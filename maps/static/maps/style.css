@@ -1,0 +1,87 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    font-family: 'Courier New', monospace;
+    background: #ffffff;
+}
+
+#map {
+    width: 100%;
+    height: 100vh;
+}
+
+#legend {
+    position: absolute;
+    bottom: 30px;
+    left: 10px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 10px 14px;
+    z-index: 1000;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
+#legend h4 {
+    margin: 0 0 6px 0;
+    font-size: 13px;
+    color: #333;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin: 4px 0;
+    color: #444;
+}
+
+.legend-color {
+    display: inline-block;
+    width: 16px;
+    height: 12px;
+    margin-right: 8px;
+    border: 1px solid #999;
+    border-radius: 2px;
+}
+
+.city-label {
+    background: none;
+    border: none;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: bold;
+    color: #1a1a1a;
+    text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+}
+
+.town-tooltip {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid #888;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+.city-dot {
+    width: 8px;
+    height: 8px;
+    background: #333;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 4px rgba(0,0,0,0.3);
+}
+
+.city-dot.major {
+    width: 12px;
+    height: 12px;
+    background: #c0392b;
+    border: 2px solid #fff;
+}
