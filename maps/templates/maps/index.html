@@ -22,10 +22,14 @@
     <script>
         var map = L.map('map', {
             center: [42.2, -71.8],
-            zoom: 9,
+            zoom: 9.5,
             zoomControl: true,
-            minZoom: 7,
-            maxZoom: 16
+            minZoom: 8,
+            maxZoom: 16,
+            zoomDelta: 0.5,
+            zoomSnap: 0.5,
+            wheelDebounceTime: 100,
+            wheelPxPerZoomLevel: 120
         });
 
         // Light base tiles (will be mostly hidden by town polygons)
@@ -89,9 +93,8 @@
             // === EVERSOURCE WEST (west of Worcester) ===
             'Agawam': 'Eversource West', 'Amherst': 'Eversource West',
             'Ashfield': 'Eversource West', 'Becket': 'Eversource West',
-            'Belchertown': 'Eversource West', 'Bernardston': 'Eversource West',
-            'Blandford': 'Eversource West', 'Brimfield': 'Eversource West',
-            'Buckland': 'Eversource West',
+ 'Bernardston': 'Eversource West',
+            'Blandford': 'Eversource West',             'Buckland': 'Eversource West',
             'Cheshire': 'Eversource West', 'Chester': 'Eversource West',
             'Chesterfield': 'Eversource West', 'Chicopee': 'Eversource West',
             'Colrain': 'Eversource West', 'Conway': 'Eversource West',
@@ -102,15 +105,15 @@
             'Gill': 'Eversource West', 'Goshen': 'Eversource West',
             'Granby': 'Eversource West', 'Granville': 'Eversource West',
             'Greenfield': 'Eversource West',
-            'Hadley': 'Eversource West', 'Hampden': 'Eversource West',
+            'Hadley': 'Eversource West',
             'Hancock': 'Eversource West', 'Hatfield': 'Eversource West',
-            'Hinsdale': 'Eversource West', 'Holland': 'Eversource West',
+            'Hinsdale': 'Eversource West',
             'Huntington': 'Eversource West',
             'Lanesborough': 'Eversource West', 'Lee': 'Eversource West',
             'Lenox': 'Eversource West', 'Leverett': 'Eversource West',
             'Leyden': 'Eversource West', 'Longmeadow': 'Eversource West',
             'Ludlow': 'Eversource West',
-            'Middlefield': 'Eversource West', 'Monson': 'Eversource West',
+            'Middlefield': 'Eversource West',
             'Montague': 'Eversource West', 'Montgomery': 'Eversource West',
             'New Ashford': 'Eversource West', 'Northampton': 'Eversource West',
             'Northfield': 'Eversource West',
@@ -123,8 +126,7 @@
             'Southampton': 'Eversource West', 'Southwick': 'Eversource West',
             'Springfield': 'Eversource West', 'Sunderland': 'Eversource West',
             'Tolland': 'Eversource West', 'Tyringham': 'Eversource West',
-            'Wales': 'Eversource West', 'Ware': 'Eversource West',
-            'Washington': 'Eversource West', 'West Springfield': 'Eversource West',
+                        'Washington': 'Eversource West', 'West Springfield': 'Eversource West',
             'Westfield': 'Eversource West', 'Westhampton': 'Eversource West',
             'Whately': 'Eversource West', 'Wilbraham': 'Eversource West',
             'Williamsburg': 'Eversource West', 'Windsor': 'Eversource West',
@@ -200,6 +202,9 @@
             'Whitman': 'National Grid', 'Williamstown': 'National Grid',
             'Winchendon': 'National Grid', 'Winthrop': 'National Grid',
             'Worcester': 'National Grid', 'Wrentham': 'National Grid',
+            'Belchertown': 'National Grid', 'Monson': 'National Grid', 'Hampden': 'National Grid',
+            'Ware': 'National Grid', 'Brimfield': 'National Grid', 'Wales': 'National Grid',
+            'Holland': 'National Grid', 'Palmer': 'National Grid',
 
             // === UNITIL ===
             'Ashby': 'Unitil', 'Fitchburg': 'Unitil', 'Lunenburg': 'Unitil', 'Townsend': 'Unitil',
@@ -247,58 +252,56 @@
                     onEachFeature: function(feature, layer) {
                         var name = feature.properties.census_name || 'Unknown';
                         var normalized = name.replace(/ Town$/, '').replace(/^Manchester-by-the-Sea$/, 'Manchester');
-                        var provider = townProviders[normalized] || townProviders[name] || 'Unknown';
-                        layer.bindTooltip(name + '<br><em>' + provider + '</em>', {
-                            sticky: true,
-                            className: 'town-tooltip'
-                        });
+                        // Check if this is a major city (has a pin)
+                        var majorCities = ['Boston', 'Worcester', 'Springfield', 'Lowell', 'Cambridge',
+                            'New Bedford', 'Brockton', 'Quincy', 'Lynn', 'Fall River', 'Pittsfield',
+                            'Framingham', 'Haverhill', 'Plymouth', 'Barnstable', 'Northampton'];
+                        if (majorCities.indexOf(normalized) !== -1) {
+                            layer.options.interactive = false;
+                        } else {
+                            var provider = townProviders[normalized] || townProviders[name] || 'Unknown';
+                            layer.bindTooltip(name + '<br><em>' + provider + '</em>', {
+                                sticky: true,
+                                className: 'town-tooltip'
+                            });
+                        }
                     }
                 }).addTo(map);
 
-                // Add mask for area outside MA after towns load
-                addMask();
-                // Add cities on top
+                // Build mask from town polygons (much more accurate than state outline)
+                var outer = [[-90, -180], [-90, 180], [90, 180], [90, -180], [-90, -180]];
+                var allHoles = [];
+
+                data.features.forEach(function(feature) {
+                    var geom = feature.geometry;
+                    var coords = geom.coordinates;
+                    if (geom.type === 'Polygon') {
+                        coords.forEach(function(ring) {
+                            allHoles.push(ring.map(function(c) { return [c[1], c[0]]; }));
+                        });
+                    } else if (geom.type === 'MultiPolygon') {
+                        coords.forEach(function(poly) {
+                            poly.forEach(function(ring) {
+                                allHoles.push(ring.map(function(c) { return [c[1], c[0]]; }));
+                            });
+                        });
+                    }
+                });
+
+                // Single mask polygon with all town shapes as holes
+                L.polygon([outer].concat(allHoles), {
+                    color: '#333',
+                    weight: 1,
+                    fillColor: '#ffffff',
+                    fillOpacity: 1,
+                    interactive: false
+                }).addTo(map);
+
                 addCities();
             })
             .catch(function() {
-                // Fallback: if town GeoJSON fails, still show cities
-                addMask();
                 addCities();
             });
-
-        function addMask() {
-            fetch('https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    var ma = data.features.find(function(f) { return f.properties.name === 'Massachusetts'; });
-                    if (!ma) return;
-
-                    var outer = [[-90, -180], [-90, 180], [90, 180], [90, -180], [-90, -180]];
-                    var maCoords = ma.geometry.coordinates;
-                    var holes = [];
-
-                    if (ma.geometry.type === 'Polygon') {
-                        holes.push(maCoords[0].map(function(c) { return [c[1], c[0]]; }));
-                    } else {
-                        maCoords.forEach(function(poly) {
-                            holes.push(poly[0].map(function(c) { return [c[1], c[0]]; }));
-                        });
-                    }
-
-                    holes.forEach(function(hole) {
-                        L.polygon([outer, hole], {
-                            color: 'none',
-                            fillColor: '#ffffff',
-                            fillOpacity: 1,
-                            interactive: false
-                        }).addTo(map);
-                    });
-
-                    L.geoJSON(ma, {
-                        style: { color: '#333', weight: 2.5, fill: false, opacity: 0.8 }
-                    }).addTo(map);
-                });
-        }
 
         function addCities() {
             var cities = [
@@ -331,7 +334,7 @@
 
                 L.marker([lat, lng], { icon: dotIcon })
                     .bindTooltip(name, {
-                        permanent: isMajor,
+                        permanent: false,
                         direction: 'right',
                         offset: [8, 0],
                         className: 'city-label'
@@ -340,6 +343,31 @@
             });
         }
 
+        // Fetch and display leads as pins
+        function loadLeads() {
+            fetch('/api/leads/')
+                .then(function(r) { return r.json(); })
+                .then(function(leads) {
+                    leads.forEach(function(lead) {
+                        var pinIcon = L.divIcon({
+                            className: 'lead-pin',
+                            iconSize: [16, 16],
+                            iconAnchor: [8, 8]
+                        });
+
+                        L.marker([lead.lat, lead.lng], { icon: pinIcon })
+                            .bindPopup(
+                                '<strong>' + lead.address + '</strong><br>' +
+                                '<em>' + lead.created_at + '</em>'
+                            )
+                            .addTo(map);
+                    });
+                });
+        }
+
+        // Load leads on page load, refresh every 30 seconds
+        loadLeads();
+        setInterval(loadLeads, 30000);
     </script>
 </body>
 </html>
