@@ -16,10 +16,14 @@
         <a href="/crm/" class="nav-tab active">CRM</a>
     </nav>
     <div class="crm-container">
-        <h2>Leads</h2>
+        <div class="crm-header">
+            <h2>Leads</h2>
+            <button id="bulk-delete-btn" class="delete-btn bulk-delete" style="display:none;" onclick="bulkDelete()">Delete Selected</button>
+        </div>
         <table class="crm-table">
             <thead>
                 <tr>
+                    <th class="checkbox-col"><input type="checkbox" id="select-all"></th>
                     <th>Homeowner Name</th>
                     <th>Phone Number</th>
                     <th>Street Address</th>
@@ -27,11 +31,13 @@
                     <th>Appt Type</th>
                     <th>Appt Format</th>
                     <th>Appt Date & Time</th>
+                    <th class="action-col"></th>
                 </tr>
             </thead>
             <tbody>
                 {% for lead in leads %}
                 <tr data-id="{{ lead.id }}">
+                    <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
                     <td><input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}"></td>
                     <td><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number }}"></td>
                     <td class="readonly">{{ lead.address }}</td>
@@ -52,9 +58,10 @@
                         </select>
                     </td>
                     <td><input type="datetime-local" class="crm-input" data-field="appointment_datetime" value="{{ lead.appointment_datetime|date:'Y-m-d\TH:i'|default:'' }}"></td>
+                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)">X</button></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="7" class="empty-row">No leads yet</td></tr>
+                <tr><td colspan="9" class="empty-row">No leads yet</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -71,6 +78,55 @@
             });
         }
 
+        function deleteLead(btn) {
+            var row = btn.closest('tr');
+            var leadId = row.dataset.id;
+            if (!confirm('Delete this lead?')) return;
+            fetch('/api/leads/' + leadId + '/', { method: 'DELETE' })
+                .then(function() { row.remove(); updateBulkBtn(); });
+        }
+
+        function bulkDelete() {
+            var checked = document.querySelectorAll('.row-select:checked');
+            var ids = [];
+            checked.forEach(function(cb) { ids.push(parseInt(cb.closest('tr').dataset.id)); });
+            if (ids.length === 0) return;
+            if (!confirm('Delete ' + ids.length + ' lead(s)?')) return;
+            fetch('/api/leads/bulk-delete/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: ids })
+            }).then(function() {
+                checked.forEach(function(cb) { cb.closest('tr').remove(); });
+                document.getElementById('select-all').checked = false;
+                updateBulkBtn();
+            });
+        }
+
+        function updateBulkBtn() {
+            var count = document.querySelectorAll('.row-select:checked').length;
+            var btn = document.getElementById('bulk-delete-btn');
+            if (count > 0) {
+                btn.style.display = 'inline-block';
+                btn.textContent = 'Delete Selected (' + count + ')';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        // Select all checkbox
+        document.getElementById('select-all').addEventListener('change', function() {
+            var checked = this.checked;
+            document.querySelectorAll('.row-select').forEach(function(cb) { cb.checked = checked; });
+            updateBulkBtn();
+        });
+
+        // Individual checkboxes
+        document.addEventListener('change', function(e) {
+            if (e.target.classList.contains('row-select')) updateBulkBtn();
+        });
+
+        // Field editing
         document.querySelectorAll('.crm-input, .crm-select').forEach(function(el) {
             el.addEventListener('change', function() {
                 var row = this.closest('tr');

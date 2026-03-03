@@ -61,7 +61,11 @@ def crm_view(request):
 
 @csrf_exempt
 def lead_update(request, pk):
-    """Update a lead's CRM fields."""
+    """Update or delete a lead's CRM fields."""
+    if request.method == 'DELETE':
+        lead = get_object_or_404(Lead, pk=pk)
+        lead.delete()
+        return JsonResponse({'status': 'ok'})
     if request.method != 'PUT':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     lead = get_object_or_404(Lead, pk=pk)
@@ -77,6 +81,17 @@ def lead_update(request, pk):
                 value = None
             setattr(lead, field, value)
     lead.save()
+    return JsonResponse({'status': 'ok'})
+
+
+@csrf_exempt
+def leads_bulk_delete(request):
+    """Delete multiple leads by ID."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    ids = data.get('ids', [])
+    Lead.objects.filter(id__in=ids).delete()
     return JsonResponse({'status': 'ok'})
 
 
