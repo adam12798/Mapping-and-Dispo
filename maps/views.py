@@ -89,7 +89,8 @@ def parse_sms_fields(body):
     for match in pattern.finditer(body):
         label = match.group(1).strip().lower()
         value = match.group(2).strip()
-        fields[label] = value
+        if value:
+            fields[label] = value
     return fields
 
 
