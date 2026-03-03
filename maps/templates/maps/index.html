@@ -1,0 +1,383 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapping & Dispo</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="/" class="nav-tab active">Map</a>
+        <a href="/crm/" class="nav-tab">CRM</a>
+        <a href="/reps/" class="nav-tab">Reps</a>
+    </nav>
+    <div id="map"></div>
+    <div id="legend">
+        <h4>Electric Providers</h4>
+        <div class="legend-item"><span class="legend-color" style="background:#9adeca"></span> Eversource</div>
+        <div class="legend-item"><span class="legend-color" style="background:#948ef5"></span> National Grid</div>
+        <div class="legend-item"><span class="legend-color" style="background:#f9dc75"></span> Unitil</div>
+        <div class="legend-item"><span class="legend-color" style="background:#f2a3bb"></span> Municipal</div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('map', {
+            center: [42.2, -71.8],
+            zoom: 9.5,
+            zoomControl: false,
+            minZoom: 8,
+            maxZoom: 16,
+            zoomDelta: 0.5,
+            zoomSnap: 0.5,
+            wheelDebounceTime: 100,
+            wheelPxPerZoomLevel: 120
+        });
+
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // Light base tiles (will be mostly hidden by town polygons)
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Provider color map
+        var providerColors = {
+            'Eversource': '#9adeca',
+            'Eversource West': '#9adeca',
+            'National Grid': '#948ef5',
+            'Unitil': '#f9dc75',
+            'Municipal': '#f2a3bb'
+        };
+
+        // Town-to-provider mapping (all 351 MA municipalities)
+        // Municipal/Unitil listed last so they override Eversource/NG for dual-territory towns
+        var townProviders = {
+            // === EVERSOURCE EAST ===
+            'Acton': 'Eversource', 'Acushnet': 'Eversource', 'Aquinnah': 'Eversource',
+            'Arlington': 'Eversource', 'Ashland': 'Eversource',
+            'Barnstable': 'Eversource', 'Bedford': 'Eversource', 'Bellingham': 'Eversource',
+            'Belmont': 'Eversource', 'Boston': 'Eversource', 'Bourne': 'Eversource',
+            'Brewster': 'Eversource', 'Brookline': 'Eversource',
+            'Burlington': 'Eversource', 'Cambridge': 'Eversource', 'Canton': 'Eversource',
+            'Carlisle': 'Eversource', 'Carver': 'Eversource', 'Chatham': 'Eversource',
+            'Chelsea': 'Eversource', 'Chilmark': 'Eversource', 'Concord': 'Eversource',
+            'Dartmouth': 'Eversource', 'Dedham': 'Eversource', 'Dennis': 'Eversource',
+            'Dover': 'Eversource', 'Duxbury': 'Eversource',
+            'Eastham': 'Eversource', 'Easton': 'Eversource', 'Edgartown': 'Eversource',
+            'Fairhaven': 'Eversource', 'Falmouth': 'Eversource',
+            'Framingham': 'Eversource', 'Franklin': 'Eversource', 'Freetown': 'Eversource',
+            'Harwich': 'Eversource', 'Holliston': 'Eversource', 'Hopkinton': 'Eversource',
+            'Kingston': 'Eversource', 'Lakeville': 'Eversource',
+            'Lexington': 'Eversource', 'Lincoln': 'Eversource',
+            'Marion': 'Eversource', 'Marshfield': 'Eversource',
+            'Mashpee': 'Eversource', 'Mattapoisett': 'Eversource', 'Maynard': 'Eversource',
+            'Medfield': 'Eversource', 'Medford': 'Eversource', 'Medway': 'Eversource',
+            'Middleborough': 'Eversource', 'Millis': 'Eversource', 'Milton': 'Eversource',
+            'Natick': 'Eversource', 'Needham': 'Eversource', 'New Bedford': 'Eversource',
+            'Newton': 'Eversource', 'Norfolk': 'Eversource',
+            'Oak Bluffs': 'Eversource', 'Orleans': 'Eversource',
+            'Pembroke': 'Eversource', 'Plymouth': 'Eversource', 'Plympton': 'Eversource',
+            'Provincetown': 'Eversource', 'Quincy': 'Eversource',
+            'Rochester': 'Eversource',
+            'Sandwich': 'Eversource', 'Scituate': 'Eversource',
+            'Sharon': 'Eversource', 'Sherborn': 'Eversource',
+            'Somerville': 'Eversource', 'Southborough': 'Eversource',
+            'Stoneham': 'Eversource', 'Stoughton': 'Eversource',
+            'Stow': 'Eversource', 'Sudbury': 'Eversource',
+            'Tisbury': 'Eversource', 'Truro': 'Eversource',
+            'Wakefield': 'Eversource', 'Walpole': 'Eversource', 'Waltham': 'Eversource',
+            'Wareham': 'Eversource', 'Watertown': 'Eversource', 'Wayland': 'Eversource',
+            'Wellesley': 'Eversource', 'Wellfleet': 'Eversource',
+            'West Tisbury': 'Eversource',
+            'Weston': 'Eversource', 'Westport': 'Eversource', 'Westwood': 'Eversource',
+            'Winchester': 'Eversource', 'Woburn': 'Eversource', 'Yarmouth': 'Eversource',
+
+            // === EVERSOURCE WEST (west of Worcester) ===
+            'Agawam': 'Eversource West', 'Amherst': 'Eversource West',
+            'Ashfield': 'Eversource West', 'Becket': 'Eversource West',
+ 'Bernardston': 'Eversource West',
+            'Blandford': 'Eversource West',             'Buckland': 'Eversource West',
+            'Cheshire': 'Eversource West', 'Chester': 'Eversource West',
+            'Chesterfield': 'Eversource West', 'Chicopee': 'Eversource West',
+            'Colrain': 'Eversource West', 'Conway': 'Eversource West',
+            'Cummington': 'Eversource West', 'Dalton': 'Eversource West',
+            'Deerfield': 'Eversource West',
+            'East Longmeadow': 'Eversource West', 'Easthampton': 'Eversource West',
+            'Erving': 'Eversource West',
+            'Gill': 'Eversource West', 'Goshen': 'Eversource West',
+            'Granby': 'Eversource West', 'Granville': 'Eversource West',
+            'Greenfield': 'Eversource West',
+            'Hadley': 'Eversource West',
+            'Hancock': 'Eversource West', 'Hatfield': 'Eversource West',
+            'Hinsdale': 'Eversource West',
+            'Huntington': 'Eversource West',
+            'Lanesborough': 'Eversource West', 'Lee': 'Eversource West',
+            'Lenox': 'Eversource West', 'Leverett': 'Eversource West',
+            'Leyden': 'Eversource West', 'Longmeadow': 'Eversource West',
+            'Ludlow': 'Eversource West',
+            'Middlefield': 'Eversource West',
+            'Montague': 'Eversource West', 'Montgomery': 'Eversource West',
+            'New Ashford': 'Eversource West', 'Northampton': 'Eversource West',
+            'Northfield': 'Eversource West',
+            'Otis': 'Eversource West',
+            'Pelham': 'Eversource West', 'Peru': 'Eversource West',
+            'Pittsfield': 'Eversource West', 'Plainfield': 'Eversource West',
+            'Richmond': 'Eversource West', 'Russell': 'Eversource West',
+            'Sandisfield': 'Eversource West', 'Savoy': 'Eversource West',
+            'Shelburne': 'Eversource West', 'Shutesbury': 'Eversource West',
+            'Southampton': 'Eversource West', 'Southwick': 'Eversource West',
+            'Springfield': 'Eversource West', 'Sunderland': 'Eversource West',
+            'Tolland': 'Eversource West', 'Tyringham': 'Eversource West',
+                        'Washington': 'Eversource West', 'West Springfield': 'Eversource West',
+            'Westfield': 'Eversource West', 'Westhampton': 'Eversource West',
+            'Whately': 'Eversource West', 'Wilbraham': 'Eversource West',
+            'Williamsburg': 'Eversource West', 'Windsor': 'Eversource West',
+            'Worthington': 'Eversource West',
+
+            // === NATIONAL GRID (everything else) ===
+            'Abington': 'National Grid', 'Adams': 'National Grid', 'Alford': 'National Grid',
+            'Amesbury': 'National Grid', 'Andover': 'National Grid',
+            'Athol': 'National Grid', 'Attleboro': 'National Grid', 'Auburn': 'National Grid',
+            'Avon': 'National Grid', 'Ayer': 'National Grid',
+            'Barre': 'National Grid', 'Berlin': 'National Grid',
+            'Beverly': 'National Grid', 'Billerica': 'National Grid',
+            'Blackstone': 'National Grid', 'Bolton': 'National Grid', 'Boxford': 'National Grid',
+            'Bridgewater': 'National Grid', 'Brockton': 'National Grid',
+            'Brookfield': 'National Grid',
+            'Charlemont': 'National Grid', 'Charlton': 'National Grid',
+            'Chelmsford': 'National Grid', 'Clarksburg': 'National Grid',
+            'Clinton': 'National Grid', 'Cohasset': 'National Grid',
+            'Douglas': 'National Grid', 'Dracut': 'National Grid', 'Dudley': 'National Grid',
+            'Dunstable': 'National Grid',
+            'East Bridgewater': 'National Grid', 'East Brookfield': 'National Grid',
+            'Egremont': 'National Grid', 'Essex': 'National Grid', 'Everett': 'National Grid',
+            'Fall River': 'National Grid', 'Florida': 'National Grid',
+            'Foxborough': 'National Grid',
+            'Gardner': 'National Grid', 'Gloucester': 'National Grid', 'Grafton': 'National Grid',
+            'Great Barrington': 'National Grid',
+            'Halifax': 'National Grid', 'Hamilton': 'National Grid',
+            'Hanover': 'National Grid', 'Hanson': 'National Grid',
+            'Hardwick': 'National Grid', 'Harvard': 'National Grid',
+            'Haverhill': 'National Grid', 'Hawley': 'National Grid', 'Heath': 'National Grid',
+            'Holbrook': 'National Grid', 'Hopedale': 'National Grid',
+            'Hubbardston': 'National Grid',
+            'Lancaster': 'National Grid', 'Lawrence': 'National Grid',
+            'Leicester': 'National Grid', 'Leominster': 'National Grid',
+            'Lowell': 'National Grid', 'Lynn': 'National Grid',
+            'Malden': 'National Grid', 'Manchester': 'National Grid',
+            'Marlborough': 'National Grid', 'Melrose': 'National Grid',
+            'Mendon': 'National Grid', 'Methuen': 'National Grid',
+            'Milford': 'National Grid', 'Millbury': 'National Grid', 'Millville': 'National Grid',
+            'Monroe': 'National Grid', 'Monterey': 'National Grid',
+            'Mount Washington': 'National Grid',
+            'Nahant': 'National Grid', 'Nantucket': 'National Grid',
+            'New Braintree': 'National Grid', 'New Marlborough': 'National Grid',
+            'New Salem': 'National Grid', 'Newbury': 'National Grid',
+            'Newburyport': 'National Grid',
+            'North Adams': 'National Grid', 'North Andover': 'National Grid',
+            'North Brookfield': 'National Grid', 'Northborough': 'National Grid',
+            'Northbridge': 'National Grid', 'Norton': 'National Grid',
+            'Norwell': 'National Grid',
+            'Oakham': 'National Grid', 'Orange': 'National Grid',
+            'Oxford': 'National Grid', 'Pepperell': 'National Grid',
+            'Petersham': 'National Grid', 'Phillipston': 'National Grid',
+            'Plainville': 'National Grid',
+            'Randolph': 'National Grid', 'Rehoboth': 'National Grid', 'Revere': 'National Grid',
+            'Rockland': 'National Grid', 'Rockport': 'National Grid',
+            'Rowe': 'National Grid', 'Royalston': 'National Grid', 'Rutland': 'National Grid',
+            'Salem': 'National Grid', 'Salisbury': 'National Grid',
+            'Saugus': 'National Grid', 'Seekonk': 'National Grid',
+            'Sheffield': 'National Grid', 'Shirley': 'National Grid',
+            'Somerset': 'National Grid', 'Southbridge': 'National Grid',
+            'Spencer': 'National Grid', 'Stockbridge': 'National Grid',
+            'Sturbridge': 'National Grid', 'Sutton': 'National Grid',
+            'Swampscott': 'National Grid', 'Swansea': 'National Grid',
+            'Tewksbury': 'National Grid', 'Topsfield': 'National Grid',
+            'Tyngsborough': 'National Grid',
+            'Upton': 'National Grid', 'Uxbridge': 'National Grid',
+            'Warren': 'National Grid', 'Warwick': 'National Grid',
+            'Webster': 'National Grid', 'Wendell': 'National Grid', 'Wenham': 'National Grid',
+            'West Bridgewater': 'National Grid', 'West Brookfield': 'National Grid',
+            'West Newbury': 'National Grid', 'West Stockbridge': 'National Grid',
+            'Westborough': 'National Grid', 'Westford': 'National Grid',
+            'Westminster': 'National Grid', 'Weymouth': 'National Grid',
+            'Whitman': 'National Grid', 'Williamstown': 'National Grid',
+            'Winchendon': 'National Grid', 'Winthrop': 'National Grid',
+            'Worcester': 'National Grid', 'Wrentham': 'National Grid',
+            'Belchertown': 'National Grid', 'Monson': 'National Grid', 'Hampden': 'National Grid',
+            'Ware': 'National Grid', 'Brimfield': 'National Grid', 'Wales': 'National Grid',
+            'Holland': 'National Grid', 'Palmer': 'National Grid',
+
+            // === UNITIL ===
+            'Ashby': 'Unitil', 'Fitchburg': 'Unitil', 'Lunenburg': 'Unitil', 'Townsend': 'Unitil',
+
+            // === MUNICIPAL ELECTRIC (overrides above) ===
+            'Ashburnham': 'Municipal', 'Belmont': 'Municipal', 'Berkley': 'Municipal',
+            'Boxborough': 'Municipal', 'Boylston': 'Municipal', 'Braintree': 'Municipal',
+            'Chester': 'Municipal', 'Chicopee': 'Municipal', 'Concord': 'Municipal',
+            'Danvers': 'Municipal', 'Dighton': 'Municipal', 'Georgetown': 'Municipal',
+            'Gosnold': 'Municipal', 'Groton': 'Municipal', 'Groveland': 'Municipal',
+            'Hingham': 'Municipal', 'Holden': 'Municipal', 'Holyoke': 'Municipal',
+            'Hudson': 'Municipal', 'Hull': 'Municipal', 'Ipswich': 'Municipal',
+            'Lakeville': 'Municipal', 'Littleton': 'Municipal', 'Lynnfield': 'Municipal',
+            'Mansfield': 'Municipal', 'Marblehead': 'Municipal', 'Merrimac': 'Municipal',
+            'Middleborough': 'Municipal', 'Middleton': 'Municipal',
+            'North Attleborough': 'Municipal', 'North Reading': 'Municipal',
+            'Norwood': 'Municipal', 'Paxton': 'Municipal', 'Peabody': 'Municipal',
+            'Princeton': 'Municipal', 'Raynham': 'Municipal', 'Reading': 'Municipal',
+            'Rowley': 'Municipal', 'Russell': 'Municipal', 'Shrewsbury': 'Municipal',
+            'South Hadley': 'Municipal', 'Sterling': 'Municipal', 'Stow': 'Municipal',
+            'Taunton': 'Municipal', 'Templeton': 'Municipal', 'Wakefield': 'Municipal',
+            'Wellesley': 'Municipal', 'West Boylston': 'Municipal', 'Westfield': 'Municipal',
+            'Wilmington': 'Municipal'
+        };
+
+        // Fetch MA town boundaries GeoJSON
+        fetch('https://raw.githubusercontent.com/nblmc/massachusetts-municipal-boundaries/main/data-cooked/mass-municipalities.geojson')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                // Add town polygons colored by provider
+                L.geoJSON(data, {
+                    style: function(feature) {
+                        var name = feature.properties.census_name || '';
+                        var normalized = name.replace(/ Town$/, '').replace(/^Manchester-by-the-Sea$/, 'Manchester');
+                        var provider = townProviders[normalized] || townProviders[name];
+                        var color = provider ? providerColors[provider] : '#e0e0e0';
+                        return {
+                            fillColor: color,
+                            fillOpacity: 0.7,
+                            color: '#555',
+                            weight: 1,
+                            opacity: 0.5
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        var name = feature.properties.census_name || 'Unknown';
+                        var normalized = name.replace(/ Town$/, '').replace(/^Manchester-by-the-Sea$/, 'Manchester');
+                        // Check if this is a major city (has a pin)
+                        var majorCities = ['Boston', 'Worcester', 'Springfield', 'Lowell', 'Cambridge',
+                            'New Bedford', 'Brockton', 'Quincy', 'Lynn', 'Fall River', 'Pittsfield',
+                            'Framingham', 'Haverhill', 'Plymouth', 'Barnstable', 'Northampton'];
+                        if (majorCities.indexOf(normalized) !== -1) {
+                            layer.options.interactive = false;
+                        } else {
+                            var provider = townProviders[normalized] || townProviders[name] || 'Unknown';
+                            layer.bindTooltip(name + '<br><em>' + provider + '</em>', {
+                                sticky: true,
+                                className: 'town-tooltip'
+                            });
+                        }
+                    }
+                }).addTo(map);
+
+                // Build mask from town polygons (much more accurate than state outline)
+                var outer = [[-90, -180], [-90, 180], [90, 180], [90, -180], [-90, -180]];
+                var allHoles = [];
+
+                data.features.forEach(function(feature) {
+                    var geom = feature.geometry;
+                    var coords = geom.coordinates;
+                    if (geom.type === 'Polygon') {
+                        coords.forEach(function(ring) {
+                            allHoles.push(ring.map(function(c) { return [c[1], c[0]]; }));
+                        });
+                    } else if (geom.type === 'MultiPolygon') {
+                        coords.forEach(function(poly) {
+                            poly.forEach(function(ring) {
+                                allHoles.push(ring.map(function(c) { return [c[1], c[0]]; }));
+                            });
+                        });
+                    }
+                });
+
+                // Single mask polygon with all town shapes as holes
+                L.polygon([outer].concat(allHoles), {
+                    color: '#333',
+                    weight: 1,
+                    fillColor: '#ffffff',
+                    fillOpacity: 1,
+                    interactive: false
+                }).addTo(map);
+
+                addCities();
+            })
+            .catch(function() {
+                addCities();
+            });
+
+        function addCities() {
+            var cities = [
+                ['Boston', 42.3601, -71.0589, true],
+                ['Worcester', 42.2626, -71.8023, true],
+                ['Springfield', 42.1015, -72.5898, true],
+                ['Lowell', 42.6334, -71.3162, false],
+                ['Cambridge', 42.3736, -71.1097, false],
+                ['New Bedford', 41.6362, -70.9342, false],
+                ['Brockton', 42.0834, -71.0184, false],
+                ['Quincy', 42.2529, -71.0023, false],
+                ['Lynn', 42.4668, -70.9495, false],
+                ['Fall River', 41.7015, -71.1550, false],
+                ['Pittsfield', 42.4501, -73.2454, false],
+                ['Framingham', 42.2793, -71.4162, false],
+                ['Haverhill', 42.7762, -71.0773, false],
+                ['Plymouth', 41.9584, -70.6673, false],
+                ['Barnstable', 41.7003, -70.3002, false],
+                ['Northampton', 42.3251, -72.6412, false]
+            ];
+
+            cities.forEach(function(city) {
+                var name = city[0], lat = city[1], lng = city[2], isMajor = city[3];
+
+                var dotIcon = L.divIcon({
+                    className: 'city-dot' + (isMajor ? ' major' : ''),
+                    iconSize: isMajor ? [12, 12] : [8, 8],
+                    iconAnchor: isMajor ? [6, 6] : [4, 4]
+                });
+
+                L.marker([lat, lng], { icon: dotIcon })
+                    .bindTooltip(name, {
+                        permanent: false,
+                        direction: 'right',
+                        offset: [8, 0],
+                        className: 'city-label'
+                    })
+                    .addTo(map);
+            });
+        }
+
+        // Fetch and display leads as pins
+        function loadLeads() {
+            fetch('/api/leads/')
+                .then(function(r) { return r.json(); })
+                .then(function(leads) {
+                    leads.forEach(function(lead) {
+                        var pinIcon = L.divIcon({
+                            className: 'lead-pin',
+                            iconSize: [16, 16],
+                            iconAnchor: [8, 8]
+                        });
+
+                        L.marker([lead.lat, lead.lng], { icon: pinIcon })
+                            .bindPopup(
+                                '<strong>' + lead.address + '</strong><br>' +
+                                '<em>' + lead.created_at + '</em>'
+                            )
+                            .addTo(map);
+                    });
+                });
+        }
+
+        // Load leads on page load, refresh every 30 seconds
+        loadLeads();
+        setInterval(loadLeads, 30000);
+    </script>
+</body>
+</html>
