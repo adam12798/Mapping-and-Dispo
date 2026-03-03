@@ -36,18 +36,21 @@ def leads_api(request):
 
 def geocode(address):
     """Geocode an address using Nominatim (free, no API key)."""
-    params = urllib.parse.urlencode({
-        'q': address,
-        'format': 'json',
-        'limit': 1,
-        'countrycodes': 'us',
-    })
-    url = f'https://nominatim.openstreetmap.org/search?{params}'
-    req = urllib.request.Request(url, headers={'User-Agent': 'MappingDispo/1.0'})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        results = json.loads(resp.read())
-    if results:
-        return float(results[0]['lat']), float(results[0]['lon'])
+    try:
+        params = urllib.parse.urlencode({
+            'q': address,
+            'format': 'json',
+            'limit': 1,
+            'countrycodes': 'us',
+        })
+        url = f'https://nominatim.openstreetmap.org/search?{params}'
+        req = urllib.request.Request(url, headers={'User-Agent': 'MappingDispo/1.0'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            results = json.loads(resp.read())
+        if results:
+            return float(results[0]['lat']), float(results[0]['lon'])
+    except Exception:
+        pass
     return None, None
 
 
@@ -142,40 +145,48 @@ def sms_webhook(request):
     body = request.POST.get('Body', '').strip()
     from_number = request.POST.get('From', '')
 
-    if body:
-        fields = parse_sms_fields(body)
+    try:
+        if body:
+            fields = parse_sms_fields(body)
 
-        # If structured fields found, use them; otherwise treat whole body as address
-        address = fields.get('address', body if not fields else '')
-        city = fields.get('city', '')
+            # If structured fields found, use them; otherwise treat whole body as address
+            address = fields.get('address', body if not fields else '')
+            city = fields.get('city', '')
 
-        # Build full address for geocoding
-        geocode_address = address
-        if city:
-            geocode_address = f"{address}, {city}, MA"
+            # Build full address for geocoding
+            geocode_address = address
+            if city:
+                geocode_address = f"{address}, {city}, MA"
 
-        lat, lng = geocode(geocode_address) if address else (None, None)
+            lat, lng = geocode(geocode_address) if address else (None, None)
 
-        # Parse appointment datetime
-        appt_datetime = None
-        raw_datetime = fields.get('appointment_datetime', '')
-        if raw_datetime:
-            try:
-                appt_datetime = dateparser.parse(raw_datetime, fuzzy=True)
-            except (ValueError, OverflowError):
-                pass
+            # Parse appointment datetime
+            appt_datetime = None
+            raw_datetime = fields.get('appointment_datetime', '')
+            if raw_datetime:
+                try:
+                    appt_datetime = dateparser.parse(raw_datetime, fuzzy=True)
+                except (ValueError, OverflowError):
+                    pass
 
+            Lead.objects.create(
+                address=address,
+                city=city,
+                latitude=lat,
+                longitude=lng,
+                from_number=from_number,
+                homeowner_name=fields.get('name', ''),
+                phone_number=fields.get('phone', ''),
+                appointment_type=normalize_type(fields.get('type', '')),
+                appointment_format=normalize_format(fields.get('format', '')),
+                appointment_datetime=appt_datetime,
+                raw_message=body,
+            )
+    except Exception:
+        # Always save the lead even if parsing fails
         Lead.objects.create(
-            address=address,
-            city=city,
-            latitude=lat,
-            longitude=lng,
+            address=body,
             from_number=from_number,
-            homeowner_name=fields.get('name', ''),
-            phone_number=fields.get('phone', ''),
-            appointment_type=normalize_type(fields.get('type', '')),
-            appointment_format=normalize_format(fields.get('format', '')),
-            appointment_datetime=appt_datetime,
             raw_message=body,
         )
 
