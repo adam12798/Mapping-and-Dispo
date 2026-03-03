@@ -3,6 +3,8 @@ import re
 import urllib.parse
 import urllib.request
 
+from dateutil import parser as dateparser
+
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
@@ -154,6 +156,15 @@ def sms_webhook(request):
 
         lat, lng = geocode(geocode_address) if address else (None, None)
 
+        # Parse appointment datetime
+        appt_datetime = None
+        raw_datetime = fields.get('appointment_datetime', '')
+        if raw_datetime:
+            try:
+                appt_datetime = dateparser.parse(raw_datetime, fuzzy=True)
+            except (ValueError, OverflowError):
+                pass
+
         Lead.objects.create(
             address=address,
             city=city,
@@ -164,6 +175,7 @@ def sms_webhook(request):
             phone_number=fields.get('phone', ''),
             appointment_type=normalize_type(fields.get('type', '')),
             appointment_format=normalize_format(fields.get('format', '')),
+            appointment_datetime=appt_datetime,
             raw_message=body,
         )
 
