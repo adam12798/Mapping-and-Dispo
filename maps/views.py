@@ -122,6 +122,8 @@ def parse_sms_fields(body):
 
 def normalize_type(value):
     v = value.lower().strip()
+    if 'both' in v or ('solar' in v and 'hvac' in v):
+        return 'both'
     if 'solar' in v:
         return 'solar'
     if 'hvac' in v:

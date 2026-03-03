@@ -41,6 +41,7 @@
                             <option value="">—</option>
                             <option value="solar" {% if lead.appointment_type == "solar" %}selected{% endif %}>Solar</option>
                             <option value="hvac" {% if lead.appointment_type == "hvac" %}selected{% endif %}>HVAC</option>
+                            <option value="both" {% if lead.appointment_type == "both" %}selected{% endif %}>Both</option>
                         </select>
                     </td>
                     <td>

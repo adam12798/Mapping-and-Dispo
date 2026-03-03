@@ -5,6 +5,7 @@ class Lead(models.Model):
     APPOINTMENT_TYPE_CHOICES = [
         ('solar', 'Solar'),
         ('hvac', 'HVAC'),
+        ('both', 'Both'),
     ]
     APPOINTMENT_FORMAT_CHOICES = [
         ('in_person', 'In Person'),
