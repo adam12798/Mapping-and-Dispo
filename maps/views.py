@@ -1,4 +1,5 @@
 import json
+import re
 import urllib.parse
 import urllib.request
 
@@ -74,20 +75,73 @@ def lead_update(request, pk):
     return JsonResponse({'status': 'ok'})
 
 
+def parse_sms_fields(body):
+    """Parse structured SMS like 'name: John Doe\\naddress: 114 Main St\\ncity: Lowell'."""
+    fields = {}
+    # Match 'label: value' patterns — split on newlines or commas followed by a label
+    pattern = re.compile(
+        r'(?:^|[\n,])\s*'
+        r'(name|phone|address|city|type|format)'
+        r'\s*:\s*'
+        r'(.+?)(?=(?:[\n,]\s*(?:name|phone|address|city|type|format)\s*:)|$)',
+        re.IGNORECASE | re.DOTALL,
+    )
+    for match in pattern.finditer(body):
+        label = match.group(1).strip().lower()
+        value = match.group(2).strip()
+        fields[label] = value
+    return fields
+
+
+def normalize_type(value):
+    v = value.lower().strip()
+    if 'solar' in v:
+        return 'solar'
+    if 'hvac' in v:
+        return 'hvac'
+    return ''
+
+
+def normalize_format(value):
+    v = value.lower().strip()
+    if 'in' in v and 'person' in v:
+        return 'in_person'
+    if 'virtual' in v:
+        return 'virtual'
+    return ''
+
+
 @csrf_exempt
 @require_POST
 def sms_webhook(request):
-    """Twilio webhook — receives incoming SMS, geocodes address, saves as Lead."""
+    """Twilio webhook — receives incoming SMS, parses fields, geocodes address, saves as Lead."""
     body = request.POST.get('Body', '').strip()
     from_number = request.POST.get('From', '')
 
     if body:
-        lat, lng = geocode(body)
+        fields = parse_sms_fields(body)
+
+        # If structured fields found, use them; otherwise treat whole body as address
+        address = fields.get('address', body if not fields else '')
+        city = fields.get('city', '')
+
+        # Build full address for geocoding
+        geocode_address = address
+        if city:
+            geocode_address = f"{address}, {city}, MA"
+
+        lat, lng = geocode(geocode_address) if address else (None, None)
+
         Lead.objects.create(
-            address=body,
+            address=address,
+            city=city,
             latitude=lat,
             longitude=lng,
             from_number=from_number,
+            homeowner_name=fields.get('name', ''),
+            phone_number=fields.get('phone', ''),
+            appointment_type=normalize_type(fields.get('type', '')),
+            appointment_format=normalize_format(fields.get('format', '')),
             raw_message=body,
         )
 
