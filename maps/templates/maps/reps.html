@@ -1,0 +1,174 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reps — Mapping & Dispo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="/" class="nav-tab">Map</a>
+        <a href="/crm/" class="nav-tab">CRM</a>
+        <a href="/reps/" class="nav-tab active">Reps</a>
+    </nav>
+    <div class="crm-container">
+        <div class="crm-header">
+            <h2>Representatives</h2>
+            <div>
+                <button id="bulk-delete-btn" class="delete-btn bulk-delete" style="display:none;" onclick="bulkDelete()">Delete Selected</button>
+                <button class="add-btn" onclick="showAddRow()">+ Add Rep</button>
+            </div>
+        </div>
+        <table class="crm-table">
+            <thead>
+                <tr>
+                    <th class="checkbox-col"><input type="checkbox" id="select-all"></th>
+                    <th>Name</th>
+                    <th>Phone Number</th>
+                    <th>Home Address</th>
+                    <th>City</th>
+                    <th>Specialty</th>
+                    <th class="action-col"></th>
+                </tr>
+            </thead>
+            <tbody id="reps-body">
+                {% for rep in reps %}
+                <tr data-id="{{ rep.id }}">
+                    <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
+                    <td><input type="text" class="crm-input" data-field="name" value="{{ rep.name }}"></td>
+                    <td><input type="text" class="crm-input" data-field="phone_number" value="{{ rep.phone_number }}"></td>
+                    <td><input type="text" class="crm-input" data-field="home_address" value="{{ rep.home_address }}"></td>
+                    <td><input type="text" class="crm-input" data-field="city" value="{{ rep.city }}"></td>
+                    <td>
+                        <select class="crm-select" data-field="specialty">
+                            <option value="">—</option>
+                            <option value="solar" {% if rep.specialty == "solar" %}selected{% endif %}>Solar</option>
+                            <option value="hvac" {% if rep.specialty == "hvac" %}selected{% endif %}>HVAC</option>
+                            <option value="both" {% if rep.specialty == "both" %}selected{% endif %}>Both</option>
+                        </select>
+                    </td>
+                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteRep(this)">X</button></td>
+                </tr>
+                {% empty %}
+                <tr id="empty-row"><td colspan="7" class="empty-row">No reps yet</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        function showAddRow() {
+            // Remove empty row if present
+            var empty = document.getElementById('empty-row');
+            if (empty) empty.remove();
+
+            var tbody = document.getElementById('reps-body');
+            var row = document.createElement('tr');
+            row.id = 'new-rep-row';
+            row.innerHTML =
+                '<td class="checkbox-col"></td>' +
+                '<td><input type="text" class="crm-input" id="new-name" placeholder="Name"></td>' +
+                '<td><input type="text" class="crm-input" id="new-phone" placeholder="Phone"></td>' +
+                '<td><input type="text" class="crm-input" id="new-address" placeholder="Home Address"></td>' +
+                '<td><input type="text" class="crm-input" id="new-city" placeholder="City"></td>' +
+                '<td><select class="crm-select" id="new-specialty">' +
+                    '<option value="">—</option>' +
+                    '<option value="solar">Solar</option>' +
+                    '<option value="hvac">HVAC</option>' +
+                    '<option value="both">Both</option>' +
+                '</select></td>' +
+                '<td class="action-col"><button class="add-btn" style="padding:4px 8px;font-size:12px;" onclick="saveNewRep()">✓</button></td>';
+            tbody.insertBefore(row, tbody.firstChild);
+            document.getElementById('new-name').focus();
+        }
+
+        function saveNewRep() {
+            var data = {
+                name: document.getElementById('new-name').value,
+                phone_number: document.getElementById('new-phone').value,
+                home_address: document.getElementById('new-address').value,
+                city: document.getElementById('new-city').value,
+                specialty: document.getElementById('new-specialty').value
+            };
+            if (!data.name) { alert('Name is required'); return; }
+            fetch('/api/reps/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            }).then(function(r) { return r.json(); })
+              .then(function() { location.reload(); });
+        }
+
+        function saveField(repId, field, value) {
+            var body = {};
+            body[field] = value;
+            fetch('/api/reps/' + repId + '/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+        }
+
+        function deleteRep(btn) {
+            var row = btn.closest('tr');
+            var repId = row.dataset.id;
+            if (!confirm('Delete this rep?')) return;
+            fetch('/api/reps/' + repId + '/', { method: 'DELETE' })
+                .then(function() { row.remove(); updateBulkBtn(); });
+        }
+
+        function bulkDelete() {
+            var checked = document.querySelectorAll('.row-select:checked');
+            var ids = [];
+            checked.forEach(function(cb) { ids.push(parseInt(cb.closest('tr').dataset.id)); });
+            if (ids.length === 0) return;
+            if (!confirm('Delete ' + ids.length + ' rep(s)?')) return;
+            fetch('/api/reps/bulk-delete/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: ids })
+            }).then(function() {
+                checked.forEach(function(cb) { cb.closest('tr').remove(); });
+                document.getElementById('select-all').checked = false;
+                updateBulkBtn();
+            });
+        }
+
+        function updateBulkBtn() {
+            var count = document.querySelectorAll('.row-select:checked').length;
+            var btn = document.getElementById('bulk-delete-btn');
+            if (count > 0) {
+                btn.style.display = 'inline-block';
+                btn.textContent = 'Delete Selected (' + count + ')';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        document.getElementById('select-all').addEventListener('change', function() {
+            var checked = this.checked;
+            document.querySelectorAll('.row-select').forEach(function(cb) { cb.checked = checked; });
+            updateBulkBtn();
+        });
+
+        document.addEventListener('change', function(e) {
+            if (e.target.classList.contains('row-select')) updateBulkBtn();
+        });
+
+        document.querySelectorAll('.crm-input, .crm-select').forEach(function(el) {
+            el.addEventListener('change', function() {
+                var row = this.closest('tr');
+                var repId = row.dataset.id;
+                if (!repId) return;
+                var field = this.dataset.field;
+                saveField(repId, field, this.value);
+            });
+        });
+    </script>
+</body>
+</html>

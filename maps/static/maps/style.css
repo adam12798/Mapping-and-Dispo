@@ -233,6 +233,22 @@ html, body {
     border: 2px solid #fff;
 }
 
+.add-btn {
+    background: #27ae60;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.add-btn:hover {
+    background: #219a52;
+}
+
 .lead-pin {
     width: 16px;
     height: 16px;

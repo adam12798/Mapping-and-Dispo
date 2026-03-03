@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from .models import Lead
+from .models import Lead, Rep
 
 
 def index(request):
@@ -92,6 +92,70 @@ def leads_bulk_delete(request):
     data = json.loads(request.body)
     ids = data.get('ids', [])
     Lead.objects.filter(id__in=ids).delete()
+    return JsonResponse({'status': 'ok'})
+
+
+def reps_view(request):
+    reps = Rep.objects.order_by('name')
+    return render(request, 'maps/reps.html', {'reps': reps})
+
+
+@csrf_exempt
+@require_POST
+def rep_create(request):
+    """Create a new rep, geocoding their home address."""
+    data = json.loads(request.body)
+    home_address = data.get('home_address', '')
+    city = data.get('city', '')
+    geocode_address = home_address
+    if city:
+        geocode_address = f"{home_address}, {city}, MA"
+    lat, lng = geocode(geocode_address) if home_address else (None, None)
+    rep = Rep.objects.create(
+        name=data.get('name', ''),
+        phone_number=data.get('phone_number', ''),
+        home_address=home_address,
+        city=city,
+        latitude=lat,
+        longitude=lng,
+        specialty=data.get('specialty', ''),
+    )
+    return JsonResponse({'status': 'ok', 'id': rep.id})
+
+
+@csrf_exempt
+def rep_update(request, pk):
+    """Update or delete a rep."""
+    if request.method == 'DELETE':
+        rep = get_object_or_404(Rep, pk=pk)
+        rep.delete()
+        return JsonResponse({'status': 'ok'})
+    if request.method != 'PUT':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    rep = get_object_or_404(Rep, pk=pk)
+    data = json.loads(request.body)
+    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty']
+    for field in allowed_fields:
+        if field in data:
+            setattr(rep, field, data[field])
+    # Re-geocode if address or city changed
+    if 'home_address' in data or 'city' in data:
+        geocode_address = rep.home_address
+        if rep.city:
+            geocode_address = f"{rep.home_address}, {rep.city}, MA"
+        rep.latitude, rep.longitude = geocode(geocode_address) if rep.home_address else (None, None)
+    rep.save()
+    return JsonResponse({'status': 'ok'})
+
+
+@csrf_exempt
+def reps_bulk_delete(request):
+    """Delete multiple reps by ID."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    ids = data.get('ids', [])
+    Rep.objects.filter(id__in=ids).delete()
     return JsonResponse({'status': 'ok'})
 
 
