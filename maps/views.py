@@ -76,21 +76,42 @@ def lead_update(request, pk):
 
 
 def parse_sms_fields(body):
-    """Parse structured SMS like 'name: John Doe\\naddress: 114 Main St\\ncity: Lowell'."""
+    """Parse structured SMS line by line, matching 'label: value' patterns."""
+    # Strip unsubscribe footers
+    body = re.sub(r'(?i)reply\s*"?\d+"?\s*to\s+unsubscribe.*$', '', body).strip()
+
+    # Map various label names to our field names
+    label_map = {
+        'name': 'name',
+        'phone': 'phone',
+        'phone number': 'phone',
+        'address': 'address',
+        'street address': 'address',
+        'city': 'city',
+        'state': 'state',
+        'type': 'type',
+        'appointment type': 'type',
+        'appt type': 'type',
+        'format': 'format',
+        'meeting type': 'format',
+        'appointment format': 'format',
+        'day and time': 'appointment_datetime',
+        'date and time': 'appointment_datetime',
+        'date': 'appointment_datetime',
+        'time': 'appointment_datetime',
+    }
+
     fields = {}
-    # Match 'label: value' patterns — split on newlines or commas followed by a label
-    pattern = re.compile(
-        r'(?:^|[\n,])\s*'
-        r'(name|phone|address|city|type|format)'
-        r'\s*:\s*'
-        r'(.+?)(?=(?:[\n,]\s*(?:name|phone|address|city|type|format)\s*:)|$)',
-        re.IGNORECASE | re.DOTALL,
-    )
-    for match in pattern.finditer(body):
-        label = match.group(1).strip().lower()
-        value = match.group(2).strip()
-        if value:
-            fields[label] = value
+    for line in body.split('\n'):
+        line = line.strip()
+        if ':' not in line:
+            continue
+        # Split on first colon only
+        label_part, _, value_part = line.partition(':')
+        label = label_part.strip().lower()
+        value = value_part.strip()
+        if label in label_map and value:
+            fields[label_map[label]] = value
     return fields
 
 
