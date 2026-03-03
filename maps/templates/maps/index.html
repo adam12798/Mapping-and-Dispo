@@ -9,6 +9,10 @@
     <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
 </head>
 <body>
+    <nav class="top-nav">
+        <a href="/" class="nav-tab active">Map</a>
+        <a href="/crm/" class="nav-tab">CRM</a>
+    </nav>
     <div id="map"></div>
     <div id="legend">
         <h4>Electric Providers</h4>
@@ -23,7 +27,7 @@
         var map = L.map('map', {
             center: [42.2, -71.8],
             zoom: 9.5,
-            zoomControl: true,
+            zoomControl: false,
             minZoom: 8,
             maxZoom: 16,
             zoomDelta: 0.5,
@@ -31,6 +35,8 @@
             wheelDebounceTime: 100,
             wheelPxPerZoomLevel: 120
         });
+
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
 
         // Light base tiles (will be mostly hidden by town polygons)
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {

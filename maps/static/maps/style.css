@@ -10,9 +10,110 @@ html, body {
     background: #ffffff;
 }
 
+/* Nav bar */
+.top-nav {
+    display: flex;
+    background: #1a1a1a;
+    height: 44px;
+    align-items: center;
+    padding: 0 16px;
+    z-index: 2000;
+    position: relative;
+}
+
+.nav-tab {
+    color: #999;
+    text-decoration: none;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 10px 20px;
+    border-radius: 4px 4px 0 0;
+}
+
+.nav-tab:hover {
+    color: #fff;
+}
+
+.nav-tab.active {
+    color: #fff;
+    background: #333;
+}
+
 #map {
     width: 100%;
-    height: 100vh;
+    height: calc(100vh - 44px);
+}
+
+/* CRM */
+.crm-container {
+    padding: 24px;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.crm-container h2 {
+    font-family: 'Courier New', monospace;
+    font-size: 20px;
+    margin-bottom: 16px;
+    color: #111;
+}
+
+.crm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.crm-table thead th {
+    background: #1a1a1a;
+    color: #fff;
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.crm-table tbody td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #e0e0e0;
+    vertical-align: middle;
+}
+
+.crm-table tbody tr:hover {
+    background: #f5f5f5;
+}
+
+.crm-table td.readonly {
+    padding: 6px 12px;
+    color: #333;
+}
+
+.crm-table td.empty-row {
+    text-align: center;
+    padding: 24px;
+    color: #999;
+}
+
+.crm-input, .crm-select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    background: transparent;
+}
+
+.crm-input:hover, .crm-select:hover {
+    border-color: #ccc;
+}
+
+.crm-input:focus, .crm-select:focus {
+    outline: none;
+    border-color: #333;
+    background: #fff;
 }
 
 #legend {

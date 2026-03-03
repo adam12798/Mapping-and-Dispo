@@ -3,7 +3,7 @@ import urllib.parse
 import urllib.request
 
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -46,6 +46,32 @@ def geocode(address):
     if results:
         return float(results[0]['lat']), float(results[0]['lon'])
     return None, None
+
+
+def crm_view(request):
+    leads = Lead.objects.order_by('-created_at')
+    return render(request, 'maps/crm.html', {'leads': leads})
+
+
+@csrf_exempt
+def lead_update(request, pk):
+    """Update a lead's CRM fields."""
+    if request.method != 'PUT':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    lead = get_object_or_404(Lead, pk=pk)
+    data = json.loads(request.body)
+    allowed_fields = [
+        'homeowner_name', 'phone_number', 'city',
+        'appointment_type', 'appointment_format', 'appointment_datetime',
+    ]
+    for field in allowed_fields:
+        if field in data:
+            value = data[field]
+            if field == 'appointment_datetime' and value == '':
+                value = None
+            setattr(lead, field, value)
+    lead.save()
+    return JsonResponse({'status': 'ok'})
 
 
 @csrf_exempt

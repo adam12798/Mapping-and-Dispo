@@ -1,0 +1,80 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRM — Mapping & Dispo</title>
+    <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="/" class="nav-tab">Map</a>
+        <a href="/crm/" class="nav-tab active">CRM</a>
+    </nav>
+    <div class="crm-container">
+        <h2>Leads</h2>
+        <table class="crm-table">
+            <thead>
+                <tr>
+                    <th>Homeowner Name</th>
+                    <th>Phone Number</th>
+                    <th>Street Address</th>
+                    <th>City</th>
+                    <th>Appt Type</th>
+                    <th>Appt Format</th>
+                    <th>Appt Date & Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for lead in leads %}
+                <tr data-id="{{ lead.id }}">
+                    <td><input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}"></td>
+                    <td><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number|default:lead.from_number }}"></td>
+                    <td class="readonly">{{ lead.address }}</td>
+                    <td><input type="text" class="crm-input" data-field="city" value="{{ lead.city }}"></td>
+                    <td>
+                        <select class="crm-select" data-field="appointment_type">
+                            <option value="">—</option>
+                            <option value="solar" {% if lead.appointment_type == "solar" %}selected{% endif %}>Solar</option>
+                            <option value="hvac" {% if lead.appointment_type == "hvac" %}selected{% endif %}>HVAC</option>
+                        </select>
+                    </td>
+                    <td>
+                        <select class="crm-select" data-field="appointment_format">
+                            <option value="">—</option>
+                            <option value="in_person" {% if lead.appointment_format == "in_person" %}selected{% endif %}>In Person</option>
+                            <option value="virtual" {% if lead.appointment_format == "virtual" %}selected{% endif %}>Virtual</option>
+                        </select>
+                    </td>
+                    <td><input type="datetime-local" class="crm-input" data-field="appointment_datetime" value="{{ lead.appointment_datetime|date:'Y-m-d\TH:i'|default:'' }}"></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="empty-row">No leads yet</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        function saveField(leadId, field, value) {
+            var body = {};
+            body[field] = value;
+            fetch('/api/leads/' + leadId + '/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+        }
+
+        document.querySelectorAll('.crm-input, .crm-select').forEach(function(el) {
+            el.addEventListener('change', function() {
+                var row = this.closest('tr');
+                var leadId = row.dataset.id;
+                var field = this.dataset.field;
+                saveField(leadId, field, this.value);
+            });
+        });
+    </script>
+</body>
+</html>
