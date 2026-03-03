@@ -249,6 +249,29 @@ html, body {
     background: #219a52;
 }
 
+.star-rating {
+    display: inline-flex;
+    gap: 2px;
+}
+
+.star {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    color: #ccc;
+    padding: 0 1px;
+    line-height: 1;
+}
+
+.star.filled {
+    color: #f1c40f;
+}
+
+.star:hover {
+    color: #f39c12;
+}
+
 .lead-pin {
     width: 16px;
     height: 16px;

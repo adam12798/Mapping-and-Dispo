@@ -45,6 +45,7 @@ class Rep(models.Model):
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     specialty = models.CharField(max_length=10, choices=SPECIALTY_CHOICES, blank=True)
+    rating = models.IntegerField(default=0)
 
     def __str__(self):
         return self.name

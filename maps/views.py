@@ -96,7 +96,7 @@ def leads_bulk_delete(request):
 
 
 def reps_view(request):
-    reps = Rep.objects.order_by('name')
+    reps = Rep.objects.order_by('-rating', 'name')
     return render(request, 'maps/reps.html', {'reps': reps})
 
 
@@ -134,7 +134,7 @@ def rep_update(request, pk):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     rep = get_object_or_404(Rep, pk=pk)
     data = json.loads(request.body)
-    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty']
+    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty', 'rating']
     for field in allowed_fields:
         if field in data:
             setattr(rep, field, data[field])

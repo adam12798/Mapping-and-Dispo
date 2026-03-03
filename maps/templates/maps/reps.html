@@ -33,6 +33,7 @@
                     <th>Home Address</th>
                     <th>City</th>
                     <th>Specialty</th>
+                    <th>Rating</th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -52,10 +53,17 @@
                             <option value="both" {% if rep.specialty == "both" %}selected{% endif %}>Both</option>
                         </select>
                     </td>
+                    <td>
+                        <div class="star-rating" data-rating="{{ rep.rating }}">
+                            {% for i in "12345" %}
+                            <button class="star {% if forloop.counter <= rep.rating %}filled{% endif %}" data-value="{{ forloop.counter }}" onclick="setRating(this)">&#9733;</button>
+                            {% endfor %}
+                        </div>
+                    </td>
                     <td class="action-col"><button class="delete-btn row-delete" onclick="deleteRep(this)">X</button></td>
                 </tr>
                 {% empty %}
-                <tr id="empty-row"><td colspan="7" class="empty-row">No reps yet</td></tr>
+                <tr id="empty-row"><td colspan="8" class="empty-row">No reps yet</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -82,6 +90,13 @@
                     '<option value="hvac">HVAC</option>' +
                     '<option value="both">Both</option>' +
                 '</select></td>' +
+                '<td><div class="star-rating" data-rating="0">' +
+                    '<button class="star" data-value="1" onclick="setNewRating(this)">&#9733;</button>' +
+                    '<button class="star" data-value="2" onclick="setNewRating(this)">&#9733;</button>' +
+                    '<button class="star" data-value="3" onclick="setNewRating(this)">&#9733;</button>' +
+                    '<button class="star" data-value="4" onclick="setNewRating(this)">&#9733;</button>' +
+                    '<button class="star" data-value="5" onclick="setNewRating(this)">&#9733;</button>' +
+                '</div></td>' +
                 '<td class="action-col"><button class="add-btn" style="padding:4px 8px;font-size:12px;" onclick="saveNewRep()">✓</button></td>';
             tbody.insertBefore(row, tbody.firstChild);
             document.getElementById('new-name').focus();
@@ -95,6 +110,9 @@
                 city: document.getElementById('new-city').value,
                 specialty: document.getElementById('new-specialty').value
             };
+            var newRow = document.getElementById('new-rep-row');
+            var ratingDiv = newRow.querySelector('.star-rating');
+            data.rating = parseInt(ratingDiv.dataset.rating) || 0;
             if (!data.name) { alert('Name is required'); return; }
             fetch('/api/reps/', {
                 method: 'POST',
@@ -102,6 +120,35 @@
                 body: JSON.stringify(data)
             }).then(function(r) { return r.json(); })
               .then(function() { location.reload(); });
+        }
+
+        function setRating(btn) {
+            var value = parseInt(btn.dataset.value);
+            var row = btn.closest('tr');
+            var repId = row.dataset.id;
+            var container = btn.closest('.star-rating');
+            container.dataset.rating = value;
+            container.querySelectorAll('.star').forEach(function(s) {
+                if (parseInt(s.dataset.value) <= value) {
+                    s.classList.add('filled');
+                } else {
+                    s.classList.remove('filled');
+                }
+            });
+            saveField(repId, 'rating', value);
+        }
+
+        function setNewRating(btn) {
+            var value = parseInt(btn.dataset.value);
+            var container = btn.closest('.star-rating');
+            container.dataset.rating = value;
+            container.querySelectorAll('.star').forEach(function(s) {
+                if (parseInt(s.dataset.value) <= value) {
+                    s.classList.add('filled');
+                } else {
+                    s.classList.remove('filled');
+                }
+            });
         }
 
         function saveField(repId, field, value) {
