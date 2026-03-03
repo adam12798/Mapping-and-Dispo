@@ -33,7 +33,7 @@
                 {% for lead in leads %}
                 <tr data-id="{{ lead.id }}">
                     <td><input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}"></td>
-                    <td><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number|default:lead.from_number }}"></td>
+                    <td><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number }}"></td>
                     <td class="readonly">{{ lead.address }}</td>
                     <td><input type="text" class="crm-input" data-field="city" value="{{ lead.city }}"></td>
                     <td>
