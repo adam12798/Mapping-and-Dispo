@@ -118,6 +118,20 @@ html, body {
     background: #eee;
 }
 
+.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.sortable:hover {
+    background: #e8e8e8;
+}
+
+.sort-arrow {
+    font-size: 10px;
+    color: #666;
+}
+
 .crm-table {
     width: 100%;
     border-collapse: collapse;

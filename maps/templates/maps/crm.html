@@ -66,14 +66,14 @@
             <thead>
                 <tr>
                     <th class="checkbox-col"><input type="checkbox" id="select-all"></th>
-                    <th>Homeowner Name</th>
-                    <th>Phone Number</th>
-                    <th>Street Address</th>
-                    <th>City</th>
-                    <th>Appt Type</th>
-                    <th>Appt Format</th>
-                    <th>Appt Date & Time</th>
-                    <th>Status</th>
+                    <th class="sortable" onclick="sortTable(1)">Homeowner Name <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortTable(2)">Phone Number <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortTable(3)">Street Address <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortTable(4)">City <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortTable(5)">Appt Type <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortTable(6)">Appt Format <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortTable(7)">Appt Date & Time <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortTable(8)">Status <span class="sort-arrow"></span></th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -119,6 +119,58 @@
     </div>
 
     <script>
+        var currentSortCol = -1;
+        var currentSortAsc = true;
+
+        function getCellValue(row, colIndex) {
+            var cell = row.cells[colIndex];
+            var input = cell.querySelector('input');
+            var select = cell.querySelector('select');
+            if (input) return input.value.toLowerCase();
+            if (select) {
+                var opt = select.options[select.selectedIndex];
+                return opt ? opt.textContent.toLowerCase() : '';
+            }
+            return cell.textContent.trim().toLowerCase();
+        }
+
+        function sortTable(colIndex) {
+            var tbody = document.querySelector('.crm-table tbody');
+            var rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
+
+            if (currentSortCol === colIndex) {
+                currentSortAsc = !currentSortAsc;
+            } else {
+                currentSortCol = colIndex;
+                currentSortAsc = true;
+            }
+
+            var isDateCol = (colIndex === 7);
+
+            rows.sort(function(a, b) {
+                var valA = getCellValue(a, colIndex);
+                var valB = getCellValue(b, colIndex);
+
+                if (isDateCol) {
+                    var dA = valA ? new Date(valA) : new Date(0);
+                    var dB = valB ? new Date(valB) : new Date(0);
+                    return currentSortAsc ? dA - dB : dB - dA;
+                }
+
+                if (valA < valB) return currentSortAsc ? -1 : 1;
+                if (valA > valB) return currentSortAsc ? 1 : -1;
+                return 0;
+            });
+
+            rows.forEach(function(row) { tbody.appendChild(row); });
+
+            // Update arrows
+            document.querySelectorAll('.sort-arrow').forEach(function(el) { el.textContent = ''; });
+            var th = document.querySelectorAll('.crm-table thead th')[colIndex];
+            var arrow = th.querySelector('.sort-arrow');
+            if (arrow) arrow.textContent = currentSortAsc ? ' \u25B2' : ' \u25BC';
+        }
+
         function saveField(leadId, field, value) {
             var body = {};
             body[field] = value;
