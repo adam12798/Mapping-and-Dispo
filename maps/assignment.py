@@ -87,6 +87,7 @@ def auto_assign_leads(target_date, save=True):
     reps = list(Rep.objects.filter(
         latitude__isnull=False,
         longitude__isnull=False,
+        is_active=True,
     ).order_by('-rating'))
 
     if not reps:

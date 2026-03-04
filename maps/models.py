@@ -48,6 +48,7 @@ class Rep(models.Model):
     specialty = models.CharField(max_length=10, choices=SPECIALTY_CHOICES, blank=True)
     rating = models.IntegerField(default=0)
     color = models.CharField(max_length=7, default='#2980b9')
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.name

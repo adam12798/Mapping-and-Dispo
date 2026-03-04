@@ -111,8 +111,12 @@ def leads_bulk_delete(request):
 
 
 def reps_view(request):
-    reps = Rep.objects.order_by('-rating', 'name')
-    return render(request, 'maps/reps.html', {'reps': reps})
+    active_reps = Rep.objects.filter(is_active=True).order_by('-rating', 'name')
+    inactive_reps = Rep.objects.filter(is_active=False).order_by('-rating', 'name')
+    return render(request, 'maps/reps.html', {
+        'active_reps': active_reps,
+        'inactive_reps': inactive_reps,
+    })
 
 
 @csrf_exempt
@@ -150,7 +154,7 @@ def rep_update(request, pk):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     rep = get_object_or_404(Rep, pk=pk)
     data = json.loads(request.body)
-    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty', 'rating', 'color']
+    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty', 'rating', 'color', 'is_active']
     for field in allowed_fields:
         if field in data:
             setattr(rep, field, data[field])
@@ -261,7 +265,7 @@ def route_api(request):
             for lead in leads
         ]
         rep_data = None
-        rep = Rep.objects.filter(latitude__isnull=False).order_by('-rating').first()
+        rep = Rep.objects.filter(latitude__isnull=False, is_active=True).order_by('-rating').first()
         if rep:
             rep_data = {
                 'name': rep.name,
