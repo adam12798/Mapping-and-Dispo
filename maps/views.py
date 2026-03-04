@@ -83,7 +83,7 @@ def lead_update(request, pk):
     lead = get_object_or_404(Lead, pk=pk)
     data = json.loads(request.body)
     allowed_fields = [
-        'homeowner_name', 'phone_number', 'city',
+        'homeowner_name', 'phone_number', 'address', 'city',
         'appointment_type', 'appointment_format', 'appointment_datetime',
     ]
     if 'rep_id' in data:
@@ -95,6 +95,12 @@ def lead_update(request, pk):
             if field == 'appointment_datetime' and value == '':
                 value = None
             setattr(lead, field, value)
+    # Re-geocode if address or city changed
+    if 'address' in data or 'city' in data:
+        geocode_address = lead.address
+        if lead.city:
+            geocode_address = f"{lead.address}, {lead.city}, MA"
+        lead.latitude, lead.longitude = geocode(geocode_address) if lead.address else (None, None)
     lead.save()
     return JsonResponse({'status': 'ok'})
 
