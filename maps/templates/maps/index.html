@@ -404,7 +404,7 @@
                 var leadDate = dateParts[2] + '-' + dateParts[0].padStart(2, '0') + '-' + dateParts[1].padStart(2, '0');
                 if (leadDate !== dateVal) return;
 
-                var color = leadTypeColors[lead.appointment_type] || '#e74c3c';
+                var color = (!lead.appointment_type || !lead.appointment_format) ? '#ff69b4' : (leadTypeColors[lead.appointment_type] || '#ff69b4');
                 var pinIcon = L.divIcon({
                     className: 'lead-pin',
                     html: '<div style="width:16px;height:16px;background:' + color + ';border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>',
@@ -679,7 +679,7 @@
                     html += '<div class="sidebar-group">';
                     html += '<div class="sidebar-group-title">All Appointments (' + dayLeads.length + ')</div>';
                     dayLeads.forEach(function(lead) {
-                        var badgeColor = typeColorMap[lead.appointment_type] || '#999';
+                        var badgeColor = (!lead.appointment_type || !lead.appointment_format) ? '#ff69b4' : (typeColorMap[lead.appointment_type] || '#ff69b4');
                         var displayName = (lead.homeowner_name || lead.address) + (lead.city ? ', ' + lead.city : '');
                         // Extract time from appointment_datetime "MM/DD/YYYY HH:MM AM/PM"
                         var timeStr = '';
@@ -691,7 +691,8 @@
                         html += '<div class="appt-name">' + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (lead.phone_number) html += '<span>' + lead.phone_number + '</span>';
-                        if (lead.appointment_type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.appointment_type + '</span>';
+                        var badgeLabel = lead.appointment_type || 'unknown';
+                        html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + badgeLabel + '</span>';
                         if (timeStr) html += '<span>' + timeStr + '</span>';
                         html += '<select class="sidebar-assign-select" onchange="assignRep(' + lead.id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
                         html += '<option value=""' + (!lead.rep_id ? ' selected' : '') + '>Unassigned</option>';
