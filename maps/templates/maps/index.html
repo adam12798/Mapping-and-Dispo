@@ -374,6 +374,12 @@
         var leadTypeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
         var leadsLayer = L.layerGroup().addTo(map);
         var allLeads = [];
+        var allReps = [];
+
+        // Fetch reps for assignment dropdowns
+        fetch('/api/reps/list/')
+            .then(function(r) { return r.json(); })
+            .then(function(reps) { allReps = reps; });
 
         // Fetch all leads once, then filter by date
         function fetchLeads() {
@@ -687,11 +693,12 @@
                         if (lead.phone_number) html += '<span>' + lead.phone_number + '</span>';
                         if (lead.appointment_type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.appointment_type + '</span>';
                         if (timeStr) html += '<span>' + timeStr + '</span>';
-                        if (lead.rep_name) {
-                            html += '<span style="color:#27ae60;font-weight:600;">Assigned</span>';
-                        } else {
-                            html += '<span style="color:#e74c3c;font-weight:600;">Unassigned</span>';
-                        }
+                        html += '<select class="sidebar-assign-select" onchange="assignRep(' + lead.id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
+                        html += '<option value=""' + (!lead.rep_id ? ' selected' : '') + '>Unassigned</option>';
+                        allReps.forEach(function(rep) {
+                            html += '<option value="' + rep.id + '"' + (lead.rep_id == rep.id ? ' selected' : '') + '>' + rep.name + '</option>';
+                        });
+                        html += '</select>';
                         html += '</div>';
                         html += '</div>';
                     });
@@ -704,6 +711,23 @@
 
         function panTo(lat, lng) {
             map.setView([lat, lng], 13);
+        }
+
+        function assignRep(leadId, repId) {
+            fetch('/api/leads/' + leadId + '/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rep_id: repId })
+            }).then(function() {
+                // Update local data
+                allLeads.forEach(function(lead) {
+                    if (lead.id === leadId) {
+                        lead.rep_id = repId ? parseInt(repId) : null;
+                        var rep = allReps.find(function(r) { return r.id == repId; });
+                        lead.rep_name = rep ? rep.name : '';
+                    }
+                });
+            });
         }
 
         function autoAssign() {

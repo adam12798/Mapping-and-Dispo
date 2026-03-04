@@ -60,7 +60,14 @@
                         </select>
                     </td>
                     <td><input type="datetime-local" class="crm-input" data-field="appointment_datetime" value="{{ lead.appointment_datetime|date:'Y-m-d\TH:i'|default:'' }}"></td>
-                    <td class="readonly">{% if lead.rep %}<span style="color:#27ae60;font-weight:600;">Assigned</span> <span style="font-size:11px;color:#666;">({{ lead.rep.name }})</span>{% else %}<span style="color:#e74c3c;font-weight:600;">Unassigned</span>{% endif %}</td>
+                    <td>
+                        <select class="crm-select" data-field="rep_id">
+                            <option value="" {% if not lead.rep %}selected{% endif %}>Unassigned</option>
+                            {% for rep in reps %}
+                            <option value="{{ rep.id }}" {% if lead.rep_id == rep.id %}selected{% endif %}>{{ rep.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
                     <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)">X</button></td>
                 </tr>
                 {% empty %}

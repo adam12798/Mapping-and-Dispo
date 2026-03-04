@@ -67,7 +67,8 @@ def geocode(address):
 
 def crm_view(request):
     leads = Lead.objects.select_related('rep').order_by('-created_at')
-    return render(request, 'maps/crm.html', {'leads': leads})
+    reps = Rep.objects.order_by('name')
+    return render(request, 'maps/crm.html', {'leads': leads, 'reps': reps})
 
 
 @csrf_exempt
@@ -85,6 +86,9 @@ def lead_update(request, pk):
         'homeowner_name', 'phone_number', 'city',
         'appointment_type', 'appointment_format', 'appointment_datetime',
     ]
+    if 'rep_id' in data:
+        rep_val = data['rep_id']
+        lead.rep_id = int(rep_val) if rep_val else None
     for field in allowed_fields:
         if field in data:
             value = data[field]
