@@ -26,6 +26,10 @@
             <button class="tomorrow-btn" onclick="setTomorrow()">Tomorrow</button>
         </div>
         <button class="tomorrow-btn" style="margin-top:4px;width:100%;" onclick="clearRoute()">Clear Route</button>
+        <hr style="margin:8px 0;border:none;border-top:1px solid #ddd;">
+        <button class="add-btn" style="width:100%;font-size:12px;padding:6px 12px;" onclick="autoAssign()">Auto-Assign</button>
+        <button class="tomorrow-btn" style="margin-top:4px;width:100%;" onclick="clearAssignments()">Clear Assignments</button>
+        <div id="assign-status" style="margin-top:6px;font-size:11px;color:#666;"></div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -431,12 +435,72 @@
             if (!dateVal) { alert('Pick a date'); return; }
 
             routeLayer.clearLayers();
-            // Hide lead pins while route is shown
             map.removeLayer(leadsLayer);
 
             fetch('/api/route/?date=' + dateVal)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
+                    // Multi-rep mode (assignments exist)
+                    if (data.routes) {
+                        if (data.routes.length === 0) {
+                            alert('No assigned appointments on this date');
+                            return;
+                        }
+                        var allPoints = [];
+                        data.routes.forEach(function(route) {
+                            var repColor = route.rep.color || '#2980b9';
+                            var points = [];
+
+                            // Rep home star
+                            if (route.rep.lat && route.rep.lng) {
+                                var homeIcon = L.divIcon({
+                                    className: 'route-marker',
+                                    html: '<div style="background:' + repColor + ';width:28px;height:28px;border-radius:50%;border:3px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;box-shadow:0 0 6px rgba(0,0,0,0.4);">&#9733;</div>',
+                                    iconSize: [24, 24],
+                                    iconAnchor: [12, 12]
+                                });
+                                L.marker([route.rep.lat, route.rep.lng], { icon: homeIcon })
+                                    .bindPopup('<strong>' + route.rep.name + ' (Home)</strong><br>' + route.rep.home_address)
+                                    .addTo(routeLayer);
+                                points.push([route.rep.lat, route.rep.lng]);
+                            }
+
+                            var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+                            route.stops.forEach(function(stop, i) {
+                                var pinColor = typeColors[stop.type] || repColor;
+                                var stopIcon = L.divIcon({
+                                    className: 'route-marker',
+                                    html: '<div style="background:' + pinColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">' + (i + 1) + '</div>',
+                                    iconSize: [24, 24],
+                                    iconAnchor: [12, 12]
+                                });
+                                var typeLabel = stop.type ? stop.type.charAt(0).toUpperCase() + stop.type.slice(1) : '';
+                                L.marker([stop.lat, stop.lng], { icon: stopIcon })
+                                    .bindPopup(
+                                        '<strong>' + route.rep.name + ' #' + (i + 1) + ': ' + stop.name + '</strong><br>' +
+                                        stop.address + (stop.city ? ', ' + stop.city : '') + '<br>' +
+                                        (typeLabel ? '<em>' + typeLabel + '</em> &mdash; ' : '') +
+                                        '<em>' + stop.time + '</em>'
+                                    )
+                                    .addTo(routeLayer);
+                                points.push([stop.lat, stop.lng]);
+                            });
+
+                            if (points.length >= 2) {
+                                L.polyline(points, {
+                                    color: repColor, weight: 4, opacity: 0.8, dashArray: '10, 8'
+                                }).addTo(routeLayer);
+                            }
+                            allPoints = allPoints.concat(points);
+                        });
+
+                        if (allPoints.length >= 2) {
+                            map.fitBounds(L.latLngBounds(allPoints), { padding: [50, 50] });
+                        }
+                        return;
+                    }
+
+                    // Single-rep fallback (no assignments)
                     if (!data.stops || data.stops.length === 0) {
                         alert('No appointments on this date');
                         return;
@@ -445,7 +509,6 @@
                     var repColor = (data.rep && data.rep.color) ? data.rep.color : '#2980b9';
                     var points = [];
 
-                    // Add rep home as start
                     if (data.rep && data.rep.lat && data.rep.lng) {
                         var homeIcon = L.divIcon({
                             className: 'route-marker',
@@ -459,10 +522,7 @@
                         points.push([data.rep.lat, data.rep.lng]);
                     }
 
-                    // Appointment type colors
                     var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
-
-                    // Add numbered stops
                     data.stops.forEach(function(stop, i) {
                         var pinColor = typeColors[stop.type] || repColor;
                         var stopIcon = L.divIcon({
@@ -483,18 +543,60 @@
                         points.push([stop.lat, stop.lng]);
                     });
 
-                    // Draw polyline in rep's color (no return to home)
                     if (points.length >= 2) {
                         L.polyline(points, {
-                            color: repColor,
-                            weight: 4,
-                            opacity: 0.8,
-                            dashArray: '10, 8'
+                            color: repColor, weight: 4, opacity: 0.8, dashArray: '10, 8'
                         }).addTo(routeLayer);
-
                         map.fitBounds(L.latLngBounds(points), { padding: [50, 50] });
                     }
                 });
+        }
+
+        function autoAssign() {
+            var dateVal = document.getElementById('route-date').value;
+            if (!dateVal) { alert('Pick a date first'); return; }
+            if (!confirm('Auto-assign appointments for ' + dateVal + '?')) return;
+
+            var statusEl = document.getElementById('assign-status');
+            statusEl.textContent = 'Assigning...';
+
+            fetch('/api/auto-assign/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: dateVal })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    statusEl.textContent = 'Error: ' + data.error;
+                    return;
+                }
+                var s = data.summary;
+                statusEl.innerHTML = '<strong>' + s.assigned + '/' + s.total_leads +
+                    '</strong> assigned to <strong>' + s.reps_used + '</strong> rep(s)';
+                if (s.unassigned > 0) {
+                    statusEl.innerHTML += '<br><span style="color:#e74c3c;">' +
+                        s.unassigned + ' unassigned</span>';
+                }
+                showRoute();
+            });
+        }
+
+        function clearAssignments() {
+            var dateVal = document.getElementById('route-date').value;
+            if (!dateVal) { alert('Pick a date first'); return; }
+            if (!confirm('Clear all assignments for ' + dateVal + '?')) return;
+
+            fetch('/api/clear-assignments/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: dateVal })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function() {
+                document.getElementById('assign-status').textContent = 'Assignments cleared';
+                clearRoute();
+            });
         }
 
         function clearRoute() {

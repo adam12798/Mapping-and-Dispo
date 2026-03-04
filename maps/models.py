@@ -26,6 +26,7 @@ class Lead(models.Model):
     appointment_type = models.CharField(max_length=10, choices=APPOINTMENT_TYPE_CHOICES, blank=True)
     appointment_format = models.CharField(max_length=10, choices=APPOINTMENT_FORMAT_CHOICES, blank=True)
     appointment_datetime = models.DateTimeField(null=True, blank=True)
+    rep = models.ForeignKey('Rep', null=True, blank=True, on_delete=models.SET_NULL, related_name='leads')
 
     def __str__(self):
         return f"{self.address} ({self.created_at:%m/%d/%Y})"

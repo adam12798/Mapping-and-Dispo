@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from .assignment import auto_assign_leads
 from .models import Lead, Rep
 
 
@@ -21,7 +22,7 @@ def index(request):
 
 def leads_api(request):
     """Return all leads as JSON for the map to plot."""
-    leads = Lead.objects.filter(latitude__isnull=False).order_by('-created_at')
+    leads = Lead.objects.filter(latitude__isnull=False).select_related('rep').order_by('-created_at')
     data = [
         {
             'id': lead.id,
@@ -36,6 +37,8 @@ def leads_api(request):
             'appointment_format': lead.appointment_format,
             'appointment_datetime': lead.appointment_datetime.strftime('%m/%d/%Y %I:%M %p') if lead.appointment_datetime else '',
             'created_at': lead.created_at.strftime('%m/%d/%Y %I:%M %p'),
+            'rep_id': lead.rep_id,
+            'rep_name': lead.rep.name if lead.rep else '',
         }
         for lead in leads
     ]
@@ -187,7 +190,11 @@ def reps_api(request):
 
 
 def route_api(request):
-    """Return ordered route stops for a given date."""
+    """Return ordered route stops for a given date.
+
+    If leads have rep assignments, returns per-rep routes.
+    Otherwise falls back to single-rep mode (highest rated).
+    """
     date_str = request.GET.get('date', '')
     if not date_str:
         return JsonResponse({'error': 'date parameter required'}, status=400)
@@ -199,34 +206,154 @@ def route_api(request):
     leads = Lead.objects.filter(
         appointment_datetime__date=date,
         latitude__isnull=False,
-    ).order_by('appointment_datetime')
+    ).select_related('rep').order_by('appointment_datetime')
 
-    stops = [
+    assigned_leads = [l for l in leads if l.rep is not None]
+
+    if assigned_leads:
+        from collections import defaultdict
+        rep_groups = defaultdict(list)
+        for lead in assigned_leads:
+            rep_groups[lead.rep_id].append(lead)
+
+        routes = []
+        for rep_id, rep_leads in rep_groups.items():
+            rep = rep_leads[0].rep
+            stops = [
+                {
+                    'name': lead.homeowner_name or lead.address,
+                    'address': lead.address,
+                    'city': lead.city,
+                    'time': lead.appointment_datetime.strftime('%I:%M %p'),
+                    'type': lead.appointment_type,
+                    'lat': lead.latitude,
+                    'lng': lead.longitude,
+                }
+                for lead in rep_leads
+            ]
+            routes.append({
+                'rep': {
+                    'name': rep.name,
+                    'lat': rep.latitude,
+                    'lng': rep.longitude,
+                    'home_address': rep.home_address,
+                    'color': rep.color,
+                },
+                'stops': stops,
+            })
+
+        return JsonResponse({'routes': routes})
+    else:
+        stops = [
+            {
+                'name': lead.homeowner_name or lead.address,
+                'address': lead.address,
+                'city': lead.city,
+                'time': lead.appointment_datetime.strftime('%I:%M %p'),
+                'type': lead.appointment_type,
+                'lat': lead.latitude,
+                'lng': lead.longitude,
+            }
+            for lead in leads
+        ]
+        rep_data = None
+        rep = Rep.objects.filter(latitude__isnull=False).order_by('-rating').first()
+        if rep:
+            rep_data = {
+                'name': rep.name,
+                'lat': rep.latitude,
+                'lng': rep.longitude,
+                'home_address': rep.home_address,
+                'color': rep.color,
+            }
+        return JsonResponse({'rep': rep_data, 'stops': stops})
+
+
+@csrf_exempt
+@require_POST
+def auto_assign_api(request):
+    """Trigger auto-assignment for a target date."""
+    data = json.loads(request.body)
+    date_str = data.get('date', '')
+    if not date_str:
+        return JsonResponse({'error': 'date parameter required'}, status=400)
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format'}, status=400)
+
+    result = auto_assign_leads(target_date)
+
+    assignments_data = []
+    for assignment in result['assignments']:
+        rep = assignment['rep']
+        stops = []
+        for lead, arrival_time in assignment['stops']:
+            stops.append({
+                'lead_id': lead.id,
+                'name': lead.homeowner_name or lead.address,
+                'address': lead.address,
+                'city': lead.city,
+                'type': lead.appointment_type,
+                'lat': lead.latitude,
+                'lng': lead.longitude,
+                'estimated_arrival': arrival_time.strftime('%I:%M %p'),
+            })
+        assignments_data.append({
+            'rep': {
+                'id': rep.id,
+                'name': rep.name,
+                'color': rep.color,
+                'lat': rep.latitude,
+                'lng': rep.longitude,
+                'home_address': rep.home_address,
+            },
+            'stops': stops,
+        })
+
+    unassigned_data = [
         {
-            'name': lead.homeowner_name or lead.address,
-            'address': lead.address,
-            'city': lead.city,
-            'time': lead.appointment_datetime.strftime('%I:%M %p'),
-            'type': lead.appointment_type,
-            'lat': lead.latitude,
-            'lng': lead.longitude,
+            'lead_id': l.id,
+            'name': l.homeowner_name or l.address,
+            'address': l.address,
+            'type': l.appointment_type,
         }
-        for lead in leads
+        for l in result['unassigned']
     ]
 
-    # Get the highest-rated rep with coordinates as the route's home base
-    rep_data = None
-    rep = Rep.objects.filter(latitude__isnull=False).order_by('-rating').first()
-    if rep:
-        rep_data = {
-            'name': rep.name,
-            'lat': rep.latitude,
-            'lng': rep.longitude,
-            'home_address': rep.home_address,
-            'color': rep.color,
-        }
+    return JsonResponse({
+        'assignments': assignments_data,
+        'unassigned': unassigned_data,
+        'summary': {
+            'total_leads': len(result['unassigned']) + sum(
+                len(a['stops']) for a in result['assignments']
+            ),
+            'assigned': sum(len(a['stops']) for a in result['assignments']),
+            'unassigned': len(result['unassigned']),
+            'reps_used': len(assignments_data),
+        },
+    })
 
-    return JsonResponse({'rep': rep_data, 'stops': stops})
+
+@csrf_exempt
+@require_POST
+def clear_assignments_api(request):
+    """Clear all rep assignments for a given date."""
+    data = json.loads(request.body)
+    date_str = data.get('date', '')
+    if not date_str:
+        return JsonResponse({'error': 'date parameter required'}, status=400)
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format'}, status=400)
+
+    count = Lead.objects.filter(
+        appointment_datetime__date=target_date,
+        rep__isnull=False,
+    ).update(rep=None)
+
+    return JsonResponse({'status': 'ok', 'cleared': count})
 
 
 def parse_sms_fields(body):

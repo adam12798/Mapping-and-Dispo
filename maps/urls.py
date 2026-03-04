@@ -14,4 +14,6 @@ urlpatterns = [
     path('api/reps/bulk-delete/', views.reps_bulk_delete, name='reps_bulk_delete'),
     path('api/reps/list/', views.reps_api, name='reps_api'),
     path('api/route/', views.route_api, name='route_api'),
+    path('api/auto-assign/', views.auto_assign_api, name='auto_assign'),
+    path('api/clear-assignments/', views.clear_assignments_api, name='clear_assignments'),
 ]
