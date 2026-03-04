@@ -414,6 +414,10 @@
                     )
                     .addTo(leadsLayer);
             });
+            // Always keep sidebar in sync with current date
+            if (!pendingAssignments) {
+                updateSidebar(null);
+            }
         }
 
         // Default date to today
