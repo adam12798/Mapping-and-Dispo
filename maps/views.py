@@ -395,6 +395,7 @@ def parse_sms_fields(body):
         'city': 'city',
         'state': 'state',
         'type': 'type',
+        'product type': 'type',
         'appointment type': 'type',
         'appt type': 'type',
         'format': 'format',
