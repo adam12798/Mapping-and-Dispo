@@ -77,12 +77,21 @@ def compute_schedule(rep, ordered_leads, target_date):
 
 
 def auto_assign_leads(target_date, save=True):
-    leads = list(Lead.objects.filter(
+    # Unassigned leads to distribute
+    unassigned_leads = list(Lead.objects.filter(
         appointment_datetime__date=target_date,
         latitude__isnull=False,
         longitude__isnull=False,
         rep__isnull=True,
     ))
+
+    # Pre-assigned (locked) leads — these are non-negotiable
+    locked_leads = list(Lead.objects.filter(
+        appointment_datetime__date=target_date,
+        latitude__isnull=False,
+        longitude__isnull=False,
+        rep__isnull=False,
+    ).select_related('rep'))
 
     reps = list(Rep.objects.filter(
         latitude__isnull=False,
@@ -91,15 +100,29 @@ def auto_assign_leads(target_date, save=True):
     ).order_by('-rating'))
 
     if not reps:
-        return {'assignments': [], 'unassigned': leads}
+        return {'assignments': [], 'unassigned': unassigned_leads}
 
-    if not leads:
-        return {'assignments': [], 'unassigned': []}
-
-    # Initialize clusters
+    # Initialize clusters with locked leads
     clusters = {rep.id: [] for rep in reps}
+    locked_ids = set()
+    for lead in locked_leads:
+        if lead.rep_id in clusters:
+            clusters[lead.rep_id].append(lead)
+            locked_ids.add(lead.id)
 
-    # Sort leads furthest-from-nearest-rep first (prevents orphans)
+    if not unassigned_leads:
+        # Still build routes for locked leads
+        assignments = []
+        for rep in reps:
+            if not clusters[rep.id]:
+                continue
+            ordered = order_stops_nearest_neighbor(rep.latitude, rep.longitude, clusters[rep.id])
+            schedule = compute_schedule(rep, ordered, target_date)
+            if schedule:
+                assignments.append({'rep': rep, 'stops': schedule})
+        return {'assignments': assignments, 'unassigned': []}
+
+    # Sort unassigned leads furthest-from-nearest-rep first (prevents orphans)
     def min_compatible_rep_distance(lead):
         dists = []
         for rep in reps:
@@ -109,10 +132,11 @@ def auto_assign_leads(target_date, save=True):
                 dists.append(d)
         return min(dists) if dists else float('inf')
 
-    remaining_leads = sorted(leads, key=min_compatible_rep_distance, reverse=True)
+    remaining_leads = sorted(unassigned_leads, key=min_compatible_rep_distance, reverse=True)
     unassigned = []
 
     # Greedy assignment: each lead to nearest compatible rep under capacity
+    # Locked leads count toward capacity
     for lead in remaining_leads:
         best_rep_id = None
         best_dist = float('inf')
@@ -137,6 +161,7 @@ def auto_assign_leads(target_date, save=True):
             unassigned.append(lead)
 
     # Order each cluster and validate schedule
+    # Locked leads are never dropped — only auto-assigned leads can be dropped
     assignments = []
     for rep in reps:
         cluster_leads = clusters[rep.id]
@@ -147,7 +172,16 @@ def auto_assign_leads(target_date, save=True):
 
         schedule = compute_schedule(rep, ordered, target_date)
         while schedule is None and len(ordered) > 0:
-            dropped = ordered.pop()
+            # Only drop auto-assigned leads, never locked ones
+            drop_candidate = None
+            for i in range(len(ordered) - 1, -1, -1):
+                if ordered[i].id not in locked_ids:
+                    drop_candidate = i
+                    break
+            if drop_candidate is None:
+                # All remaining are locked — can't drop any, keep as-is
+                break
+            dropped = ordered.pop(drop_candidate)
             unassigned.append(dropped)
             schedule = compute_schedule(rep, ordered, target_date)
 
@@ -161,8 +195,9 @@ def auto_assign_leads(target_date, save=True):
         for assignment in assignments:
             rep = assignment['rep']
             for lead, arrival_time in assignment['stops']:
-                lead.rep = rep
-                lead.save(update_fields=['rep_id'])
+                if lead.id not in locked_ids:
+                    lead.rep = rep
+                    lead.save(update_fields=['rep_id'])
 
     return {
         'assignments': assignments,
