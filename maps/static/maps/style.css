@@ -155,10 +155,16 @@ html, body {
 }
 
 .crm-table {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
     border-collapse: collapse;
     font-family: 'Montserrat', sans-serif;
     font-size: 13px;
+}
+
+.crm-table thead th,
+.crm-table tbody td {
+    white-space: nowrap;
 }
 
 .crm-table thead th {
