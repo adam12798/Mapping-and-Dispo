@@ -21,6 +21,9 @@
             <h2>Leads</h2>
             <button id="bulk-delete-btn" class="delete-btn bulk-delete" style="display:none;" onclick="bulkDelete()">Delete Selected</button>
         </div>
+        <div class="crm-search">
+            <input type="text" id="search-input" placeholder="Search leads..." oninput="filterTable()">
+        </div>
         <div class="crm-filters">
             <div class="filter-group">
                 <label>Date</label>
@@ -236,10 +239,22 @@
             var fFormat = document.getElementById('filter-format').value;
             var fRep = document.getElementById('filter-rep').value;
             var fStatus = document.getElementById('filter-status').value;
+            var search = document.getElementById('search-input').value.toLowerCase().trim();
 
             document.querySelectorAll('tbody tr').forEach(function(row) {
                 if (!row.dataset.id) return; // skip empty row
                 var show = true;
+
+                // Search — check all text content in the row
+                if (search) {
+                    var rowText = '';
+                    row.querySelectorAll('input[type="text"]').forEach(function(inp) { rowText += ' ' + inp.value; });
+                    row.querySelectorAll('select').forEach(function(sel) {
+                        var opt = sel.options[sel.selectedIndex];
+                        if (opt) rowText += ' ' + opt.textContent;
+                    });
+                    if (rowText.toLowerCase().indexOf(search) === -1) show = false;
+                }
 
                 // Date filter — compare YYYY-MM-DD portion of datetime-local input
                 if (fDate) {
@@ -279,6 +294,7 @@
         }
 
         function clearFilters() {
+            document.getElementById('search-input').value = '';
             document.getElementById('filter-date').value = '';
             document.getElementById('filter-type').value = '';
             document.getElementById('filter-format').value = '';

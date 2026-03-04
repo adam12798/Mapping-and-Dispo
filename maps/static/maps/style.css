@@ -70,6 +70,25 @@ html, body {
     color: #111;
 }
 
+.crm-search {
+    margin-bottom: 10px;
+}
+
+.crm-search input {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    padding: 6px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    width: 300px;
+    background: #fff;
+}
+
+.crm-search input:focus {
+    outline: none;
+    border-color: #999;
+}
+
 .crm-filters {
     display: flex;
     gap: 12px;
