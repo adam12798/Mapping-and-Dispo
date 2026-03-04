@@ -630,6 +630,12 @@
                         if (stop.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + stop.type + '</span>';
                         if (stop.estimated_arrival) html += '<span>' + stop.estimated_arrival + '</span>';
                         else if (stop.time) html += '<span>' + stop.time + '</span>';
+                        html += '<select class="sidebar-assign-select" onchange="previewReassign(' + stop.lead_id + ', ' + rep.id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
+                        html += '<option value="">Unassigned</option>';
+                        allReps.forEach(function(r) {
+                            html += '<option value="' + r.id + '"' + (r.id == rep.id ? ' selected' : '') + '>' + r.name + '</option>';
+                        });
+                        html += '</select>';
                         html += '</div>';
                         html += '</div>';
                     });
@@ -718,6 +724,49 @@
 
         function panTo(lat, lng) {
             map.setView([lat, lng], 13);
+        }
+
+        function previewReassign(leadId, fromRepId, toRepId) {
+            if (!pendingAssignments) return;
+            // Remove lead from current rep's group
+            var lead = null;
+            pendingAssignments.assignments.forEach(function(group) {
+                if (group.rep.id == fromRepId) {
+                    group.stops = group.stops.filter(function(s) {
+                        if (s.lead_id === leadId) { lead = s; return false; }
+                        return true;
+                    });
+                }
+            });
+            // Remove empty groups
+            pendingAssignments.assignments = pendingAssignments.assignments.filter(function(g) {
+                return g.stops.length > 0;
+            });
+            if (!lead) return;
+            if (!toRepId) {
+                // Move to unassigned
+                if (!pendingAssignments.unassigned) pendingAssignments.unassigned = [];
+                pendingAssignments.unassigned.push(lead);
+            } else {
+                // Move to target rep
+                var found = false;
+                pendingAssignments.assignments.forEach(function(group) {
+                    if (group.rep.id == toRepId) {
+                        group.stops.push(lead);
+                        found = true;
+                    }
+                });
+                if (!found) {
+                    var repInfo = allReps.find(function(r) { return r.id == toRepId; });
+                    if (repInfo) {
+                        pendingAssignments.assignments.push({
+                            rep: { id: repInfo.id, name: repInfo.name, color: repInfo.color, lat: repInfo.lat, lng: repInfo.lng, home_address: repInfo.home_address },
+                            stops: [lead]
+                        });
+                    }
+                }
+            }
+            updateSidebar(pendingAssignments);
         }
 
         function previewAssignRep(leadId, repId) {
