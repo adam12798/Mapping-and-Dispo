@@ -423,7 +423,7 @@
                     if (data.rep && data.rep.lat && data.rep.lng) {
                         var homeIcon = L.divIcon({
                             className: 'route-marker',
-                            html: '<div style="background:' + repColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">H</div>',
+                            html: '<div style="background:' + repColor + ';width:28px;height:28px;border-radius:50%;border:3px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:11px;box-shadow:0 0 6px rgba(0,0,0,0.4);">START</div>',
                             iconSize: [24, 24],
                             iconAnchor: [12, 12]
                         });
@@ -451,12 +451,7 @@
                         points.push([stop.lat, stop.lng]);
                     });
 
-                    // Add rep home as end
-                    if (data.rep && data.rep.lat && data.rep.lng) {
-                        points.push([data.rep.lat, data.rep.lng]);
-                    }
-
-                    // Draw polyline in rep's color
+                    // Draw polyline in rep's color (no return to home)
                     if (points.length >= 2) {
                         L.polyline(points, {
                             color: repColor,
