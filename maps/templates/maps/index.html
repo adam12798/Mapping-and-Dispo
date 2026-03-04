@@ -430,8 +430,8 @@
             filterLeadsByDate();
             if (!pendingAssignments) {
                 routeLayer.clearLayers();
-                updateSidebar(null);
             }
+            updateSidebar(pendingAssignments);
         });
 
         function setTomorrow() {
@@ -653,8 +653,14 @@
                     return leadDate === dateVal;
                 });
 
+                // Sort by time portion (extract HH:MM AM/PM and compare)
                 dayLeads.sort(function(a, b) {
-                    return (a.appointment_datetime || '').localeCompare(b.appointment_datetime || '');
+                    var dtA = a.appointment_datetime || '';
+                    var dtB = b.appointment_datetime || '';
+                    // Format is "MM/DD/YYYY HH:MM AM/PM" — parse to Date for proper sort
+                    var dA = dtA ? new Date(dtA) : new Date(0);
+                    var dB = dtB ? new Date(dtB) : new Date(0);
+                    return dA - dB;
                 });
 
                 if (dayLeads.length === 0) {
@@ -665,11 +671,18 @@
                     dayLeads.forEach(function(lead) {
                         var badgeColor = typeColorMap[lead.appointment_type] || '#999';
                         var displayName = (lead.homeowner_name || lead.address) + (lead.city ? ', ' + lead.city : '');
+                        // Extract time from appointment_datetime "MM/DD/YYYY HH:MM AM/PM"
+                        var timeStr = '';
+                        if (lead.appointment_datetime) {
+                            var parts = lead.appointment_datetime.split(' ');
+                            if (parts.length >= 3) timeStr = parts[1] + ' ' + parts[2];
+                        }
                         html += '<div class="sidebar-row" onclick="panTo(' + lead.lat + ',' + lead.lng + ')">';
                         html += '<div class="appt-name">' + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (lead.phone_number) html += '<span>' + lead.phone_number + '</span>';
                         if (lead.appointment_type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.appointment_type + '</span>';
+                        if (timeStr) html += '<span>' + timeStr + '</span>';
                         if (lead.rep_name) html += '<span>Rep: ' + lead.rep_name + '</span>';
                         html += '</div>';
                         html += '</div>';
