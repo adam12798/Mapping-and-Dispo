@@ -4,7 +4,7 @@ from .models import Lead, Rep
 
 APPOINTMENT_DURATION = 90  # minutes (1.5 hours buffer)
 WORK_START_HOUR = 9        # 9:00 AM
-WORK_END_HOUR = 17         # 5:00 PM
+WORK_END_HOUR = 20         # 8:00 PM
 AVG_SPEED_MPH = 30         # average MA driving speed
 TARGET_PER_REP = 4
 MAX_PER_REP = 6
