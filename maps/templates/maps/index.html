@@ -363,9 +363,11 @@
 
         // Lead pin colors by appointment type
         var leadTypeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+        var leadsLayer = L.layerGroup().addTo(map);
 
         // Fetch and display leads as pins
         function loadLeads() {
+            leadsLayer.clearLayers();
             fetch('/api/leads/')
                 .then(function(r) { return r.json(); })
                 .then(function(leads) {
@@ -383,7 +385,7 @@
                                 '<strong>' + lead.address + '</strong><br>' +
                                 '<em>' + lead.created_at + '</em>'
                             )
-                            .addTo(map);
+                            .addTo(leadsLayer);
                     });
                 });
         }
