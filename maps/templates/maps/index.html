@@ -368,10 +368,10 @@
 
         // Fetch and display leads as pins
         function loadLeads() {
-            leadsLayer.clearLayers();
             fetch('/api/leads/')
                 .then(function(r) { return r.json(); })
                 .then(function(leads) {
+                    leadsLayer.clearLayers();
                     leads.forEach(function(lead) {
                         var color = leadTypeColors[lead.appointment_type] || '#e74c3c';
                         var pinIcon = L.divIcon({
