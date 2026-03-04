@@ -317,6 +317,7 @@ def auto_assign_api(request):
             'lead_id': l.id,
             'name': l.homeowner_name or l.address,
             'address': l.address,
+            'city': l.city,
             'type': l.appointment_type,
             'phone': l.phone_number,
         }

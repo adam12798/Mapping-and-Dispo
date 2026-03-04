@@ -599,12 +599,19 @@
             if (assignData && assignData.assignments && assignData.assignments.length > 0) {
                 assignData.assignments.forEach(function(group) {
                     var rep = group.rep;
+                    // Sort stops by time
+                    var sortedStops = group.stops.slice().sort(function(a, b) {
+                        var timeA = a.estimated_arrival || a.time || '';
+                        var timeB = b.estimated_arrival || b.time || '';
+                        return timeA.localeCompare(timeB);
+                    });
                     html += '<div class="sidebar-group">';
-                    html += '<div class="sidebar-group-title"><span class="rep-dot" style="background:' + (rep.color || '#2980b9') + '"></span>' + rep.name + ' (' + group.stops.length + ')</div>';
-                    group.stops.forEach(function(stop) {
+                    html += '<div class="sidebar-group-title"><span class="rep-dot" style="background:' + (rep.color || '#2980b9') + '"></span>' + rep.name + ' (' + sortedStops.length + ')</div>';
+                    sortedStops.forEach(function(stop) {
                         var badgeColor = typeColorMap[stop.type] || '#999';
+                        var displayName = (stop.name || 'Unknown') + (stop.city ? ', ' + stop.city : '');
                         html += '<div class="sidebar-row" style="border-left-color:' + (rep.color || '#2980b9') + '" onclick="panTo(' + stop.lat + ',' + stop.lng + ')">';
-                        html += '<div class="appt-name">' + (stop.name || 'Unknown') + '</div>';
+                        html += '<div class="appt-name">' + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (stop.phone) html += '<span>' + stop.phone + '</span>';
                         if (stop.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + stop.type + '</span>';
@@ -621,8 +628,9 @@
                     html += '<div class="sidebar-group-title"><span class="rep-dot" style="background:#ccc"></span>Unassigned (' + assignData.unassigned.length + ')</div>';
                     assignData.unassigned.forEach(function(lead) {
                         var badgeColor = typeColorMap[lead.type] || '#999';
+                        var displayName = (lead.name || 'Unknown') + (lead.city ? ', ' + lead.city : '');
                         html += '<div class="sidebar-row" style="border-left-color:#ccc">';
-                        html += '<div class="appt-name">' + (lead.name || 'Unknown') + '</div>';
+                        html += '<div class="appt-name">' + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (lead.phone) html += '<span>' + lead.phone + '</span>';
                         if (lead.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.type + '</span>';
@@ -642,6 +650,11 @@
                     return leadDate === dateVal;
                 });
 
+                // Sort by appointment time
+                dayLeads.sort(function(a, b) {
+                    return (a.appointment_datetime || '').localeCompare(b.appointment_datetime || '');
+                });
+
                 if (dayLeads.length === 0) {
                     html = '<div class="sidebar-empty">No appointments on this date</div>';
                 } else {
@@ -649,8 +662,9 @@
                     html += '<div class="sidebar-group-title">All Appointments (' + dayLeads.length + ')</div>';
                     dayLeads.forEach(function(lead) {
                         var badgeColor = typeColorMap[lead.appointment_type] || '#999';
+                        var displayName = (lead.homeowner_name || lead.address) + (lead.city ? ', ' + lead.city : '');
                         html += '<div class="sidebar-row" onclick="panTo(' + lead.lat + ',' + lead.lng + ')">';
-                        html += '<div class="appt-name">' + (lead.homeowner_name || lead.address) + '</div>';
+                        html += '<div class="appt-name">' + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (lead.phone_number) html += '<span>' + lead.phone_number + '</span>';
                         if (lead.appointment_type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.appointment_type + '</span>';
