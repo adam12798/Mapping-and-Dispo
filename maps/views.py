@@ -24,9 +24,15 @@ def leads_api(request):
         {
             'id': lead.id,
             'address': lead.address,
+            'city': lead.city,
             'lat': lead.latitude,
             'lng': lead.longitude,
             'from_number': lead.from_number,
+            'homeowner_name': lead.homeowner_name,
+            'phone_number': lead.phone_number,
+            'appointment_type': lead.appointment_type,
+            'appointment_format': lead.appointment_format,
+            'appointment_datetime': lead.appointment_datetime.strftime('%m/%d/%Y %I:%M %p') if lead.appointment_datetime else '',
             'created_at': lead.created_at.strftime('%m/%d/%Y %I:%M %p'),
         }
         for lead in leads
