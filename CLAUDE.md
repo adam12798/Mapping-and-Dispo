@@ -34,11 +34,13 @@ Mapping and Dispo — a Django app for mapping MA utility providers with SMS int
 
 ## App Features
 
-- **Map** (`/`) — MA utility provider map with lead pins color-coded by appointment type (Solar=yellow, HVAC=red, Both=green). Route planner shows rep's daily route with numbered stops.
+- **Map** (`/`) — MA utility provider map with lead pins color-coded by appointment type (Solar=yellow, HVAC=red, Both=green). Route planner (bottom-left) shows rep's daily route with numbered stops. Pins filter by selected date. Star icon marks rep's home/start.
 - **CRM** (`/crm/`) — Inline-editable lead table. Leads come in via Twilio SMS webhook.
 - **Reps** (`/reps/`) — Sales rep management with star ratings, color picker (used for route lines), and specialty.
 - **Route API** (`/api/route/?date=YYYY-MM-DD`) — Pre-computed route for a given date, returns ordered stops + rep info.
 - Lead pins use inline styles for color (`.lead-pin` CSS class must stay transparent to avoid double pins).
+- Local database is empty — all real data lives in Railway's PostgreSQL. Use the live API to check data.
+- Cannot access Railway dashboard directly — can only push code to GitHub to trigger deploys.
 
 ## Deployment
 
