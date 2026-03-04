@@ -361,14 +361,19 @@
             });
         }
 
+        // Lead pin colors by appointment type
+        var leadTypeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+
         // Fetch and display leads as pins
         function loadLeads() {
             fetch('/api/leads/')
                 .then(function(r) { return r.json(); })
                 .then(function(leads) {
                     leads.forEach(function(lead) {
+                        var color = leadTypeColors[lead.appointment_type] || '#e74c3c';
                         var pinIcon = L.divIcon({
                             className: 'lead-pin',
+                            html: '<div style="width:16px;height:16px;background:' + color + ';border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>',
                             iconSize: [16, 16],
                             iconAnchor: [8, 8]
                         });
@@ -433,18 +438,24 @@
                         points.push([data.rep.lat, data.rep.lng]);
                     }
 
+                    // Appointment type colors
+                    var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+
                     // Add numbered stops
                     data.stops.forEach(function(stop, i) {
+                        var pinColor = typeColors[stop.type] || repColor;
                         var stopIcon = L.divIcon({
                             className: 'route-marker',
-                            html: '<div style="background:' + repColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">' + (i + 1) + '</div>',
+                            html: '<div style="background:' + pinColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">' + (i + 1) + '</div>',
                             iconSize: [24, 24],
                             iconAnchor: [12, 12]
                         });
+                        var typeLabel = stop.type ? stop.type.charAt(0).toUpperCase() + stop.type.slice(1) : '';
                         L.marker([stop.lat, stop.lng], { icon: stopIcon })
                             .bindPopup(
                                 '<strong>' + (i + 1) + '. ' + stop.name + '</strong><br>' +
                                 stop.address + (stop.city ? ', ' + stop.city : '') + '<br>' +
+                                (typeLabel ? '<em>' + typeLabel + '</em> &mdash; ' : '') +
                                 '<em>' + stop.time + '</em>'
                             )
                             .addTo(routeLayer);

@@ -207,6 +207,7 @@ def route_api(request):
             'address': lead.address,
             'city': lead.city,
             'time': lead.appointment_datetime.strftime('%I:%M %p'),
+            'type': lead.appointment_type,
             'lat': lead.latitude,
             'lng': lead.longitude,
         }
