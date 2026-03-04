@@ -34,6 +34,7 @@
                     <th>City</th>
                     <th>Specialty</th>
                     <th>Rating</th>
+                    <th>Color</th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -60,10 +61,11 @@
                             {% endfor %}
                         </div>
                     </td>
+                    <td><input type="color" class="crm-input color-picker" data-field="color" value="{{ rep.color|default:'#2980b9' }}"></td>
                     <td class="action-col"><button class="delete-btn row-delete" onclick="deleteRep(this)">X</button></td>
                 </tr>
                 {% empty %}
-                <tr id="empty-row"><td colspan="8" class="empty-row">No reps yet</td></tr>
+                <tr id="empty-row"><td colspan="9" class="empty-row">No reps yet</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -97,6 +99,7 @@
                     '<button class="star" data-value="4" onclick="setNewRating(this)">&#9733;</button>' +
                     '<button class="star" data-value="5" onclick="setNewRating(this)">&#9733;</button>' +
                 '</div></td>' +
+                '<td><input type="color" id="new-color" value="#2980b9"></td>' +
                 '<td class="action-col"><button class="add-btn" style="padding:4px 8px;font-size:12px;" onclick="saveNewRep()">✓</button></td>';
             tbody.insertBefore(row, tbody.firstChild);
             document.getElementById('new-name').focus();
@@ -113,6 +116,7 @@
             var newRow = document.getElementById('new-rep-row');
             var ratingDiv = newRow.querySelector('.star-rating');
             data.rating = parseInt(ratingDiv.dataset.rating) || 0;
+            data.color = document.getElementById('new-color').value;
             if (!data.name) { alert('Name is required'); return; }
             fetch('/api/reps/', {
                 method: 'POST',

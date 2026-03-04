@@ -21,7 +21,10 @@
     <div class="route-panel">
         <h4>Route Planner</h4>
         <input type="date" id="route-date" />
-        <button onclick="showRoute()">Show Route</button>
+        <div style="display:flex;gap:6px;margin-top:2px;">
+            <button onclick="showRoute()">Show Route</button>
+            <button class="tomorrow-btn" onclick="setTomorrow()">Tomorrow</button>
+        </div>
     </div>
     <div id="legend">
         <h4>Electric Providers</h4>
@@ -384,6 +387,18 @@
         loadLeads();
         setInterval(loadLeads, 30000);
 
+        // Default date to today
+        var today = new Date();
+        var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+        document.getElementById('route-date').value = todayStr;
+
+        function setTomorrow() {
+            var tmrw = new Date();
+            tmrw.setDate(tmrw.getDate() + 1);
+            var tmrwStr = tmrw.getFullYear() + '-' + String(tmrw.getMonth() + 1).padStart(2, '0') + '-' + String(tmrw.getDate()).padStart(2, '0');
+            document.getElementById('route-date').value = tmrwStr;
+        }
+
         // Route overlay
         var routeLayer = L.layerGroup().addTo(map);
 
@@ -401,13 +416,14 @@
                         return;
                     }
 
+                    var repColor = (data.rep && data.rep.color) ? data.rep.color : '#2980b9';
                     var points = [];
 
                     // Add rep home as start
                     if (data.rep && data.rep.lat && data.rep.lng) {
                         var homeIcon = L.divIcon({
-                            className: 'route-marker home',
-                            html: 'H',
+                            className: 'route-marker',
+                            html: '<div style="background:' + repColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">H</div>',
                             iconSize: [24, 24],
                             iconAnchor: [12, 12]
                         });
@@ -421,7 +437,7 @@
                     data.stops.forEach(function(stop, i) {
                         var stopIcon = L.divIcon({
                             className: 'route-marker',
-                            html: '' + (i + 1),
+                            html: '<div style="background:' + repColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">' + (i + 1) + '</div>',
                             iconSize: [24, 24],
                             iconAnchor: [12, 12]
                         });
@@ -440,16 +456,15 @@
                         points.push([data.rep.lat, data.rep.lng]);
                     }
 
-                    // Draw polyline
+                    // Draw polyline in rep's color
                     if (points.length >= 2) {
                         L.polyline(points, {
-                            color: '#2980b9',
+                            color: repColor,
                             weight: 4,
                             opacity: 0.8,
                             dashArray: '10, 8'
                         }).addTo(routeLayer);
 
-                        // Fit map to route
                         map.fitBounds(L.latLngBounds(points), { padding: [50, 50] });
                     }
                 });

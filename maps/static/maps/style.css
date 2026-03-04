@@ -321,23 +321,32 @@ html, body {
 }
 
 .route-marker {
-    background: #2980b9;
-    color: #fff;
-    border: 2px solid #fff;
-    border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Montserrat', sans-serif;
-    font-size: 12px;
-    font-weight: 700;
-    box-shadow: 0 0 6px rgba(0,0,0,0.4);
+    background: transparent;
+    border: none;
 }
 
-.route-marker.home {
-    background: #27ae60;
+.tomorrow-btn {
+    background: #7f8c8d;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.tomorrow-btn:hover {
+    background: #6c7a7b;
+}
+
+.color-picker {
+    width: 36px;
+    height: 30px;
+    padding: 1px;
+    border: 1px solid #ccc;
+    cursor: pointer;
 }
 
 .lead-pin {

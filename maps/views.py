@@ -127,6 +127,7 @@ def rep_create(request):
         latitude=lat,
         longitude=lng,
         specialty=data.get('specialty', ''),
+        color=data.get('color', '#2980b9'),
     )
     return JsonResponse({'status': 'ok', 'id': rep.id})
 
@@ -142,7 +143,7 @@ def rep_update(request, pk):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     rep = get_object_or_404(Rep, pk=pk)
     data = json.loads(request.body)
-    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty', 'rating']
+    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty', 'rating', 'color']
     for field in allowed_fields:
         if field in data:
             setattr(rep, field, data[field])
@@ -178,6 +179,7 @@ def reps_api(request):
             'lng': rep.longitude,
             'home_address': rep.home_address,
             'city': rep.city,
+            'color': rep.color,
         }
         for rep in reps
     ]
@@ -220,6 +222,7 @@ def route_api(request):
             'lat': rep.latitude,
             'lng': rep.longitude,
             'home_address': rep.home_address,
+            'color': rep.color,
         }
 
     return JsonResponse({'rep': rep_data, 'stops': stops})
