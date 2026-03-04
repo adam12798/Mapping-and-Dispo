@@ -647,6 +647,12 @@
                         html += '<div class="appt-details">';
                         if (lead.phone) html += '<span>' + lead.phone + '</span>';
                         if (lead.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.type + '</span>';
+                        html += '<select class="sidebar-assign-select" onchange="previewAssignRep(' + lead.lead_id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
+                        html += '<option value="" selected>Unassigned</option>';
+                        allReps.forEach(function(rep) {
+                            html += '<option value="' + rep.id + '">' + rep.name + '</option>';
+                        });
+                        html += '</select>';
                         html += '</div>';
                         html += '</div>';
                     });
@@ -712,6 +718,37 @@
 
         function panTo(lat, lng) {
             map.setView([lat, lng], 13);
+        }
+
+        function previewAssignRep(leadId, repId) {
+            if (!pendingAssignments || !repId) return;
+            // Move lead from unassigned into the matching rep's assignment group
+            var lead = null;
+            pendingAssignments.unassigned = pendingAssignments.unassigned.filter(function(l) {
+                if (l.lead_id === leadId) { lead = l; return false; }
+                return true;
+            });
+            if (lead) {
+                var found = false;
+                pendingAssignments.assignments.forEach(function(group) {
+                    if (group.rep.id == repId) {
+                        group.stops.push(lead);
+                        found = true;
+                    }
+                });
+                if (!found) {
+                    // Rep not in assignments yet — find rep info and create group
+                    var repInfo = allReps.find(function(r) { return r.id == repId; });
+                    if (repInfo) {
+                        pendingAssignments.assignments.push({
+                            rep: { id: repInfo.id, name: repInfo.name, color: repInfo.color, lat: repInfo.lat, lng: repInfo.lng, home_address: repInfo.home_address },
+                            stops: [lead]
+                        });
+                    }
+                }
+                // Re-render sidebar with updated data
+                updateSidebar(pendingAssignments);
+            }
         }
 
         function assignRep(leadId, repId) {
