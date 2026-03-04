@@ -25,11 +25,10 @@
             </div>
         </div>
 
-        <h3 class="rep-section-title">Active Reps ({{ active_reps|length }})</h3>
         <table class="crm-table">
             <thead>
                 <tr>
-                    <th class="checkbox-col"><input type="checkbox" class="select-all-group" data-group="active"></th>
+                    <th class="checkbox-col"><input type="checkbox" id="select-all"></th>
                     <th>Name</th>
                     <th>Phone Number</th>
                     <th>Home Address</th>
@@ -37,10 +36,11 @@
                     <th>Specialty</th>
                     <th>Rating</th>
                     <th>Color</th>
+                    <th>Status</th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
-            <tbody id="active-reps-body">
+            <tbody id="reps-body">
                 {% for rep in active_reps %}
                 <tr data-id="{{ rep.id }}">
                     <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
@@ -64,35 +64,17 @@
                         </div>
                     </td>
                     <td><input type="color" class="crm-input color-picker" data-field="color" value="{{ rep.color|default:'#2980b9' }}"></td>
-                    <td class="action-col">
-                        <button class="status-btn deactivate-btn" onclick="toggleActive(this, false)" title="Deactivate">&#9660;</button>
-                        <button class="delete-btn row-delete" onclick="deleteRep(this)">X</button>
+                    <td>
+                        <select class="crm-select status-select" data-field="is_active" onchange="toggleActive(this)">
+                            <option value="true" selected>Active</option>
+                            <option value="false">Inactive</option>
+                        </select>
                     </td>
+                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteRep(this)">X</button></td>
                 </tr>
-                {% empty %}
-                <tr class="empty-row-tr"><td colspan="9" class="empty-row">No active reps</td></tr>
                 {% endfor %}
-            </tbody>
-        </table>
-
-        <h3 class="rep-section-title inactive-title">Inactive Reps ({{ inactive_reps|length }})</h3>
-        <table class="crm-table inactive-table">
-            <thead>
-                <tr>
-                    <th class="checkbox-col"><input type="checkbox" class="select-all-group" data-group="inactive"></th>
-                    <th>Name</th>
-                    <th>Phone Number</th>
-                    <th>Home Address</th>
-                    <th>City</th>
-                    <th>Specialty</th>
-                    <th>Rating</th>
-                    <th>Color</th>
-                    <th class="action-col"></th>
-                </tr>
-            </thead>
-            <tbody id="inactive-reps-body">
                 {% for rep in inactive_reps %}
-                <tr data-id="{{ rep.id }}">
+                <tr data-id="{{ rep.id }}" class="inactive-row">
                     <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
                     <td><input type="text" class="crm-input" data-field="name" value="{{ rep.name }}"></td>
                     <td><input type="text" class="crm-input" data-field="phone_number" value="{{ rep.phone_number }}"></td>
@@ -114,13 +96,14 @@
                         </div>
                     </td>
                     <td><input type="color" class="crm-input color-picker" data-field="color" value="{{ rep.color|default:'#2980b9' }}"></td>
-                    <td class="action-col">
-                        <button class="status-btn activate-btn" onclick="toggleActive(this, true)" title="Activate">&#9650;</button>
-                        <button class="delete-btn row-delete" onclick="deleteRep(this)">X</button>
+                    <td>
+                        <select class="crm-select status-select" data-field="is_active" onchange="toggleActive(this)">
+                            <option value="true">Active</option>
+                            <option value="false" selected>Inactive</option>
+                        </select>
                     </td>
+                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteRep(this)">X</button></td>
                 </tr>
-                {% empty %}
-                <tr class="empty-row-tr"><td colspan="9" class="empty-row">No inactive reps</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -128,10 +111,10 @@
 
     <script>
         function showAddRow() {
-            var empty = document.querySelector('#active-reps-body .empty-row-tr');
+            var empty = document.getElementById('empty-row');
             if (empty) empty.remove();
 
-            var tbody = document.getElementById('active-reps-body');
+            var tbody = document.getElementById('reps-body');
             var row = document.createElement('tr');
             row.id = 'new-rep-row';
             row.innerHTML =
@@ -154,6 +137,7 @@
                     '<button class="star" data-value="5" onclick="setNewRating(this)">&#9733;</button>' +
                 '</div></td>' +
                 '<td><input type="color" id="new-color" value="#2980b9"></td>' +
+                '<td><span style="color:#27ae60;font-weight:600;font-size:11px;">Active</span></td>' +
                 '<td class="action-col"><button class="add-btn" style="padding:4px 8px;font-size:12px;" onclick="saveNewRep()">&#10003;</button></td>';
             tbody.insertBefore(row, tbody.firstChild);
             document.getElementById('new-name').focus();
@@ -180,11 +164,16 @@
               .then(function() { location.reload(); });
         }
 
-        function toggleActive(btn, makeActive) {
-            var row = btn.closest('tr');
+        function toggleActive(select) {
+            var row = select.closest('tr');
             var repId = row.dataset.id;
+            var makeActive = select.value === 'true';
             saveField(repId, 'is_active', makeActive);
-            location.reload();
+            if (makeActive) {
+                row.classList.remove('inactive-row');
+            } else {
+                row.classList.add('inactive-row');
+            }
         }
 
         function setRating(btn) {
@@ -246,7 +235,7 @@
                 body: JSON.stringify({ ids: ids })
             }).then(function() {
                 checked.forEach(function(cb) { cb.closest('tr').remove(); });
-                document.querySelectorAll('.select-all-group').forEach(function(cb) { cb.checked = false; });
+                document.getElementById('select-all').checked = false;
                 updateBulkBtn();
             });
         }
@@ -262,13 +251,10 @@
             }
         }
 
-        document.querySelectorAll('.select-all-group').forEach(function(selectAll) {
-            selectAll.addEventListener('change', function() {
-                var checked = this.checked;
-                var table = this.closest('table');
-                table.querySelectorAll('.row-select').forEach(function(cb) { cb.checked = checked; });
-                updateBulkBtn();
-            });
+        document.getElementById('select-all').addEventListener('change', function() {
+            var checked = this.checked;
+            document.querySelectorAll('.row-select').forEach(function(cb) { cb.checked = checked; });
+            updateBulkBtn();
         });
 
         document.addEventListener('change', function(e) {
