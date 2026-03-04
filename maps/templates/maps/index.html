@@ -365,46 +365,69 @@
         // Lead pin colors by appointment type
         var leadTypeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
         var leadsLayer = L.layerGroup().addTo(map);
+        var allLeads = [];
 
-        // Fetch and display leads as pins
-        function loadLeads() {
+        // Fetch all leads once, then filter by date
+        function fetchLeads() {
             fetch('/api/leads/')
                 .then(function(r) { return r.json(); })
                 .then(function(leads) {
-                    leadsLayer.clearLayers();
-                    leads.forEach(function(lead) {
-                        var color = leadTypeColors[lead.appointment_type] || '#e74c3c';
-                        var pinIcon = L.divIcon({
-                            className: 'lead-pin',
-                            html: '<div style="width:16px;height:16px;background:' + color + ';border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>',
-                            iconSize: [16, 16],
-                            iconAnchor: [8, 8]
-                        });
-
-                        L.marker([lead.lat, lead.lng], { icon: pinIcon })
-                            .bindPopup(
-                                '<strong>' + lead.address + '</strong><br>' +
-                                '<em>' + lead.created_at + '</em>'
-                            )
-                            .addTo(leadsLayer);
-                    });
+                    allLeads = leads;
+                    filterLeadsByDate();
                 });
         }
 
-        // Load leads on page load, refresh every 30 seconds
-        loadLeads();
-        setInterval(loadLeads, 30000);
+        function filterLeadsByDate() {
+            leadsLayer.clearLayers();
+            var dateVal = document.getElementById('route-date').value;
+            allLeads.forEach(function(lead) {
+                // Only show leads with appointments on the selected date
+                if (!lead.appointment_datetime) return;
+                // appointment_datetime format: "MM/DD/YYYY HH:MM AM/PM"
+                var parts = lead.appointment_datetime.split(' ');
+                var dateParts = parts[0].split('/');
+                var leadDate = dateParts[2] + '-' + dateParts[0].padStart(2, '0') + '-' + dateParts[1].padStart(2, '0');
+                if (leadDate !== dateVal) return;
+
+                var color = leadTypeColors[lead.appointment_type] || '#e74c3c';
+                var pinIcon = L.divIcon({
+                    className: 'lead-pin',
+                    html: '<div style="width:16px;height:16px;background:' + color + ';border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>',
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8]
+                });
+
+                L.marker([lead.lat, lead.lng], { icon: pinIcon })
+                    .bindPopup(
+                        '<strong>' + lead.address + '</strong><br>' +
+                        (lead.homeowner_name ? lead.homeowner_name + '<br>' : '') +
+                        '<em>' + lead.appointment_datetime + '</em>'
+                    )
+                    .addTo(leadsLayer);
+            });
+        }
 
         // Default date to today
         var today = new Date();
         var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
         document.getElementById('route-date').value = todayStr;
 
+        // Fetch leads after date is set
+        fetchLeads();
+
+        // Re-filter pins when date changes
+        document.getElementById('route-date').addEventListener('change', function() {
+            filterLeadsByDate();
+            routeLayer.clearLayers();
+        });
+
         function setTomorrow() {
             var tmrw = new Date();
             tmrw.setDate(tmrw.getDate() + 1);
             var tmrwStr = tmrw.getFullYear() + '-' + String(tmrw.getMonth() + 1).padStart(2, '0') + '-' + String(tmrw.getDate()).padStart(2, '0');
             document.getElementById('route-date').value = tmrwStr;
+            filterLeadsByDate();
+            routeLayer.clearLayers();
         }
 
         // Route overlay
@@ -486,6 +509,7 @@
             if (!map.hasLayer(leadsLayer)) {
                 map.addLayer(leadsLayer);
             }
+            filterLeadsByDate();
         }
     </script>
 </body>
