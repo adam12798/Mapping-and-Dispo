@@ -421,8 +421,9 @@
         var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
         document.getElementById('route-date').value = todayStr;
 
-        // Fetch leads after date is set
+        // Fetch leads after date is set, open sidebar
         fetchLeads();
+        openSidebar();
 
         // Re-filter pins when date changes
         document.getElementById('route-date').addEventListener('change', function() {
