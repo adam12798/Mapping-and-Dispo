@@ -32,6 +32,7 @@
                     <th>Appt Type</th>
                     <th>Appt Format</th>
                     <th>Appt Date & Time</th>
+                    <th>Status</th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -59,10 +60,11 @@
                         </select>
                     </td>
                     <td><input type="datetime-local" class="crm-input" data-field="appointment_datetime" value="{{ lead.appointment_datetime|date:'Y-m-d\TH:i'|default:'' }}"></td>
+                    <td class="readonly">{% if lead.rep %}<span style="color:#27ae60;font-weight:600;">Assigned</span> <span style="font-size:11px;color:#666;">({{ lead.rep.name }})</span>{% else %}<span style="color:#e74c3c;font-weight:600;">Unassigned</span>{% endif %}</td>
                     <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)">X</button></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="9" class="empty-row">No leads yet</td></tr>
+                <tr><td colspan="10" class="empty-row">No leads yet</td></tr>
                 {% endfor %}
             </tbody>
         </table>

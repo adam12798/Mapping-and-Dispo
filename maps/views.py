@@ -66,7 +66,7 @@ def geocode(address):
 
 
 def crm_view(request):
-    leads = Lead.objects.order_by('-created_at')
+    leads = Lead.objects.select_related('rep').order_by('-created_at')
     return render(request, 'maps/crm.html', {'leads': leads})
 
 
