@@ -822,11 +822,10 @@
                 document.getElementById('assign-status').innerHTML =
                     '<strong style="color:#27ae60;">Confirmed!</strong> ' + data.confirmed + ' appointments saved';
                 document.getElementById('confirm-bar').classList.remove('show');
+                // Keep routes on map — they're already rendered and match the saved assignments
                 pendingAssignments = null;
-                // Refresh leads data
+                // Refresh leads data (sidebar will update but routes stay)
                 fetchLeads();
-                // Show the saved routes
-                showRoute();
             });
         }
 
