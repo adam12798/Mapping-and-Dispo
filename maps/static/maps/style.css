@@ -7,13 +7,13 @@
 html, body {
     height: 100%;
     font-family: 'Courier New', monospace;
-    background: #ffffff;
+    background: #e0fbfc;
 }
 
 /* Nav bar */
 .top-nav {
     display: flex;
-    background: #1a1a1a;
+    background: #293241;
     height: 44px;
     align-items: center;
     padding: 0 16px;
@@ -22,7 +22,7 @@ html, body {
 }
 
 .nav-tab {
-    color: #999;
+    color: #98c1d9;
     text-decoration: none;
     font-family: 'Montserrat', sans-serif;
     font-size: 14px;
@@ -32,12 +32,12 @@ html, body {
 }
 
 .nav-tab:hover {
-    color: #fff;
+    color: #e0fbfc;
 }
 
 .nav-tab.active {
     color: #fff;
-    background: #333;
+    background: #3d5a80;
 }
 
 #map {
@@ -50,6 +50,8 @@ html, body {
     padding: 24px;
     max-width: 100%;
     overflow-x: auto;
+    background: #fff;
+    min-height: calc(100vh - 44px);
 }
 
 .crm-header {
@@ -67,7 +69,7 @@ html, body {
     font-family: 'Montserrat', sans-serif;
     font-size: 20px;
     margin-bottom: 16px;
-    color: #111;
+    color: #293241;
 }
 
 .crm-search {
@@ -78,7 +80,7 @@ html, body {
     font-family: 'Courier New', monospace;
     font-size: 13px;
     padding: 6px 12px;
-    border: 1px solid #ddd;
+    border: 1px solid #98c1d9;
     border-radius: 4px;
     width: 300px;
     background: #fff;
@@ -86,7 +88,7 @@ html, body {
 
 .crm-search input:focus {
     outline: none;
-    border-color: #999;
+    border-color: #3d5a80;
 }
 
 .crm-filters {
@@ -107,7 +109,7 @@ html, body {
     font-family: 'Montserrat', sans-serif;
     font-size: 10px;
     font-weight: 600;
-    color: #888;
+    color: #3d5a80;
     text-transform: uppercase;
 }
 
@@ -116,7 +118,7 @@ html, body {
     font-family: 'Courier New', monospace;
     font-size: 12px;
     padding: 4px 8px;
-    border: 1px solid #ddd;
+    border: 1px solid #98c1d9;
     border-radius: 4px;
     background: #fff;
 }
@@ -126,15 +128,16 @@ html, body {
     font-size: 11px;
     font-weight: 600;
     padding: 5px 12px;
-    border: 1px solid #ccc;
+    border: 1px solid #98c1d9;
     border-radius: 4px;
-    background: #f5f5f5;
+    background: #e0fbfc;
     cursor: pointer;
-    color: #666;
+    color: #3d5a80;
 }
 
 .filter-clear:hover {
-    background: #eee;
+    background: #98c1d9;
+    color: #293241;
 }
 
 .sortable {
@@ -143,12 +146,12 @@ html, body {
 }
 
 .sortable:hover {
-    background: #e8e8e8;
+    background: #3d5a80;
 }
 
 .sort-arrow {
     font-size: 10px;
-    color: #666;
+    color: #98c1d9;
 }
 
 .crm-table {
@@ -159,8 +162,8 @@ html, body {
 }
 
 .crm-table thead th {
-    background: #1a1a1a;
-    color: #fff;
+    background: #293241;
+    color: #e0fbfc;
     padding: 10px 12px;
     text-align: left;
     font-weight: bold;
@@ -169,23 +172,23 @@ html, body {
 
 .crm-table tbody td {
     padding: 6px 8px;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid #98c1d9;
     vertical-align: middle;
 }
 
 .crm-table tbody tr:hover {
-    background: #f5f5f5;
+    background: #e0fbfc;
 }
 
 .crm-table td.readonly {
     padding: 6px 12px;
-    color: #333;
+    color: #293241;
 }
 
 .crm-table td.empty-row {
     text-align: center;
     padding: 24px;
-    color: #999;
+    color: #98c1d9;
 }
 
 .crm-input, .crm-select {
@@ -199,12 +202,12 @@ html, body {
 }
 
 .crm-input:hover, .crm-select:hover {
-    border-color: #ccc;
+    border-color: #98c1d9;
 }
 
 .crm-input:focus, .crm-select:focus {
     outline: none;
-    border-color: #333;
+    border-color: #3d5a80;
     background: #fff;
 }
 
@@ -222,11 +225,11 @@ html, body {
     opacity: 0.5;
 }
 
-.status-select option[value="true"] { color: #27ae60; }
-.status-select option[value="false"] { color: #e74c3c; }
+.status-select option[value="true"] { color: #3d5a80; }
+.status-select option[value="false"] { color: #ee6c4d; }
 
 .delete-btn {
-    background: #e74c3c;
+    background: #ee6c4d;
     color: #fff;
     border: none;
     border-radius: 4px;
@@ -236,7 +239,7 @@ html, body {
 }
 
 .delete-btn:hover {
-    background: #c0392b;
+    background: #d4583a;
 }
 
 .row-delete {
@@ -254,7 +257,7 @@ html, body {
     bottom: 30px;
     left: 10px;
     background: rgba(255, 255, 255, 0.92);
-    border: 1px solid #ccc;
+    border: 1px solid #98c1d9;
     border-radius: 6px;
     padding: 10px 14px;
     z-index: 1000;
@@ -265,14 +268,14 @@ html, body {
 #legend h4 {
     margin: 0 0 6px 0;
     font-size: 13px;
-    color: #333;
+    color: #293241;
 }
 
 .legend-item {
     display: flex;
     align-items: center;
     margin: 4px 0;
-    color: #444;
+    color: #293241;
 }
 
 .legend-color {
@@ -280,19 +283,19 @@ html, body {
     width: 16px;
     height: 12px;
     margin-right: 8px;
-    border: 1px solid #999;
+    border: 1px solid #98c1d9;
     border-radius: 2px;
 }
 
 .city-label {
     background: rgba(255, 255, 255, 0.95);
-    border: 1px solid #ccc;
+    border: 1px solid #98c1d9;
     border-radius: 3px;
     padding: 2px 6px;
     font-family: 'Courier New', monospace;
     font-size: 12px;
     font-weight: bold;
-    color: #111;
+    color: #293241;
     white-space: nowrap;
 }
 
@@ -300,7 +303,7 @@ html, body {
     font-family: 'Courier New', monospace;
     font-size: 12px;
     background: rgba(255, 255, 255, 0.95);
-    border: 1px solid #888;
+    border: 1px solid #3d5a80;
     border-radius: 4px;
     padding: 4px 8px;
 }
@@ -308,7 +311,7 @@ html, body {
 .city-dot {
     width: 8px;
     height: 8px;
-    background: #333;
+    background: #293241;
     border: 2px solid #fff;
     border-radius: 50%;
     box-shadow: 0 0 4px rgba(0,0,0,0.3);
@@ -317,12 +320,12 @@ html, body {
 .city-dot.major {
     width: 12px;
     height: 12px;
-    background: #111;
+    background: #293241;
     border: 2px solid #fff;
 }
 
 .add-btn {
-    background: #27ae60;
+    background: #3d5a80;
     color: #fff;
     border: none;
     border-radius: 4px;
@@ -334,7 +337,7 @@ html, body {
 }
 
 .add-btn:hover {
-    background: #219a52;
+    background: #293241;
 }
 
 .star-rating {
@@ -347,17 +350,17 @@ html, body {
     border: none;
     cursor: pointer;
     font-size: 18px;
-    color: #ccc;
+    color: #98c1d9;
     padding: 0 1px;
     line-height: 1;
 }
 
 .star.filled {
-    color: #f1c40f;
+    color: #ee6c4d;
 }
 
 .star:hover {
-    color: #f39c12;
+    color: #ee6c4d;
 }
 
 .route-panel {
@@ -365,7 +368,7 @@ html, body {
     bottom: 30px;
     left: 10px;
     background: rgba(255, 255, 255, 0.95);
-    border: 1px solid #ccc;
+    border: 1px solid #98c1d9;
     border-radius: 6px;
     padding: 10px 14px;
     z-index: 1000;
@@ -377,13 +380,13 @@ html, body {
     margin: 0 0 8px 0;
     font-size: 13px;
     font-weight: 700;
-    color: #333;
+    color: #293241;
 }
 
 .route-panel input,
 .route-panel select {
     padding: 5px 8px;
-    border: 1px solid #ccc;
+    border: 1px solid #98c1d9;
     border-radius: 4px;
     font-family: 'Montserrat', sans-serif;
     font-size: 12px;
@@ -394,7 +397,7 @@ html, body {
 .route-panel button {
     width: 100%;
     padding: 6px 12px;
-    background: #2980b9;
+    background: #3d5a80;
     color: #fff;
     border: none;
     border-radius: 4px;
@@ -405,7 +408,7 @@ html, body {
 }
 
 .route-panel button:hover {
-    background: #2471a3;
+    background: #293241;
 }
 
 .route-marker {
@@ -414,8 +417,8 @@ html, body {
 }
 
 .tomorrow-btn {
-    background: #7f8c8d;
-    color: #fff;
+    background: #98c1d9;
+    color: #293241;
     border: none;
     border-radius: 4px;
     padding: 6px 12px;
@@ -426,14 +429,15 @@ html, body {
 }
 
 .tomorrow-btn:hover {
-    background: #6c7a7b;
+    background: #3d5a80;
+    color: #fff;
 }
 
 .color-picker {
     width: 36px;
     height: 30px;
     padding: 1px;
-    border: 1px solid #ccc;
+    border: 1px solid #98c1d9;
     cursor: pointer;
 }
 
@@ -459,7 +463,7 @@ html, body {
     width: 320px;
     height: 100%;
     background: #fff;
-    border-left: 1px solid #ddd;
+    border-left: 1px solid #98c1d9;
     overflow-y: auto;
     font-family: 'Montserrat', sans-serif;
     font-size: 12px;
@@ -477,8 +481,8 @@ html, body {
     top: 50%;
     transform: translateY(-50%);
     z-index: 1001;
-    background: #1a1a1a;
-    color: #fff;
+    background: #293241;
+    color: #e0fbfc;
     border: none;
     border-radius: 4px 0 0 4px;
     padding: 12px 6px;
@@ -494,8 +498,8 @@ html, body {
 
 .sidebar-header {
     padding: 12px 14px;
-    background: #1a1a1a;
-    color: #fff;
+    background: #293241;
+    color: #e0fbfc;
     font-weight: 700;
     font-size: 13px;
     position: sticky;
@@ -504,7 +508,7 @@ html, body {
 }
 
 .sidebar-group {
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid #e0fbfc;
     padding: 8px 0;
 }
 
@@ -512,7 +516,7 @@ html, body {
     padding: 6px 14px;
     font-weight: 700;
     font-size: 12px;
-    color: #555;
+    color: #3d5a80;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -523,7 +527,7 @@ html, body {
     height: 10px;
     border-radius: 50%;
     display: inline-block;
-    border: 1px solid #ccc;
+    border: 1px solid #98c1d9;
 }
 
 .sidebar-row {
@@ -536,18 +540,18 @@ html, body {
 }
 
 .sidebar-row:hover {
-    background: #f5f5f5;
+    background: #e0fbfc;
 }
 
 .sidebar-row .appt-name {
     font-weight: 600;
     font-size: 12px;
-    color: #111;
+    color: #293241;
 }
 
 .sidebar-row .appt-details {
     font-size: 11px;
-    color: #666;
+    color: #3d5a80;
     display: flex;
     gap: 8px;
     align-items: center;
@@ -566,7 +570,7 @@ html, body {
 .sidebar-assign-select {
     font-size: 10px;
     padding: 1px 4px;
-    border: 1px solid #ccc;
+    border: 1px solid #98c1d9;
     border-radius: 3px;
     background: #fff;
     cursor: pointer;
@@ -576,7 +580,7 @@ html, body {
 .sidebar-empty {
     padding: 24px 14px;
     text-align: center;
-    color: #999;
+    color: #98c1d9;
     font-size: 12px;
 }
 
@@ -592,19 +596,19 @@ html, body {
 }
 
 .confirm-btn {
-    background: #27ae60 !important;
+    background: #3d5a80 !important;
     flex: 1;
 }
 
 .confirm-btn:hover {
-    background: #219a52 !important;
+    background: #293241 !important;
 }
 
 .redo-btn {
-    background: #e74c3c !important;
+    background: #ee6c4d !important;
     flex: 1;
 }
 
 .redo-btn:hover {
-    background: #c0392b !important;
+    background: #d4583a !important;
 }
