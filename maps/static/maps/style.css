@@ -274,8 +274,8 @@ html, body {
 
 .route-panel {
     position: absolute;
-    top: 54px;
-    right: 10px;
+    bottom: 30px;
+    left: 10px;
     background: rgba(255, 255, 255, 0.95);
     border: 1px solid #ccc;
     border-radius: 6px;
