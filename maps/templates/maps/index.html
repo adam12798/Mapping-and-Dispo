@@ -18,6 +18,11 @@
         <a href="/reps/" class="nav-tab">Reps</a>
     </nav>
     <div id="map"></div>
+    <div class="route-panel">
+        <h4>Route Planner</h4>
+        <input type="date" id="route-date" />
+        <button onclick="showRoute()">Show Route</button>
+    </div>
     <div id="legend">
         <h4>Electric Providers</h4>
         <div class="legend-item"><span class="legend-color" style="background:#9adeca"></span> Eversource</div>
@@ -378,6 +383,77 @@
         // Load leads on page load, refresh every 30 seconds
         loadLeads();
         setInterval(loadLeads, 30000);
+
+        // Route overlay
+        var routeLayer = L.layerGroup().addTo(map);
+
+        function showRoute() {
+            var dateVal = document.getElementById('route-date').value;
+            if (!dateVal) { alert('Pick a date'); return; }
+
+            routeLayer.clearLayers();
+
+            fetch('/api/route/?date=' + dateVal)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.stops || data.stops.length === 0) {
+                        alert('No appointments on this date');
+                        return;
+                    }
+
+                    var points = [];
+
+                    // Add rep home as start
+                    if (data.rep && data.rep.lat && data.rep.lng) {
+                        var homeIcon = L.divIcon({
+                            className: 'route-marker home',
+                            html: 'H',
+                            iconSize: [24, 24],
+                            iconAnchor: [12, 12]
+                        });
+                        L.marker([data.rep.lat, data.rep.lng], { icon: homeIcon })
+                            .bindPopup('<strong>' + data.rep.name + ' (Home)</strong><br>' + data.rep.home_address)
+                            .addTo(routeLayer);
+                        points.push([data.rep.lat, data.rep.lng]);
+                    }
+
+                    // Add numbered stops
+                    data.stops.forEach(function(stop, i) {
+                        var stopIcon = L.divIcon({
+                            className: 'route-marker',
+                            html: '' + (i + 1),
+                            iconSize: [24, 24],
+                            iconAnchor: [12, 12]
+                        });
+                        L.marker([stop.lat, stop.lng], { icon: stopIcon })
+                            .bindPopup(
+                                '<strong>' + (i + 1) + '. ' + stop.name + '</strong><br>' +
+                                stop.address + (stop.city ? ', ' + stop.city : '') + '<br>' +
+                                '<em>' + stop.time + '</em>'
+                            )
+                            .addTo(routeLayer);
+                        points.push([stop.lat, stop.lng]);
+                    });
+
+                    // Add rep home as end
+                    if (data.rep && data.rep.lat && data.rep.lng) {
+                        points.push([data.rep.lat, data.rep.lng]);
+                    }
+
+                    // Draw polyline
+                    if (points.length >= 2) {
+                        L.polyline(points, {
+                            color: '#2980b9',
+                            weight: 4,
+                            opacity: 0.8,
+                            dashArray: '10, 8'
+                        }).addTo(routeLayer);
+
+                        // Fit map to route
+                        map.fitBounds(L.latLngBounds(points), { padding: [50, 50] });
+                    }
+                });
+        }
     </script>
 </body>
 </html>

@@ -3,6 +3,8 @@ import re
 import urllib.parse
 import urllib.request
 
+from datetime import datetime
+
 from dateutil import parser as dateparser
 
 from django.http import HttpResponse, JsonResponse
@@ -163,6 +165,64 @@ def reps_bulk_delete(request):
     ids = data.get('ids', [])
     Rep.objects.filter(id__in=ids).delete()
     return JsonResponse({'status': 'ok'})
+
+
+def reps_api(request):
+    """Return all reps as JSON."""
+    reps = Rep.objects.order_by('-rating', 'name')
+    data = [
+        {
+            'id': rep.id,
+            'name': rep.name,
+            'lat': rep.latitude,
+            'lng': rep.longitude,
+            'home_address': rep.home_address,
+            'city': rep.city,
+        }
+        for rep in reps
+    ]
+    return JsonResponse(data, safe=False)
+
+
+def route_api(request):
+    """Return ordered route stops for a given date."""
+    date_str = request.GET.get('date', '')
+    if not date_str:
+        return JsonResponse({'error': 'date parameter required'}, status=400)
+    try:
+        date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format, use YYYY-MM-DD'}, status=400)
+
+    leads = Lead.objects.filter(
+        appointment_datetime__date=date,
+        latitude__isnull=False,
+    ).order_by('appointment_datetime')
+
+    stops = [
+        {
+            'name': lead.homeowner_name or lead.address,
+            'address': lead.address,
+            'city': lead.city,
+            'time': lead.appointment_datetime.strftime('%I:%M %p'),
+            'lat': lead.latitude,
+            'lng': lead.longitude,
+        }
+        for lead in leads
+    ]
+
+    # Get the highest-rated rep with coordinates as the route's home base
+    rep_data = None
+    rep = Rep.objects.filter(latitude__isnull=False).order_by('-rating').first()
+    if rep:
+        rep_data = {
+            'name': rep.name,
+            'lat': rep.latitude,
+            'lng': rep.longitude,
+            'home_address': rep.home_address,
+        }
+
+    return JsonResponse({'rep': rep_data, 'stops': stops})
 
 
 def parse_sms_fields(body):
