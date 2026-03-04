@@ -599,7 +599,6 @@
             if (assignData && assignData.assignments && assignData.assignments.length > 0) {
                 assignData.assignments.forEach(function(group) {
                     var rep = group.rep;
-                    // Sort stops by time
                     var sortedStops = group.stops.slice().sort(function(a, b) {
                         var timeA = a.estimated_arrival || a.time || '';
                         var timeB = b.estimated_arrival || b.time || '';
@@ -650,7 +649,6 @@
                     return leadDate === dateVal;
                 });
 
-                // Sort by appointment time
                 dayLeads.sort(function(a, b) {
                     return (a.appointment_datetime || '').localeCompare(b.appointment_datetime || '');
                 });
