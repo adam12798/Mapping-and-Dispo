@@ -451,7 +451,6 @@
             if (!dateVal) { alert('Pick a date'); return; }
 
             routeLayer.clearLayers();
-            map.removeLayer(leadsLayer);
 
             fetch('/api/route/?date=' + dateVal)
                 .then(function(r) { return r.json(); })
@@ -725,7 +724,6 @@
 
         function renderPreviewRoutes(data) {
             routeLayer.clearLayers();
-            map.removeLayer(leadsLayer);
 
             var allPoints = [];
             var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
@@ -841,10 +839,6 @@
 
         function clearRoute() {
             routeLayer.clearLayers();
-            if (!map.hasLayer(leadsLayer)) {
-                map.addLayer(leadsLayer);
-            }
-            filterLeadsByDate();
         }
     </script>
 </body>
