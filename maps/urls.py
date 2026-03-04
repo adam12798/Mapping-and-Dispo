@@ -16,4 +16,5 @@ urlpatterns = [
     path('api/route/', views.route_api, name='route_api'),
     path('api/auto-assign/', views.auto_assign_api, name='auto_assign'),
     path('api/clear-assignments/', views.clear_assignments_api, name='clear_assignments'),
+    path('api/confirm-assignments/', views.confirm_assignments_api, name='confirm_assignments'),
 ]

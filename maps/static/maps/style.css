@@ -42,7 +42,7 @@ html, body {
 
 #map {
     width: 100%;
-    height: calc(100vh - 44px);
+    height: 100%;
 }
 
 /* CRM */
@@ -352,4 +352,161 @@ html, body {
 .lead-pin {
     background: transparent;
     border: none;
+}
+
+/* Map wrapper for sidebar layout */
+.map-wrapper {
+    display: flex;
+    height: calc(100vh - 44px);
+    position: relative;
+}
+
+.map-wrapper #map {
+    flex: 1;
+    height: 100%;
+}
+
+/* Right sidebar */
+.sidebar {
+    width: 320px;
+    height: 100%;
+    background: #fff;
+    border-left: 1px solid #ddd;
+    overflow-y: auto;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 12px;
+    display: none;
+    flex-shrink: 0;
+}
+
+.sidebar.open {
+    display: block;
+}
+
+.sidebar-toggle {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1001;
+    background: #1a1a1a;
+    color: #fff;
+    border: none;
+    border-radius: 4px 0 0 4px;
+    padding: 12px 6px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: right 0.2s;
+}
+
+.sidebar.open ~ .sidebar-toggle {
+    right: 320px;
+}
+
+.sidebar-header {
+    padding: 12px 14px;
+    background: #1a1a1a;
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.sidebar-group {
+    border-bottom: 1px solid #eee;
+    padding: 8px 0;
+}
+
+.sidebar-group-title {
+    padding: 6px 14px;
+    font-weight: 700;
+    font-size: 12px;
+    color: #555;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sidebar-group-title .rep-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 1px solid #ccc;
+}
+
+.sidebar-row {
+    padding: 6px 14px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-left: 3px solid transparent;
+}
+
+.sidebar-row:hover {
+    background: #f5f5f5;
+}
+
+.sidebar-row .appt-name {
+    font-weight: 600;
+    font-size: 12px;
+    color: #111;
+}
+
+.sidebar-row .appt-details {
+    font-size: 11px;
+    color: #666;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.sidebar-row .appt-type-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #fff;
+    text-transform: uppercase;
+}
+
+.sidebar-empty {
+    padding: 24px 14px;
+    text-align: center;
+    color: #999;
+    font-size: 12px;
+}
+
+/* Confirm bar */
+.confirm-bar {
+    display: none;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.confirm-bar.show {
+    display: flex;
+}
+
+.confirm-btn {
+    background: #27ae60 !important;
+    flex: 1;
+}
+
+.confirm-btn:hover {
+    background: #219a52 !important;
+}
+
+.redo-btn {
+    background: #e74c3c !important;
+    flex: 1;
+}
+
+.redo-btn:hover {
+    background: #c0392b !important;
 }

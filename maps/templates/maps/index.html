@@ -17,7 +17,14 @@
         <a href="/crm/" class="nav-tab">CRM</a>
         <a href="/reps/" class="nav-tab">Reps</a>
     </nav>
+    <div class="map-wrapper">
     <div id="map"></div>
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">Appointments</div>
+        <div id="sidebar-content"><div class="sidebar-empty">Select a date to see appointments</div></div>
+    </div>
+    <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()">&#9664;</button>
+    </div>
     <div class="route-panel">
         <h4>Route Planner</h4>
         <input type="date" id="route-date" />
@@ -30,6 +37,10 @@
         <button class="add-btn" style="width:100%;font-size:12px;padding:6px 12px;" onclick="autoAssign()">Auto-Assign</button>
         <button class="tomorrow-btn" style="margin-top:4px;width:100%;" onclick="clearAssignments()">Clear Assignments</button>
         <div id="assign-status" style="margin-top:6px;font-size:11px;color:#666;"></div>
+        <div class="confirm-bar" id="confirm-bar">
+            <button class="confirm-btn" onclick="confirmAssignments()">Confirm</button>
+            <button class="redo-btn" onclick="redoAssignments()">Redo</button>
+        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -371,6 +382,7 @@
                 .then(function(leads) {
                     allLeads = leads;
                     filterLeadsByDate();
+                    updateSidebar(null);
                 });
         }
 
@@ -416,6 +428,10 @@
         document.getElementById('route-date').addEventListener('change', function() {
             filterLeadsByDate();
             routeLayer.clearLayers();
+            pendingAssignments = null;
+            document.getElementById('confirm-bar').classList.remove('show');
+            document.getElementById('assign-status').textContent = '';
+            updateSidebar(null);
         });
 
         function setTomorrow() {
@@ -552,10 +568,110 @@
                 });
         }
 
+        // Sidebar
+        var sidebarOpen = false;
+        var pendingAssignments = null; // holds proposed assignments before confirm
+
+        function toggleSidebar() {
+            var sidebar = document.getElementById('sidebar');
+            var toggle = document.getElementById('sidebar-toggle');
+            sidebarOpen = !sidebarOpen;
+            if (sidebarOpen) {
+                sidebar.classList.add('open');
+                toggle.innerHTML = '&#9654;';
+            } else {
+                sidebar.classList.remove('open');
+                toggle.innerHTML = '&#9664;';
+            }
+            setTimeout(function() { map.invalidateSize(); }, 50);
+        }
+
+        function openSidebar() {
+            if (!sidebarOpen) toggleSidebar();
+        }
+
+        var typeColorMap = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+
+        function updateSidebar(assignData) {
+            var container = document.getElementById('sidebar-content');
+            var html = '';
+
+            if (assignData && assignData.assignments && assignData.assignments.length > 0) {
+                assignData.assignments.forEach(function(group) {
+                    var rep = group.rep;
+                    html += '<div class="sidebar-group">';
+                    html += '<div class="sidebar-group-title"><span class="rep-dot" style="background:' + (rep.color || '#2980b9') + '"></span>' + rep.name + ' (' + group.stops.length + ')</div>';
+                    group.stops.forEach(function(stop) {
+                        var badgeColor = typeColorMap[stop.type] || '#999';
+                        html += '<div class="sidebar-row" style="border-left-color:' + (rep.color || '#2980b9') + '" onclick="panTo(' + stop.lat + ',' + stop.lng + ')">';
+                        html += '<div class="appt-name">' + (stop.name || 'Unknown') + '</div>';
+                        html += '<div class="appt-details">';
+                        if (stop.phone) html += '<span>' + stop.phone + '</span>';
+                        if (stop.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + stop.type + '</span>';
+                        if (stop.estimated_arrival) html += '<span>' + stop.estimated_arrival + '</span>';
+                        else if (stop.time) html += '<span>' + stop.time + '</span>';
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                });
+
+                if (assignData.unassigned && assignData.unassigned.length > 0) {
+                    html += '<div class="sidebar-group">';
+                    html += '<div class="sidebar-group-title"><span class="rep-dot" style="background:#ccc"></span>Unassigned (' + assignData.unassigned.length + ')</div>';
+                    assignData.unassigned.forEach(function(lead) {
+                        var badgeColor = typeColorMap[lead.type] || '#999';
+                        html += '<div class="sidebar-row" style="border-left-color:#ccc">';
+                        html += '<div class="appt-name">' + (lead.name || 'Unknown') + '</div>';
+                        html += '<div class="appt-details">';
+                        if (lead.phone) html += '<span>' + lead.phone + '</span>';
+                        if (lead.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.type + '</span>';
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+            } else {
+                // Show leads from allLeads for this date
+                var dateVal = document.getElementById('route-date').value;
+                var dayLeads = allLeads.filter(function(lead) {
+                    if (!lead.appointment_datetime) return false;
+                    var parts = lead.appointment_datetime.split(' ');
+                    var dateParts = parts[0].split('/');
+                    var leadDate = dateParts[2] + '-' + dateParts[0].padStart(2, '0') + '-' + dateParts[1].padStart(2, '0');
+                    return leadDate === dateVal;
+                });
+
+                if (dayLeads.length === 0) {
+                    html = '<div class="sidebar-empty">No appointments on this date</div>';
+                } else {
+                    html += '<div class="sidebar-group">';
+                    html += '<div class="sidebar-group-title">All Appointments (' + dayLeads.length + ')</div>';
+                    dayLeads.forEach(function(lead) {
+                        var badgeColor = typeColorMap[lead.appointment_type] || '#999';
+                        html += '<div class="sidebar-row" onclick="panTo(' + lead.lat + ',' + lead.lng + ')">';
+                        html += '<div class="appt-name">' + (lead.homeowner_name || lead.address) + '</div>';
+                        html += '<div class="appt-details">';
+                        if (lead.phone_number) html += '<span>' + lead.phone_number + '</span>';
+                        if (lead.appointment_type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.appointment_type + '</span>';
+                        if (lead.rep_name) html += '<span>Rep: ' + lead.rep_name + '</span>';
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+            }
+
+            container.innerHTML = html;
+        }
+
+        function panTo(lat, lng) {
+            map.setView([lat, lng], 13);
+        }
+
         function autoAssign() {
             var dateVal = document.getElementById('route-date').value;
             if (!dateVal) { alert('Pick a date first'); return; }
-            if (!confirm('Auto-assign appointments for ' + dateVal + '?')) return;
 
             var statusEl = document.getElementById('assign-status');
             statusEl.textContent = 'Assigning...';
@@ -578,8 +694,116 @@
                     statusEl.innerHTML += '<br><span style="color:#e74c3c;">' +
                         s.unassigned + ' unassigned</span>';
                 }
+                statusEl.innerHTML += '<br><em style="font-size:10px;">Preview — click Confirm to save</em>';
+
+                // Store pending assignments for confirm
+                pendingAssignments = data;
+
+                // Show confirm/redo buttons
+                document.getElementById('confirm-bar').classList.add('show');
+
+                // Show routes preview on map
+                renderPreviewRoutes(data);
+
+                // Update sidebar with proposed assignments
+                updateSidebar(data);
+                openSidebar();
+            });
+        }
+
+        function renderPreviewRoutes(data) {
+            routeLayer.clearLayers();
+            map.removeLayer(leadsLayer);
+
+            var allPoints = [];
+            var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+
+            data.assignments.forEach(function(assignment) {
+                var rep = assignment.rep;
+                var repColor = rep.color || '#2980b9';
+                var points = [];
+
+                if (rep.lat && rep.lng) {
+                    var homeIcon = L.divIcon({
+                        className: 'route-marker',
+                        html: '<div style="background:' + repColor + ';width:28px;height:28px;border-radius:50%;border:3px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;box-shadow:0 0 6px rgba(0,0,0,0.4);">&#9733;</div>',
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    });
+                    L.marker([rep.lat, rep.lng], { icon: homeIcon })
+                        .bindPopup('<strong>' + rep.name + ' (Home)</strong><br>' + rep.home_address)
+                        .addTo(routeLayer);
+                    points.push([rep.lat, rep.lng]);
+                }
+
+                assignment.stops.forEach(function(stop, i) {
+                    var pinColor = typeColors[stop.type] || repColor;
+                    var stopIcon = L.divIcon({
+                        className: 'route-marker',
+                        html: '<div style="background:' + pinColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">' + (i + 1) + '</div>',
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    });
+                    var typeLabel = stop.type ? stop.type.charAt(0).toUpperCase() + stop.type.slice(1) : '';
+                    L.marker([stop.lat, stop.lng], { icon: stopIcon })
+                        .bindPopup(
+                            '<strong>' + rep.name + ' #' + (i + 1) + ': ' + stop.name + '</strong><br>' +
+                            stop.address + (stop.city ? ', ' + stop.city : '') + '<br>' +
+                            (typeLabel ? '<em>' + typeLabel + '</em> &mdash; ' : '') +
+                            '<em>' + stop.estimated_arrival + '</em>'
+                        )
+                        .addTo(routeLayer);
+                    points.push([stop.lat, stop.lng]);
+                });
+
+                if (points.length >= 2) {
+                    L.polyline(points, {
+                        color: repColor, weight: 4, opacity: 0.8, dashArray: '10, 8'
+                    }).addTo(routeLayer);
+                }
+                allPoints = allPoints.concat(points);
+            });
+
+            if (allPoints.length >= 2) {
+                map.fitBounds(L.latLngBounds(allPoints), { padding: [50, 50] });
+            }
+        }
+
+        function confirmAssignments() {
+            if (!pendingAssignments) return;
+
+            // Build lead_id -> rep_id mapping
+            var mapping = {};
+            pendingAssignments.assignments.forEach(function(group) {
+                group.stops.forEach(function(stop) {
+                    mapping[stop.lead_id] = group.rep.id;
+                });
+            });
+
+            fetch('/api/confirm-assignments/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assignments: mapping })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                document.getElementById('assign-status').innerHTML =
+                    '<strong style="color:#27ae60;">Confirmed!</strong> ' + data.confirmed + ' appointments saved';
+                document.getElementById('confirm-bar').classList.remove('show');
+                pendingAssignments = null;
+                // Refresh leads data
+                fetchLeads();
+                // Show the saved routes
                 showRoute();
             });
+        }
+
+        function redoAssignments() {
+            pendingAssignments = null;
+            document.getElementById('confirm-bar').classList.remove('show');
+            document.getElementById('assign-status').textContent = '';
+            clearRoute();
+            updateSidebar(null);
         }
 
         function clearAssignments() {
@@ -595,7 +819,11 @@
             .then(function(r) { return r.json(); })
             .then(function() {
                 document.getElementById('assign-status').textContent = 'Assignments cleared';
+                document.getElementById('confirm-bar').classList.remove('show');
+                pendingAssignments = null;
                 clearRoute();
+                fetchLeads();
+                updateSidebar(null);
             });
         }
 

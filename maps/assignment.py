@@ -76,7 +76,7 @@ def compute_schedule(rep, ordered_leads, target_date):
     return schedule
 
 
-def auto_assign_leads(target_date):
+def auto_assign_leads(target_date, save=True):
     leads = list(Lead.objects.filter(
         appointment_datetime__date=target_date,
         latitude__isnull=False,
@@ -156,12 +156,12 @@ def auto_assign_leads(target_date):
                 'stops': schedule,
             })
 
-    # Save assignments to DB
-    for assignment in assignments:
-        rep = assignment['rep']
-        for lead, arrival_time in assignment['stops']:
-            lead.rep = rep
-            lead.save(update_fields=['rep_id'])
+    if save:
+        for assignment in assignments:
+            rep = assignment['rep']
+            for lead, arrival_time in assignment['stops']:
+                lead.rep = rep
+                lead.save(update_fields=['rep_id'])
 
     return {
         'assignments': assignments,

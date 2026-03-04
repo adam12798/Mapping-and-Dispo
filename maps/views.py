@@ -282,7 +282,7 @@ def auto_assign_api(request):
     except ValueError:
         return JsonResponse({'error': 'Invalid date format'}, status=400)
 
-    result = auto_assign_leads(target_date)
+    result = auto_assign_leads(target_date, save=False)
 
     assignments_data = []
     for assignment in result['assignments']:
@@ -295,6 +295,7 @@ def auto_assign_api(request):
                 'address': lead.address,
                 'city': lead.city,
                 'type': lead.appointment_type,
+                'phone': lead.phone_number,
                 'lat': lead.latitude,
                 'lng': lead.longitude,
                 'estimated_arrival': arrival_time.strftime('%I:%M %p'),
@@ -317,6 +318,7 @@ def auto_assign_api(request):
             'name': l.homeowner_name or l.address,
             'address': l.address,
             'type': l.appointment_type,
+            'phone': l.phone_number,
         }
         for l in result['unassigned']
     ]
@@ -354,6 +356,23 @@ def clear_assignments_api(request):
     ).update(rep=None)
 
     return JsonResponse({'status': 'ok', 'cleared': count})
+
+
+@csrf_exempt
+@require_POST
+def confirm_assignments_api(request):
+    """Confirm proposed assignments by saving lead-to-rep mappings."""
+    data = json.loads(request.body)
+    assignments = data.get('assignments', {})
+    if not assignments:
+        return JsonResponse({'error': 'No assignments provided'}, status=400)
+
+    count = 0
+    for lead_id_str, rep_id in assignments.items():
+        Lead.objects.filter(id=int(lead_id_str)).update(rep_id=rep_id)
+        count += 1
+
+    return JsonResponse({'status': 'ok', 'confirmed': count})
 
 
 def parse_sms_fields(body):
