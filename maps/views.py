@@ -186,8 +186,8 @@ def reps_bulk_delete(request):
 
 
 def reps_api(request):
-    """Return all reps as JSON."""
-    reps = Rep.objects.order_by('-rating', 'name')
+    """Return all active reps as JSON."""
+    reps = Rep.objects.filter(is_active=True).order_by('-rating', 'name')
     data = [
         {
             'id': rep.id,
