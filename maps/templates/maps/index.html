@@ -428,11 +428,10 @@
         // Re-filter pins when date changes
         document.getElementById('route-date').addEventListener('change', function() {
             filterLeadsByDate();
-            routeLayer.clearLayers();
-            pendingAssignments = null;
-            document.getElementById('confirm-bar').classList.remove('show');
-            document.getElementById('assign-status').textContent = '';
-            updateSidebar(null);
+            if (!pendingAssignments) {
+                routeLayer.clearLayers();
+                updateSidebar(null);
+            }
         });
 
         function setTomorrow() {
@@ -448,6 +447,11 @@
         var routeLayer = L.layerGroup().addTo(map);
 
         function showRoute() {
+            // If we have pending (unconfirmed) assignments, show those instead
+            if (pendingAssignments) {
+                renderPreviewRoutes(pendingAssignments);
+                return;
+            }
             var dateVal = document.getElementById('route-date').value;
             if (!dateVal) { alert('Pick a date'); return; }
 
