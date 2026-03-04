@@ -21,6 +21,47 @@
             <h2>Leads</h2>
             <button id="bulk-delete-btn" class="delete-btn bulk-delete" style="display:none;" onclick="bulkDelete()">Delete Selected</button>
         </div>
+        <div class="crm-filters">
+            <div class="filter-group">
+                <label>Date</label>
+                <input type="date" id="filter-date" onchange="filterTable()">
+            </div>
+            <div class="filter-group">
+                <label>Product Type</label>
+                <select id="filter-type" onchange="filterTable()">
+                    <option value="">All</option>
+                    <option value="solar">Solar</option>
+                    <option value="hvac">HVAC</option>
+                    <option value="both">Both</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Meeting Type</label>
+                <select id="filter-format" onchange="filterTable()">
+                    <option value="">All</option>
+                    <option value="in_person">In Person</option>
+                    <option value="virtual">Virtual</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Rep</label>
+                <select id="filter-rep" onchange="filterTable()">
+                    <option value="">All</option>
+                    {% for rep in reps %}
+                    <option value="{{ rep.id }}">{{ rep.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Status</label>
+                <select id="filter-status" onchange="filterTable()">
+                    <option value="">All</option>
+                    <option value="assigned">Assigned</option>
+                    <option value="unassigned">Unassigned</option>
+                </select>
+            </div>
+            <button class="filter-clear" onclick="clearFilters()">Clear</button>
+        </div>
         <table class="crm-table">
             <thead>
                 <tr>
@@ -135,6 +176,64 @@
         document.addEventListener('change', function(e) {
             if (e.target.classList.contains('row-select')) updateBulkBtn();
         });
+
+        // Filtering
+        function filterTable() {
+            var fDate = document.getElementById('filter-date').value;
+            var fType = document.getElementById('filter-type').value;
+            var fFormat = document.getElementById('filter-format').value;
+            var fRep = document.getElementById('filter-rep').value;
+            var fStatus = document.getElementById('filter-status').value;
+
+            document.querySelectorAll('tbody tr').forEach(function(row) {
+                if (!row.dataset.id) return; // skip empty row
+                var show = true;
+
+                // Date filter — compare YYYY-MM-DD portion of datetime-local input
+                if (fDate) {
+                    var dtInput = row.querySelector('[data-field="appointment_datetime"]');
+                    var dtVal = dtInput ? dtInput.value : '';
+                    if (!dtVal || dtVal.substring(0, 10) !== fDate) show = false;
+                }
+
+                // Product type
+                if (fType) {
+                    var typeSelect = row.querySelector('[data-field="appointment_type"]');
+                    if (!typeSelect || typeSelect.value !== fType) show = false;
+                }
+
+                // Meeting type
+                if (fFormat) {
+                    var fmtSelect = row.querySelector('[data-field="appointment_format"]');
+                    if (!fmtSelect || fmtSelect.value !== fFormat) show = false;
+                }
+
+                // Rep
+                if (fRep) {
+                    var repSelect = row.querySelector('[data-field="rep_id"]');
+                    if (!repSelect || repSelect.value !== fRep) show = false;
+                }
+
+                // Status
+                if (fStatus) {
+                    var repSelect2 = row.querySelector('[data-field="rep_id"]');
+                    var repVal = repSelect2 ? repSelect2.value : '';
+                    if (fStatus === 'assigned' && !repVal) show = false;
+                    if (fStatus === 'unassigned' && repVal) show = false;
+                }
+
+                row.style.display = show ? '' : 'none';
+            });
+        }
+
+        function clearFilters() {
+            document.getElementById('filter-date').value = '';
+            document.getElementById('filter-type').value = '';
+            document.getElementById('filter-format').value = '';
+            document.getElementById('filter-rep').value = '';
+            document.getElementById('filter-status').value = '';
+            filterTable();
+        }
 
         // Field editing
         document.querySelectorAll('.crm-input, .crm-select').forEach(function(el) {
