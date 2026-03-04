@@ -6,8 +6,8 @@ APPOINTMENT_DURATION = 90  # minutes (1.5 hours buffer)
 WORK_START_HOUR = 9        # 9:00 AM
 WORK_END_HOUR = 20         # 8:00 PM
 AVG_SPEED_MPH = 30         # average MA driving speed
-TARGET_PER_REP = 4
-MAX_PER_REP = 6
+TARGET_PER_REP = 3
+MAX_PER_REP = 5
 
 
 def haversine_miles(lat1, lon1, lat2, lon2):
@@ -137,6 +137,14 @@ def auto_assign_leads(target_date, save=True):
 
     # Greedy assignment: each lead to nearest compatible rep under capacity
     # Locked leads count toward capacity
+    # Balance load among same-rated reps to avoid burnout
+    def get_min_load_for_rating(rating):
+        """Find the minimum cluster size among reps with this rating."""
+        return min(
+            (len(clusters[r.id]) for r in reps if r.rating == rating),
+            default=0,
+        )
+
     for lead in remaining_leads:
         best_rep_id = None
         best_dist = float('inf')
@@ -151,6 +159,12 @@ def auto_assign_leads(target_date, save=True):
             # Soft penalty for reps already at target capacity
             if len(clusters[rep.id]) >= TARGET_PER_REP:
                 dist *= 1.5
+            # Load-balancing: penalize reps that have more leads than
+            # the least-loaded rep at the same rating tier
+            min_load = get_min_load_for_rating(rep.rating)
+            excess = len(clusters[rep.id]) - min_load
+            if excess > 0:
+                dist *= (1.0 + 0.3 * excess)
             if dist < best_dist:
                 best_dist = dist
                 best_rep_id = rep.id
