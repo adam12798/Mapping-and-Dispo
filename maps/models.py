@@ -11,6 +11,15 @@ class Lead(models.Model):
         ('in_person', 'In Person'),
         ('virtual', 'Virtual'),
     ]
+    DISPOSITION_CHOICES = [
+        ('sale', 'Sale'),
+        ('no_sale', 'No Sale'),
+        ('credit_fail', 'Credit Fail'),
+        ('cancel_door', 'Cancel at Door'),
+        ('cpfu', 'CPFU'),
+        ('rep_no_show', 'Rep No Show'),
+        ('no_coverage', 'No Coverage'),
+    ]
 
     address = models.CharField(max_length=500)
     city = models.CharField(max_length=200, blank=True)
@@ -27,6 +36,7 @@ class Lead(models.Model):
     appointment_format = models.CharField(max_length=10, choices=APPOINTMENT_FORMAT_CHOICES, blank=True)
     appointment_datetime = models.DateTimeField(null=True, blank=True)
     rep = models.ForeignKey('Rep', null=True, blank=True, on_delete=models.SET_NULL, related_name='leads')
+    disposition = models.CharField(max_length=20, choices=DISPOSITION_CHOICES, blank=True)
 
     def __str__(self):
         return f"{self.address} ({self.created_at:%m/%d/%Y})"

@@ -63,6 +63,20 @@
                     <option value="unassigned">Unassigned</option>
                 </select>
             </div>
+            <div class="filter-group">
+                <label>Disposition</label>
+                <select id="filter-dispo" onchange="filterTable()">
+                    <option value="">All</option>
+                    <option value="sale">Sale</option>
+                    <option value="no_sale">No Sale</option>
+                    <option value="credit_fail">Credit Fail</option>
+                    <option value="cancel_door">Cancel at Door</option>
+                    <option value="cpfu">CPFU</option>
+                    <option value="rep_no_show">Rep No Show</option>
+                    <option value="no_coverage">No Coverage</option>
+                    <option value="none">No Disposition</option>
+                </select>
+            </div>
             <button class="filter-clear" onclick="clearFilters()">Clear</button>
         </div>
         <table class="crm-table">
@@ -77,6 +91,7 @@
                     <th class="sortable" onclick="sortTable(6)">Appt Format <span class="sort-arrow"></span></th>
                     <th class="sortable" onclick="sortTable(7)">Appt Date & Time <span class="sort-arrow"></span></th>
                     <th class="sortable" onclick="sortTable(8)">Status <span class="sort-arrow"></span></th>
+                    <th class="sortable" onclick="sortTable(9)">Disposition <span class="sort-arrow"></span></th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -112,16 +127,52 @@
                             {% endfor %}
                         </select>
                     </td>
+                    <td>
+                        <select class="crm-select dispo-select" data-field="disposition" onchange="updateDispoColor(this)">
+                            <option value="">—</option>
+                            <option value="sale" {% if lead.disposition == "sale" %}selected{% endif %}>Sale</option>
+                            <option value="no_sale" {% if lead.disposition == "no_sale" %}selected{% endif %}>No Sale</option>
+                            <option value="credit_fail" {% if lead.disposition == "credit_fail" %}selected{% endif %}>Credit Fail</option>
+                            <option value="cancel_door" {% if lead.disposition == "cancel_door" %}selected{% endif %}>Cancel at Door</option>
+                            <option value="cpfu" {% if lead.disposition == "cpfu" %}selected{% endif %}>CPFU</option>
+                            <option value="rep_no_show" {% if lead.disposition == "rep_no_show" %}selected{% endif %}>Rep No Show</option>
+                            <option value="no_coverage" {% if lead.disposition == "no_coverage" %}selected{% endif %}>No Coverage</option>
+                        </select>
+                    </td>
                     <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)">X</button></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="10" class="empty-row">No leads yet</td></tr>
+                <tr><td colspan="11" class="empty-row">No leads yet</td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
     <script>
+        var dispoColors = {
+            sale: '#27ae60',
+            no_sale: '#8e44ad',
+            credit_fail: '#ff69b4',
+            cancel_door: '#95a5a6',
+            cpfu: '#98c1d9',
+            rep_no_show: '#111111',
+            no_coverage: '#c0392b'
+        };
+
+        function updateDispoColor(select) {
+            var color = dispoColors[select.value] || '';
+            select.style.backgroundColor = color;
+            select.style.color = color ? '#fff' : '';
+            select.style.fontWeight = color ? '600' : '';
+        }
+
+        // Initialize colors on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.dispo-select').forEach(function(sel) {
+                updateDispoColor(sel);
+            });
+        });
+
         var currentSortCol = -1;
         var currentSortAsc = true;
 
@@ -289,6 +340,18 @@
                     if (fStatus === 'unassigned' && repVal) show = false;
                 }
 
+                // Disposition
+                var fDispo = document.getElementById('filter-dispo').value;
+                if (fDispo) {
+                    var dispoSelect = row.querySelector('[data-field="disposition"]');
+                    var dispoVal = dispoSelect ? dispoSelect.value : '';
+                    if (fDispo === 'none') {
+                        if (dispoVal) show = false;
+                    } else {
+                        if (dispoVal !== fDispo) show = false;
+                    }
+                }
+
                 row.style.display = show ? '' : 'none';
             });
         }
@@ -300,6 +363,7 @@
             document.getElementById('filter-format').value = '';
             document.getElementById('filter-rep').value = '';
             document.getElementById('filter-status').value = '';
+            document.getElementById('filter-dispo').value = '';
             filterTable();
         }
 
