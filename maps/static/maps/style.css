@@ -49,9 +49,13 @@ html, body {
 .crm-container {
     padding: 24px;
     max-width: 100%;
-    overflow-x: auto;
     background: #fff;
     min-height: calc(100vh - 44px);
+}
+
+.crm-table-wrapper {
+    overflow-x: auto;
+    max-width: 100%;
 }
 
 .crm-header {
