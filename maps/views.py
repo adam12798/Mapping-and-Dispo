@@ -314,6 +314,7 @@ def auto_assign_api(request):
                 'lat': lead.latitude,
                 'lng': lead.longitude,
                 'estimated_arrival': arrival_time.strftime('%I:%M %p'),
+                'time': lead.appointment_datetime.strftime('%I:%M %p') if lead.appointment_datetime else '',
             })
         assignments_data.append({
             'rep': {
@@ -335,6 +336,7 @@ def auto_assign_api(request):
             'city': l.city,
             'type': l.appointment_type,
             'phone': l.phone_number,
+            'time': l.appointment_datetime.strftime('%I:%M %p') if l.appointment_datetime else '',
         }
         for l in result['unassigned']
     ]

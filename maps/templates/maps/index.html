@@ -614,8 +614,8 @@
                 assignData.assignments.forEach(function(group) {
                     var rep = group.rep;
                     var sortedStops = group.stops.slice().sort(function(a, b) {
-                        var timeA = a.estimated_arrival || a.time || '';
-                        var timeB = b.estimated_arrival || b.time || '';
+                        var timeA = a.time || a.estimated_arrival || '';
+                        var timeB = b.time || b.estimated_arrival || '';
                         return timeA.localeCompare(timeB);
                     });
                     html += '<div class="sidebar-group">';
@@ -628,8 +628,8 @@
                         html += '<div class="appt-details">';
                         if (stop.phone) html += '<span>' + stop.phone + '</span>';
                         if (stop.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + stop.type + '</span>';
-                        if (stop.estimated_arrival) html += '<span>' + stop.estimated_arrival + '</span>';
-                        else if (stop.time) html += '<span>' + stop.time + '</span>';
+                        if (stop.time) html += '<span>' + stop.time + '</span>';
+                        else if (stop.estimated_arrival) html += '<span>' + stop.estimated_arrival + '</span>';
                         html += '<select class="sidebar-assign-select" onchange="previewReassign(' + stop.lead_id + ', ' + rep.id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
                         html += '<option value="">Unassigned</option>';
                         allReps.forEach(function(r) {
@@ -653,6 +653,7 @@
                         html += '<div class="appt-details">';
                         if (lead.phone) html += '<span>' + lead.phone + '</span>';
                         if (lead.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.type + '</span>';
+                        if (lead.time) html += '<span>' + lead.time + '</span>';
                         html += '<select class="sidebar-assign-select" onchange="previewAssignRep(' + lead.lead_id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
                         html += '<option value="" selected>Unassigned</option>';
                         allReps.forEach(function(rep) {
