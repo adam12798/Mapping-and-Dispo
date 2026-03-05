@@ -255,6 +255,7 @@
                         {% endif %}
                         {% if req.reason %}<span class="timeoff-reason">{{ req.reason }}</span>{% endif %}
                     </div>
+                    {% if req.raw_message %}<div class="timeoff-details"><span class="timeoff-reason">"{{ req.raw_message }}"</span></div>{% endif %}
                     <div class="timeoff-timestamp">Submitted {{ req.created_at|date:"m/d/Y g:i A" }}</div>
                 </div>
                 <div class="timeoff-actions">
