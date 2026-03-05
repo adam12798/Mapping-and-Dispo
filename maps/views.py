@@ -286,6 +286,7 @@ def reps_api(request):
             'home_address': rep.home_address,
             'city': rep.city,
             'color': rep.color,
+            'phone': rep.phone_number,
         }
         for rep in reps
     ]
