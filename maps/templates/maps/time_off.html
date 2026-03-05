@@ -223,12 +223,6 @@
         </div>
 
         <div class="filter-bar">
-            <select id="filter-status" onchange="filterCards()">
-                <option value="">All Status</option>
-                <option value="pending" selected>Pending</option>
-                <option value="approved">Approved</option>
-                <option value="denied">Denied</option>
-            </select>
             <select id="filter-rep" onchange="filterCards()">
                 <option value="">All Reps</option>
                 {% for rep in reps %}
@@ -237,9 +231,10 @@
             </select>
         </div>
 
+        <!-- Pending & Denied Requests -->
         <div id="cards-container">
-        {% if requests %}
-            {% for req in requests %}
+        {% for req in requests %}
+            {% if req.status != 'approved' %}
             <div class="timeoff-card {{ req.status }}" data-status="{{ req.status }}" data-rep="{{ req.rep.id }}" data-id="{{ req.id }}">
                 <div class="timeoff-info">
                     <div>
@@ -262,18 +257,48 @@
                     {% if req.status == 'pending' %}
                         <button class="approve-btn" onclick="updateStatus({{ req.id }}, 'approved')">Approve</button>
                         <button class="deny-btn" onclick="updateStatus({{ req.id }}, 'denied')">Deny</button>
-                    {% elif req.status == 'approved' %}
-                        <button class="deny-btn" onclick="updateStatus({{ req.id }}, 'denied')">Deny</button>
                     {% elif req.status == 'denied' %}
                         <button class="approve-btn" onclick="updateStatus({{ req.id }}, 'approved')">Approve</button>
                     {% endif %}
                     <button class="delete-btn-sm" onclick="deleteRequest({{ req.id }})">Delete</button>
                 </div>
             </div>
+            {% endif %}
+        {% endfor %}
+        </div>
+
+        <!-- Approved History -->
+        <div style="margin-top: 36px;">
+            <h2 style="font-family: 'Montserrat', sans-serif; color: #293241; margin-bottom: 16px; font-size: 18px;">Approved Time Off</h2>
+            <div id="approved-container">
+            {% for req in requests %}
+                {% if req.status == 'approved' %}
+                <div class="timeoff-card approved" data-rep="{{ req.rep.id }}">
+                    <div class="timeoff-info">
+                        <div>
+                            <span class="timeoff-rep">{{ req.rep.name }}</span>
+                            <span class="timeoff-status approved">approved</span>
+                        </div>
+                        <div class="timeoff-details">
+                            <span>{{ req.date|date:"l, M d Y" }}</span>
+                            {% if req.start_time %}
+                                <span>{{ req.start_time|time:"g:i A" }} — {{ req.end_time|time:"g:i A" }}</span>
+                            {% else %}
+                                <span>All Day</span>
+                            {% endif %}
+                            {% if req.reason %}<span class="timeoff-reason">{{ req.reason }}</span>{% endif %}
+                        </div>
+                        {% if req.raw_message %}<div class="timeoff-details"><span class="timeoff-reason">"{{ req.raw_message }}"</span></div>{% endif %}
+                        <div class="timeoff-timestamp">Submitted {{ req.created_at|date:"m/d/Y g:i A" }}</div>
+                    </div>
+                    <div class="timeoff-actions">
+                        <button class="deny-btn" onclick="updateStatus({{ req.id }}, 'denied')">Revoke</button>
+                        <button class="delete-btn-sm" onclick="deleteRequest({{ req.id }})">Delete</button>
+                    </div>
+                </div>
+                {% endif %}
             {% endfor %}
-        {% else %}
-            <div class="timeoff-empty">No time off requests yet.</div>
-        {% endif %}
+            </div>
         </div>
     </div>
 
@@ -374,19 +399,13 @@
         }
 
         function filterCards() {
-            var status = document.getElementById('filter-status').value;
             var rep = document.getElementById('filter-rep').value;
-            var cards = document.querySelectorAll('.timeoff-card');
-            cards.forEach(function(card) {
+            document.querySelectorAll('#cards-container .timeoff-card, #approved-container .timeoff-card').forEach(function(card) {
                 var show = true;
-                if (status && card.dataset.status !== status) show = false;
                 if (rep && card.dataset.rep !== rep) show = false;
                 card.style.display = show ? '' : 'none';
             });
         }
-
-        // Apply default filter on load
-        filterCards();
     </script>
 </body>
 </html>
