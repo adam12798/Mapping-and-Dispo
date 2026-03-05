@@ -1,7 +1,7 @@
 import math
 from datetime import datetime, timedelta
 from itertools import permutations
-from .models import Lead, Rep
+from .models import Lead, Rep, TimeOffRequest
 
 APPOINTMENT_DURATION = 90   # minutes per appointment
 WORK_START_HOUR = 9         # 9:00 AM
@@ -26,6 +26,39 @@ def haversine_miles(lat1, lon1, lat2, lon2):
 def travel_minutes(lat1, lon1, lat2, lon2):
     dist = haversine_miles(lat1, lon1, lat2, lon2)
     return (dist / AVG_SPEED_MPH) * 60
+
+
+def get_rep_time_off(rep_id, target_date):
+    """Get approved time off blocks for a rep on a given date.
+
+    Returns list of (start_datetime, end_datetime) tuples.
+    Full day off returns a block covering the entire work window.
+    """
+    blocks = []
+    requests = TimeOffRequest.objects.filter(
+        rep_id=rep_id,
+        date=target_date,
+        status='approved',
+    )
+    for req in requests:
+        if req.start_time and req.end_time:
+            start = datetime.combine(target_date, req.start_time)
+            end = datetime.combine(target_date, req.end_time)
+        else:
+            # Full day off
+            start = datetime(target_date.year, target_date.month, target_date.day, 0, 0)
+            end = datetime(target_date.year, target_date.month, target_date.day, 23, 59)
+        blocks.append((start, end))
+    return blocks
+
+
+def is_blocked_by_time_off(arrival, duration_min, time_off_blocks):
+    """Check if an appointment window overlaps any time off block."""
+    appt_end = arrival + timedelta(minutes=duration_min)
+    for block_start, block_end in time_off_blocks:
+        if arrival < block_end and appt_end > block_start:
+            return True
+    return False
 
 
 def is_compatible(rep, lead):
@@ -96,12 +129,21 @@ def score_schedule(schedule, rep):
     return coverage_score + total_lateness * 2 + total_drive
 
 
-def build_best_schedule(rep, leads, target_date):
+def build_best_schedule(rep, leads, target_date, time_off_blocks=None):
     """Find the best ordering of leads for a rep.
 
     For small sets (<=6), try all permutations.
     For larger sets, use appointment-time ordering with nearest-neighbor tiebreak.
+    Skips any appointments that overlap with approved time off blocks.
     """
+    if time_off_blocks is None:
+        time_off_blocks = get_rep_time_off(rep.id, target_date)
+
+    # If rep has full-day off, they can't take any appointments
+    for block_start, block_end in time_off_blocks:
+        if block_start.hour == 0 and block_end.hour == 23:
+            return []
+
     end_of_day = datetime(target_date.year, target_date.month, target_date.day,
                           WORK_END_HOUR, 0)
 
@@ -126,6 +168,10 @@ def build_best_schedule(rep, leads, target_date):
 
             if arrival + timedelta(minutes=APPOINTMENT_DURATION) > end_of_day:
                 continue  # Skip — won't finish before end of day
+
+            # Skip if appointment overlaps with time off
+            if is_blocked_by_time_off(arrival, APPOINTMENT_DURATION, time_off_blocks):
+                continue
 
             schedule.append((lead, arrival))
             current_time = arrival + timedelta(minutes=APPOINTMENT_DURATION)
@@ -178,6 +224,19 @@ def auto_assign_leads(target_date, save=True):
     if not reps:
         return {'assignments': [], 'unassigned': unassigned_leads}
 
+    # Load approved time off blocks for each rep on this date
+    rep_time_off = {rep.id: get_rep_time_off(rep.id, target_date) for rep in reps}
+
+    # Filter out reps who have full-day off
+    available_reps = []
+    for rep in reps:
+        full_day_off = any(
+            s.hour == 0 and e.hour == 23
+            for s, e in rep_time_off[rep.id]
+        )
+        if not full_day_off:
+            available_reps.append(rep)
+
     # Initialize clusters with locked leads
     clusters = {rep.id: [] for rep in reps}
     locked_ids = set()
@@ -192,7 +251,7 @@ def auto_assign_leads(target_date, save=True):
         for rep in reps:
             if not clusters[rep.id]:
                 continue
-            schedule = build_best_schedule(rep, clusters[rep.id], target_date)
+            schedule = build_best_schedule(rep, clusters[rep.id], target_date, rep_time_off.get(rep.id, []))
             if schedule:
                 assignments.append({'rep': rep, 'stops': schedule})
         return {'assignments': assignments, 'unassigned': []}
@@ -218,7 +277,7 @@ def auto_assign_leads(target_date, save=True):
             return rep_obj.latitude, rep_obj.longitude, free_at
 
         # Build a quick schedule to find last stop's end time
-        schedule = build_best_schedule(rep_obj, clusters[rep_id], target_date)
+        schedule = build_best_schedule(rep_obj, clusters[rep_id], target_date, rep_time_off.get(rep_id, []))
         if schedule:
             last_lead, last_arrival = schedule[-1]
             free_at = last_arrival + timedelta(minutes=APPOINTMENT_DURATION)
@@ -233,7 +292,7 @@ def auto_assign_leads(target_date, save=True):
         best_lateness = float('inf')
         best_drive = float('inf')
 
-        for rep in reps:
+        for rep in available_reps:
             if not is_compatible(rep, lead):
                 continue
             if len(clusters[rep.id]) >= MAX_PER_REP:
@@ -246,6 +305,15 @@ def auto_assign_leads(target_date, save=True):
                 continue
 
             lateness, drive = result
+
+            # Check if appointment would overlap rep's time off
+            if lead.appointment_datetime:
+                appt_time = lead.appointment_datetime.replace(tzinfo=None)
+                arrival = max(free_at + timedelta(minutes=drive), appt_time)
+            else:
+                arrival = free_at + timedelta(minutes=drive)
+            if is_blocked_by_time_off(arrival, APPOINTMENT_DURATION, rep_time_off[rep.id]):
+                continue
 
             # Prefer: on-time > within 30min late > stretch
             # Among same lateness tier, prefer less driving
@@ -275,7 +343,7 @@ def auto_assign_leads(target_date, save=True):
         if not cluster_leads:
             continue
 
-        schedule = build_best_schedule(rep, cluster_leads, target_date)
+        schedule = build_best_schedule(rep, cluster_leads, target_date, rep_time_off.get(rep.id, []))
 
         # Any leads that didn't make the schedule go back to unassigned
         scheduled_ids = {lead.id for lead, _ in schedule}

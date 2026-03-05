@@ -1,0 +1,391 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time Off — Mapping & Dispo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
+    <style>
+        .timeoff-container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .timeoff-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .timeoff-header h2 {
+            font-family: 'Montserrat', sans-serif;
+            color: #293241;
+            margin: 0;
+        }
+        .add-btn {
+            background: #3d5a80;
+            color: #fff;
+            border: none;
+            padding: 8px 18px;
+            border-radius: 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .add-btn:hover { background: #293241; }
+
+        .timeoff-card {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 4px solid #98c1d9;
+        }
+        .timeoff-card.pending { border-left-color: #f39c12; }
+        .timeoff-card.approved { border-left-color: #27ae60; }
+        .timeoff-card.denied { border-left-color: #e74c3c; }
+
+        .timeoff-info {
+            flex: 1;
+        }
+        .timeoff-rep {
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            font-size: 15px;
+            color: #293241;
+        }
+        .timeoff-details {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            color: #555;
+            margin-top: 4px;
+        }
+        .timeoff-details span {
+            margin-right: 14px;
+        }
+        .timeoff-reason {
+            font-style: italic;
+            color: #777;
+        }
+        .timeoff-timestamp {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+            font-family: 'Montserrat', sans-serif;
+        }
+        .timeoff-status {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            margin-left: 10px;
+        }
+        .timeoff-status.pending { background: #fef3cd; color: #856404; }
+        .timeoff-status.approved { background: #d4edda; color: #155724; }
+        .timeoff-status.denied { background: #f8d7da; color: #721c24; }
+
+        .timeoff-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .approve-btn, .deny-btn, .delete-btn-sm {
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .approve-btn { background: #27ae60; color: #fff; }
+        .approve-btn:hover { background: #219a52; }
+        .deny-btn { background: #e74c3c; color: #fff; }
+        .deny-btn:hover { background: #c0392b; }
+        .delete-btn-sm { background: #ccc; color: #333; }
+        .delete-btn-sm:hover { background: #999; color: #fff; }
+
+        .timeoff-empty {
+            text-align: center;
+            color: #999;
+            font-family: 'Montserrat', sans-serif;
+            padding: 40px;
+        }
+
+        /* Add form modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-box {
+            background: #fff;
+            border-radius: 12px;
+            padding: 28px;
+            width: 400px;
+            max-width: 90vw;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .modal-box h3 {
+            font-family: 'Montserrat', sans-serif;
+            color: #293241;
+            margin: 0 0 18px;
+        }
+        .modal-field {
+            margin-bottom: 14px;
+        }
+        .modal-field label {
+            display: block;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 4px;
+        }
+        .modal-field input, .modal-field select, .modal-field textarea {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        .modal-field .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .modal-field .checkbox-row input[type="checkbox"] {
+            width: auto;
+        }
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 18px;
+        }
+        .modal-cancel {
+            background: #ccc;
+            color: #333;
+            border: none;
+            padding: 8px 18px;
+            border-radius: 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .filter-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 18px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-bar select {
+            padding: 6px 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="/" class="nav-tab">Map</a>
+        <a href="/crm/" class="nav-tab">CRM</a>
+        <a href="/reps/" class="nav-tab">Reps</a>
+        <a href="/time-off/" class="nav-tab active">Time Off</a>
+    </nav>
+
+    <div class="timeoff-container">
+        <div class="timeoff-header">
+            <h2>Time Off Requests</h2>
+            <button class="add-btn" onclick="openAddModal()">+ Add Request</button>
+        </div>
+
+        <div class="filter-bar">
+            <select id="filter-status" onchange="filterCards()">
+                <option value="">All Status</option>
+                <option value="pending" selected>Pending</option>
+                <option value="approved">Approved</option>
+                <option value="denied">Denied</option>
+            </select>
+            <select id="filter-rep" onchange="filterCards()">
+                <option value="">All Reps</option>
+                {% for rep in reps %}
+                <option value="{{ rep.id }}">{{ rep.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div id="cards-container">
+        {% if requests %}
+            {% for req in requests %}
+            <div class="timeoff-card {{ req.status }}" data-status="{{ req.status }}" data-rep="{{ req.rep.id }}" data-id="{{ req.id }}">
+                <div class="timeoff-info">
+                    <div>
+                        <span class="timeoff-rep">{{ req.rep.name }}</span>
+                        <span class="timeoff-status {{ req.status }}">{{ req.status }}</span>
+                    </div>
+                    <div class="timeoff-details">
+                        <span>{{ req.date|date:"l, M d Y" }}</span>
+                        {% if req.start_time %}
+                            <span>{{ req.start_time|time:"g:i A" }} — {{ req.end_time|time:"g:i A" }}</span>
+                        {% else %}
+                            <span>All Day</span>
+                        {% endif %}
+                        {% if req.reason %}<span class="timeoff-reason">{{ req.reason }}</span>{% endif %}
+                    </div>
+                    <div class="timeoff-timestamp">Submitted {{ req.created_at|date:"m/d/Y g:i A" }}</div>
+                </div>
+                <div class="timeoff-actions">
+                    {% if req.status == 'pending' %}
+                        <button class="approve-btn" onclick="updateStatus({{ req.id }}, 'approved')">Approve</button>
+                        <button class="deny-btn" onclick="updateStatus({{ req.id }}, 'denied')">Deny</button>
+                    {% elif req.status == 'approved' %}
+                        <button class="deny-btn" onclick="updateStatus({{ req.id }}, 'denied')">Deny</button>
+                    {% elif req.status == 'denied' %}
+                        <button class="approve-btn" onclick="updateStatus({{ req.id }}, 'approved')">Approve</button>
+                    {% endif %}
+                    <button class="delete-btn-sm" onclick="deleteRequest({{ req.id }})">Delete</button>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="timeoff-empty">No time off requests yet.</div>
+        {% endif %}
+        </div>
+    </div>
+
+    <!-- Add Request Modal -->
+    <div class="modal-overlay" id="add-modal">
+        <div class="modal-box">
+            <h3>Add Time Off Request</h3>
+            <div class="modal-field">
+                <label>Rep</label>
+                <select id="modal-rep">
+                    {% for rep in reps %}
+                    <option value="{{ rep.id }}">{{ rep.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="modal-field">
+                <label>Date</label>
+                <input type="date" id="modal-date" />
+            </div>
+            <div class="modal-field">
+                <div class="checkbox-row">
+                    <input type="checkbox" id="modal-allday" checked onchange="toggleTimeFields()" />
+                    <label for="modal-allday" style="margin:0; display:inline;">All Day</label>
+                </div>
+            </div>
+            <div id="time-fields" style="display:none;">
+                <div class="modal-field">
+                    <label>Start Time</label>
+                    <input type="time" id="modal-start" />
+                </div>
+                <div class="modal-field">
+                    <label>End Time</label>
+                    <input type="time" id="modal-end" />
+                </div>
+            </div>
+            <div class="modal-field">
+                <label>Reason</label>
+                <input type="text" id="modal-reason" placeholder="Optional" />
+            </div>
+            <div class="modal-actions">
+                <button class="modal-cancel" onclick="closeAddModal()">Cancel</button>
+                <button class="add-btn" onclick="submitRequest()">Add Request</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function getCookie(name) {
+            var v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+            return v ? v[2] : null;
+        }
+
+        function updateStatus(id, status) {
+            fetch('/api/time-off/' + id + '/', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+                body: JSON.stringify({status: status})
+            }).then(function() { location.reload(); });
+        }
+
+        function deleteRequest(id) {
+            if (!confirm('Delete this time off request?')) return;
+            fetch('/api/time-off/' + id + '/', {
+                method: 'DELETE',
+                headers: {'X-CSRFToken': getCookie('csrftoken')}
+            }).then(function() { location.reload(); });
+        }
+
+        function openAddModal() {
+            document.getElementById('add-modal').classList.add('active');
+        }
+
+        function closeAddModal() {
+            document.getElementById('add-modal').classList.remove('active');
+        }
+
+        function toggleTimeFields() {
+            var allDay = document.getElementById('modal-allday').checked;
+            document.getElementById('time-fields').style.display = allDay ? 'none' : 'block';
+        }
+
+        function submitRequest() {
+            var data = {
+                rep_id: document.getElementById('modal-rep').value,
+                date: document.getElementById('modal-date').value,
+                reason: document.getElementById('modal-reason').value,
+            };
+            if (!data.date) { alert('Please select a date'); return; }
+            if (!document.getElementById('modal-allday').checked) {
+                data.start_time = document.getElementById('modal-start').value || null;
+                data.end_time = document.getElementById('modal-end').value || null;
+            }
+            fetch('/api/time-off/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+                body: JSON.stringify(data)
+            }).then(function() { location.reload(); });
+        }
+
+        function filterCards() {
+            var status = document.getElementById('filter-status').value;
+            var rep = document.getElementById('filter-rep').value;
+            var cards = document.querySelectorAll('.timeoff-card');
+            cards.forEach(function(card) {
+                var show = true;
+                if (status && card.dataset.status !== status) show = false;
+                if (rep && card.dataset.rep !== rep) show = false;
+                card.style.display = show ? '' : 'none';
+            });
+        }
+
+        // Apply default filter on load
+        filterCards();
+    </script>
+</body>
+</html>

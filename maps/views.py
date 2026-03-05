@@ -13,7 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .assignment import auto_assign_leads
-from .models import Lead, Rep
+from .models import Lead, Rep, TimeOffRequest
 
 
 def index(request):
@@ -153,6 +153,55 @@ def leads_bulk_delete(request):
     data = json.loads(request.body)
     ids = data.get('ids', [])
     Lead.objects.filter(id__in=ids).delete()
+    return JsonResponse({'status': 'ok'})
+
+
+def time_off_view(request):
+    requests = TimeOffRequest.objects.select_related('rep').order_by('-created_at')
+    reps = Rep.objects.filter(is_active=True).order_by('name')
+    return render(request, 'maps/time_off.html', {'requests': requests, 'reps': reps})
+
+
+@csrf_exempt
+def time_off_api(request):
+    """Create a time off request manually."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    rep = get_object_or_404(Rep, pk=data['rep_id'])
+    start_time = data.get('start_time') or None
+    end_time = data.get('end_time') or None
+    TimeOffRequest.objects.create(
+        rep=rep,
+        date=data['date'],
+        start_time=start_time,
+        end_time=end_time,
+        reason=data.get('reason', ''),
+    )
+    return JsonResponse({'status': 'ok'})
+
+
+@csrf_exempt
+def time_off_update(request, pk):
+    """Update or delete a time off request."""
+    tor = get_object_or_404(TimeOffRequest, pk=pk)
+    if request.method == 'DELETE':
+        tor.delete()
+        return JsonResponse({'status': 'ok'})
+    if request.method != 'PUT':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    if 'status' in data:
+        tor.status = data['status']
+    if 'reason' in data:
+        tor.reason = data['reason']
+    if 'date' in data:
+        tor.date = data['date']
+    if 'start_time' in data:
+        tor.start_time = data['start_time'] or None
+    if 'end_time' in data:
+        tor.end_time = data['end_time'] or None
+    tor.save()
     return JsonResponse({'status': 'ok'})
 
 
@@ -493,12 +542,127 @@ def normalize_format(value):
     return ''
 
 
+def parse_time_off_request(body, rep):
+    """Parse a time off request from SMS body.
+
+    Expected format:
+      Rep Name
+      Off Tuesday
+      -- or --
+      Rep Name
+      Busy Wed 12pm-3pm tire appointment
+
+    Returns list of (date, start_time, end_time, reason) tuples, or None if can't parse.
+    """
+    from datetime import date, time, timedelta
+    import calendar
+
+    lines = [l.strip() for l in body.strip().split('\n') if l.strip()]
+    if len(lines) < 2:
+        return None
+
+    # Skip the first line (rep name), parse the rest
+    requests = []
+    today = date.today()
+
+    for line in lines[1:]:
+        lower = line.lower()
+
+        # Detect time off keywords
+        off_keywords = ['off', 'busy', 'unavailable', 'out', 'vacation', 'pto']
+        if not any(kw in lower for kw in off_keywords):
+            continue
+
+        # Try to find a date reference
+        # Check for day names (monday, tuesday, etc.)
+        target_date = None
+        day_names = list(calendar.day_name)
+        day_abbrs = list(calendar.day_abbr)
+
+        for i, (full, abbr) in enumerate(zip(day_names, day_abbrs)):
+            if full.lower() in lower or abbr.lower() in lower:
+                # Find next occurrence of this weekday
+                days_ahead = i - today.weekday()
+                if days_ahead <= 0:
+                    days_ahead += 7
+                target_date = today + timedelta(days=days_ahead)
+                break
+
+        # Check for "today" or "tomorrow"
+        if 'today' in lower:
+            target_date = today
+        elif 'tomorrow' in lower:
+            target_date = today + timedelta(days=1)
+
+        # Try to parse a date from the line (e.g. "March 10" or "3/10")
+        if target_date is None:
+            try:
+                parsed = dateparser.parse(line, fuzzy=True)
+                if parsed:
+                    target_date = parsed.date()
+            except (ValueError, OverflowError):
+                pass
+
+        if target_date is None:
+            continue
+
+        # Try to extract time range (e.g. "12pm-3pm" or "12:00-3:00")
+        time_pattern = r'(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–to]+\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)'
+        time_match = re.search(time_pattern, lower)
+
+        start_t = None
+        end_t = None
+        if time_match:
+            try:
+                start_parsed = dateparser.parse(time_match.group(1), fuzzy=True)
+                end_parsed = dateparser.parse(time_match.group(2), fuzzy=True)
+                if start_parsed and end_parsed:
+                    start_t = start_parsed.time()
+                    end_t = end_parsed.time()
+            except (ValueError, OverflowError):
+                pass
+
+        # Extract reason — everything after the date/time info
+        reason = line
+        for kw in off_keywords:
+            reason = re.sub(rf'\b{kw}\b', '', reason, flags=re.IGNORECASE)
+        for day in day_names + day_abbrs:
+            reason = re.sub(rf'\b{day}\b', '', reason, flags=re.IGNORECASE)
+        if time_match:
+            reason = reason.replace(time_match.group(0), '')
+        reason = re.sub(r'\s+', ' ', reason).strip(' -–,.')
+
+        requests.append((target_date, start_t, end_t, reason))
+
+    return requests if requests else None
+
+
 @csrf_exempt
 @require_POST
 def sms_webhook(request):
-    """Twilio webhook — receives incoming SMS, parses fields, geocodes address, saves as Lead."""
+    """Twilio webhook — receives incoming SMS, parses fields, geocodes address, saves as Lead.
+    If sender is a rep, parse as time off request instead."""
     body = request.POST.get('Body', '').strip()
     from_number = request.POST.get('From', '')
+
+    # Check if sender is a rep — if so, treat as time off request
+    rep = Rep.objects.filter(phone_number__icontains=from_number[-10:]).first() if from_number else None
+    if rep and body:
+        time_off = parse_time_off_request(body, rep)
+        if time_off:
+            for req_date, start_t, end_t, reason in time_off:
+                TimeOffRequest.objects.create(
+                    rep=rep,
+                    date=req_date,
+                    start_time=start_t,
+                    end_time=end_t,
+                    reason=reason,
+                    raw_message=body,
+                )
+            return HttpResponse(
+                '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                content_type='text/xml',
+            )
 
     try:
         if body:

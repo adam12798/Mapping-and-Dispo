@@ -63,3 +63,24 @@ class Rep(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class TimeOffRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('denied', 'Denied'),
+    ]
+
+    rep = models.ForeignKey(Rep, on_delete=models.CASCADE, related_name='time_off_requests')
+    date = models.DateField()
+    start_time = models.TimeField(null=True, blank=True)  # null = full day off
+    end_time = models.TimeField(null=True, blank=True)
+    reason = models.CharField(max_length=500, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    raw_message = models.TextField(blank=True)
+
+    def __str__(self):
+        time_str = 'All Day' if not self.start_time else f'{self.start_time:%I:%M %p} - {self.end_time:%I:%M %p}'
+        return f"{self.rep.name} — {self.date:%m/%d/%Y} {time_str} ({self.status})"
