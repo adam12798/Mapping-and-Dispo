@@ -19,5 +19,6 @@ urlpatterns = [
     path('api/confirm-assignments/', views.confirm_assignments_api, name='confirm_assignments'),
     path('time-off/', views.time_off_view, name='time_off'),
     path('api/time-off/', views.time_off_api, name='time_off_api'),
+    path('api/time-off/by-date/', views.time_off_by_date_api, name='time_off_by_date'),
     path('api/time-off/<int:pk>/', views.time_off_update, name='time_off_update'),
 ]

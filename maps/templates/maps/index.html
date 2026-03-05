@@ -729,6 +729,30 @@
             }
 
             container.innerHTML = html;
+
+            // Fetch time off for this date and append to sidebar
+            var dateVal = document.getElementById('route-date').value;
+            if (dateVal) {
+                fetch('/api/time-off/by-date/?date=' + dateVal)
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.time_off && data.time_off.length > 0) {
+                            var offHtml = '<div class="sidebar-group" style="margin-top:12px;">';
+                            offHtml += '<div class="sidebar-group-title" style="color:#e74c3c;"><span class="rep-dot" style="background:#e74c3c"></span>Reps Off (' + data.time_off.length + ')</div>';
+                            data.time_off.forEach(function(to) {
+                                var timeStr = to.all_day ? 'All Day' : to.start_time + ' — ' + to.end_time;
+                                offHtml += '<div class="sidebar-row" style="border-left-color:#e74c3c; opacity:0.8;">';
+                                offHtml += '<div class="appt-name">' + to.rep_name + '</div>';
+                                offHtml += '<div class="appt-details">';
+                                offHtml += '<span>' + timeStr + '</span>';
+                                if (to.reason) offHtml += '<span style="font-style:italic; color:#999;">' + to.reason + '</span>';
+                                offHtml += '</div></div>';
+                            });
+                            offHtml += '</div>';
+                            container.innerHTML += offHtml;
+                        }
+                    });
+            }
         }
 
         function panTo(lat, lng) {

@@ -162,6 +162,30 @@ def time_off_view(request):
     return render(request, 'maps/time_off.html', {'requests': requests, 'reps': reps})
 
 
+def time_off_by_date_api(request):
+    """Return approved time off for a given date."""
+    date_str = request.GET.get('date', '')
+    if not date_str:
+        return JsonResponse({'error': 'date required'}, status=400)
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date'}, status=400)
+
+    reqs = TimeOffRequest.objects.filter(date=target_date, status='approved').select_related('rep')
+    data = []
+    for r in reqs:
+        data.append({
+            'rep_name': r.rep.name,
+            'rep_color': r.rep.color,
+            'all_day': r.start_time is None,
+            'start_time': r.start_time.strftime('%I:%M %p') if r.start_time else None,
+            'end_time': r.end_time.strftime('%I:%M %p') if r.end_time else None,
+            'reason': r.reason,
+        })
+    return JsonResponse({'time_off': data})
+
+
 @csrf_exempt
 def time_off_api(request):
     """Create a time off request manually."""
