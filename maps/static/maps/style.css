@@ -183,11 +183,11 @@ html, body {
 
 .crm-table td:nth-child(3),
 .crm-table th:nth-child(3) {
-    max-width: 100px;
+    max-width: 105px;
 }
 
 .crm-table td:nth-child(3) .crm-input {
-    max-width: 100px;
+    max-width: 105px;
 }
 
 .crm-table td:nth-child(5),
@@ -641,7 +641,7 @@ tbody tr:hover .sticky-col {
     border-radius: 3px;
     background: #fff;
     cursor: pointer;
-    max-width: 100px;
+    max-width: 105px;
 }
 
 .sidebar-empty {
