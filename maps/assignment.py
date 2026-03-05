@@ -35,6 +35,11 @@ def is_compatible(rep, lead):
     return rep.specialty == lead.appointment_type
 
 
+def order_stops_by_appointment_time(leads):
+    """Order leads by their actual appointment time."""
+    return sorted(leads, key=lambda l: l.appointment_datetime or datetime.max)
+
+
 def order_stops_nearest_neighbor(start_lat, start_lng, leads):
     if not leads:
         return []
@@ -55,6 +60,11 @@ def order_stops_nearest_neighbor(start_lat, start_lng, leads):
 
 
 def compute_schedule(rep, ordered_leads, target_date):
+    """Build schedule respecting actual appointment times.
+
+    Rep cannot arrive before the appointment time — they wait until
+    the scheduled time if they'd get there early.
+    """
     schedule = []
     current_time = datetime(target_date.year, target_date.month, target_date.day,
                             WORK_START_HOUR, 0)
@@ -64,7 +74,14 @@ def compute_schedule(rep, ordered_leads, target_date):
 
     for lead in ordered_leads:
         travel = travel_minutes(cur_lat, cur_lng, lead.latitude, lead.longitude)
-        arrival = current_time + timedelta(minutes=travel)
+        earliest_arrival = current_time + timedelta(minutes=travel)
+
+        # If the lead has a scheduled appointment time, don't arrive before it
+        if lead.appointment_datetime:
+            appt_time = lead.appointment_datetime.replace(tzinfo=None)
+            arrival = max(earliest_arrival, appt_time)
+        else:
+            arrival = earliest_arrival
 
         if arrival + timedelta(minutes=APPOINTMENT_DURATION) > end_of_day:
             return None
@@ -116,7 +133,7 @@ def auto_assign_leads(target_date, save=True):
         for rep in reps:
             if not clusters[rep.id]:
                 continue
-            ordered = order_stops_nearest_neighbor(rep.latitude, rep.longitude, clusters[rep.id])
+            ordered = order_stops_by_appointment_time(clusters[rep.id])
             schedule = compute_schedule(rep, ordered, target_date)
             if schedule:
                 assignments.append({'rep': rep, 'stops': schedule})
@@ -182,7 +199,8 @@ def auto_assign_leads(target_date, save=True):
         if not cluster_leads:
             continue
 
-        ordered = order_stops_nearest_neighbor(rep.latitude, rep.longitude, cluster_leads)
+        # Order by appointment time so reps follow the scheduled sequence
+        ordered = order_stops_by_appointment_time(cluster_leads)
 
         schedule = compute_schedule(rep, ordered, target_date)
         while schedule is None and len(ordered) > 0:
