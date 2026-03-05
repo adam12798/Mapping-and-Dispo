@@ -190,6 +190,15 @@ html, body {
     max-width: 100px;
 }
 
+.crm-table td:nth-child(5),
+.crm-table th:nth-child(5) {
+    max-width: 90px;
+}
+
+.crm-table td:nth-child(5) .crm-input {
+    max-width: 90px;
+}
+
 .sticky-col {
     position: sticky;
     z-index: 2;
