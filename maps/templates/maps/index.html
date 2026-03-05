@@ -613,10 +613,17 @@
             if (assignData && assignData.assignments && assignData.assignments.length > 0) {
                 assignData.assignments.forEach(function(group) {
                     var rep = group.rep;
+                    function parseTime12h(str) {
+                        if (!str) return 99999;
+                        var m = str.match(/(\d+):(\d+)\s*(AM|PM)/i);
+                        if (!m) return 99999;
+                        var h = parseInt(m[1]), min = parseInt(m[2]), period = m[3].toUpperCase();
+                        if (period === 'PM' && h !== 12) h += 12;
+                        if (period === 'AM' && h === 12) h = 0;
+                        return h * 60 + min;
+                    }
                     var sortedStops = group.stops.slice().sort(function(a, b) {
-                        var timeA = a.time || a.estimated_arrival || '';
-                        var timeB = b.time || b.estimated_arrival || '';
-                        return timeA.localeCompare(timeB);
+                        return parseTime12h(a.time || a.estimated_arrival) - parseTime12h(b.time || b.estimated_arrival);
                     });
                     html += '<div class="sidebar-group">';
                     html += '<div class="sidebar-group-title"><span class="rep-dot" style="background:' + (rep.color || '#2980b9') + '"></span>' + rep.name + ' (' + sortedStops.length + ')</div>';
