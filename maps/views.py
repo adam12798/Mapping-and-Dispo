@@ -558,18 +558,20 @@ def parse_time_off_request(body, rep):
     import calendar
 
     lines = [l.strip() for l in body.strip().split('\n') if l.strip()]
-    if len(lines) < 2:
+    if not lines:
         return None
 
-    # Skip the first line (rep name), parse the rest
+    # If single line, parse the whole message; if multi-line, skip first line (rep name)
+    parse_lines = lines if len(lines) == 1 else lines[1:]
+
     requests = []
     today = date.today()
 
-    for line in lines[1:]:
+    for line in parse_lines:
         lower = line.lower()
 
         # Detect time off keywords
-        off_keywords = ['off', 'busy', 'unavailable', 'out', 'vacation', 'pto']
+        off_keywords = ['off', 'busy', 'unavailable', 'out', 'vacation', 'pto', "can't work", 'cant work', 'not available', 'time off']
         if not any(kw in lower for kw in off_keywords):
             continue
 
