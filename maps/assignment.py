@@ -29,9 +29,9 @@ def travel_minutes(lat1, lon1, lat2, lon2):
 
 
 def is_compatible(rep, lead):
-    if not rep.specialty or rep.specialty == 'both':
-        return True
     if not lead.appointment_type:
+        return False  # No type set — can't assign any rep
+    if not rep.specialty or rep.specialty == 'both':
         return True
     if lead.appointment_type == 'both':
         return True
