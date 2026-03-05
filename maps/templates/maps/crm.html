@@ -17,14 +17,15 @@
         <a href="/reps/" class="nav-tab">Reps</a>
     </nav>
     <div class="crm-container">
-        <div class="crm-header">
-            <h2>Leads</h2>
-            <button id="bulk-delete-btn" class="delete-btn bulk-delete" style="display:none;" onclick="bulkDelete()">Delete Selected</button>
-        </div>
-        <div class="crm-search">
-            <input type="text" id="search-input" placeholder="Search leads..." oninput="filterTable()">
-        </div>
-        <div class="crm-filters">
+        <div class="crm-toolbar">
+            <div class="crm-header">
+                <h2>Leads</h2>
+                <button id="bulk-delete-btn" class="delete-btn bulk-delete" style="display:none;" onclick="bulkDelete()">Delete Selected</button>
+            </div>
+            <div class="crm-search">
+                <input type="text" id="search-input" placeholder="Search leads..." oninput="filterTable()">
+            </div>
+            <div class="crm-filters">
             <div class="filter-group">
                 <label>Date</label>
                 <input type="date" id="filter-date" onchange="filterTable()">
@@ -78,6 +79,7 @@
                 </select>
             </div>
             <button class="filter-clear" onclick="clearFilters()">Clear</button>
+            </div>
         </div>
         <div class="crm-table-wrapper">
         <table class="crm-table">
