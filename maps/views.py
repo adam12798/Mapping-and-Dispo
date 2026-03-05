@@ -45,24 +45,63 @@ def leads_api(request):
     return JsonResponse(data, safe=False)
 
 
+def is_in_massachusetts(lat, lng):
+    """Check if coordinates fall within Massachusetts bounding box."""
+    return 41.0 <= lat <= 43.0 and -73.6 <= lng <= -69.8
+
+
 def geocode(address):
-    """Geocode an address using Nominatim (free, no API key)."""
-    try:
-        params = urllib.parse.urlencode({
-            'q': address,
-            'format': 'json',
-            'limit': 1,
-            'countrycodes': 'us',
-        })
-        url = f'https://nominatim.openstreetmap.org/search?{params}'
-        req = urllib.request.Request(url, headers={'User-Agent': 'MappingDispo/1.0'})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            results = json.loads(resp.read())
-        if results:
-            return float(results[0]['lat']), float(results[0]['lon'])
-    except Exception:
-        pass
-    return None, None
+    """Geocode an address using Nominatim (free, no API key).
+
+    Validates results are in Massachusetts. If not, retries with
+    ', Massachusetts' appended. Returns (None, None) if still outside MA.
+    """
+    def _nominatim_search(query):
+        try:
+            params = urllib.parse.urlencode({
+                'q': query,
+                'format': 'json',
+                'limit': 1,
+                'countrycodes': 'us',
+            })
+            url = f'https://nominatim.openstreetmap.org/search?{params}'
+            req = urllib.request.Request(url, headers={'User-Agent': 'MappingDispo/1.0'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                results = json.loads(resp.read())
+            if results:
+                return float(results[0]['lat']), float(results[0]['lon'])
+        except Exception:
+            pass
+        return None, None
+
+    lat, lng = _nominatim_search(address)
+
+    # If result is outside MA, retry with Massachusetts explicitly
+    if lat is not None and not is_in_massachusetts(lat, lng):
+        retry_address = f"{address}, Massachusetts"
+        lat2, lng2 = _nominatim_search(retry_address)
+        if lat2 is not None and is_in_massachusetts(lat2, lng2):
+            return lat2, lng2
+
+        # Last resort: try just the city/town from the address
+        # e.g. "848 main st, beverly, MA" → try "beverly, Massachusetts"
+        parts = address.split(',')
+        if len(parts) >= 2:
+            city_part = parts[-2].strip() if 'MA' in parts[-1].upper() else parts[-1].strip()
+            city_lat, city_lng = _nominatim_search(f"{city_part}, Massachusetts")
+            if city_lat is not None and is_in_massachusetts(city_lat, city_lng):
+                return city_lat, city_lng
+
+        return None, None
+
+    # No result at all — try with Massachusetts appended
+    if lat is None:
+        retry_address = f"{address}, Massachusetts"
+        lat2, lng2 = _nominatim_search(retry_address)
+        if lat2 is not None and is_in_massachusetts(lat2, lng2):
+            return lat2, lng2
+
+    return lat, lng
 
 
 def crm_view(request):
