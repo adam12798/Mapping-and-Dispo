@@ -300,6 +300,20 @@
             {% endfor %}
             </div>
         </div>
+        <!-- Managers Section -->
+        <div style="margin-top: 36px;">
+            <h2 style="font-family: 'Montserrat', sans-serif; color: #293241; margin-bottom: 16px; font-size: 18px;">
+                Notification Managers
+                <button class="add-btn" style="font-size: 11px; padding: 5px 12px; margin-left: 12px;" onclick="document.getElementById('manager-form').style.display='flex'">+ Add</button>
+            </h2>
+            <div id="manager-form" style="display:none; gap:8px; margin-bottom:12px; align-items:center;">
+                <input type="text" id="mgr-name" placeholder="Name" style="padding:6px 10px; border:1px solid #ccc; border-radius:6px; font-family:'Montserrat',sans-serif; font-size:13px;">
+                <input type="text" id="mgr-phone" placeholder="Phone number" style="padding:6px 10px; border:1px solid #ccc; border-radius:6px; font-family:'Montserrat',sans-serif; font-size:13px;">
+                <button class="add-btn" style="font-size:12px; padding:6px 14px;" onclick="addManager()">Save</button>
+                <button class="modal-cancel" style="font-size:12px; padding:6px 14px;" onclick="document.getElementById('manager-form').style.display='none'">Cancel</button>
+            </div>
+            <div id="managers-list"></div>
+        </div>
     </div>
 
     <!-- Add Request Modal -->
@@ -406,6 +420,57 @@
                 card.style.display = show ? '' : 'none';
             });
         }
+
+        function loadManagers() {
+            fetch('/api/managers/')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var el = document.getElementById('managers-list');
+                    if (!data.managers || data.managers.length === 0) {
+                        el.innerHTML = '<div style="color:#999; font-family:Montserrat,sans-serif; font-size:13px;">No managers added yet. Add a manager to receive SMS notifications for time off requests.</div>';
+                        return;
+                    }
+                    var html = '';
+                    data.managers.forEach(function(m) {
+                        html += '<div class="timeoff-card approved" style="border-left-color:#3d5a80;">';
+                        html += '<div class="timeoff-info">';
+                        html += '<span class="timeoff-rep">' + m.name + '</span>';
+                        html += '<span class="timeoff-details" style="margin-left:12px;">' + m.phone_number + '</span>';
+                        html += '</div>';
+                        html += '<div class="timeoff-actions">';
+                        html += '<button class="delete-btn-sm" onclick="deleteManager(' + m.id + ')">Remove</button>';
+                        html += '</div></div>';
+                    });
+                    el.innerHTML = html;
+                });
+        }
+
+        function addManager() {
+            var name = document.getElementById('mgr-name').value.trim();
+            var phone = document.getElementById('mgr-phone').value.trim();
+            if (!name || !phone) { alert('Name and phone required'); return; }
+            fetch('/api/managers/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+                body: JSON.stringify({name: name, phone_number: phone})
+            }).then(function() {
+                document.getElementById('mgr-name').value = '';
+                document.getElementById('mgr-phone').value = '';
+                document.getElementById('manager-form').style.display = 'none';
+                loadManagers();
+            });
+        }
+
+        function deleteManager(id) {
+            if (!confirm('Remove this manager?')) return;
+            fetch('/api/managers/', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+                body: JSON.stringify({id: id})
+            }).then(function() { loadManagers(); });
+        }
+
+        loadManagers();
     </script>
 </body>
 </html>

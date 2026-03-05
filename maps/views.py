@@ -12,8 +12,10 @@ from django.shortcuts import get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from django.conf import settings
+
 from .assignment import auto_assign_leads
-from .models import Lead, Rep, TimeOffRequest
+from .models import Lead, Rep, TimeOffRequest, Manager
 
 
 def index(request):
@@ -43,6 +45,41 @@ def leads_api(request):
         for lead in leads
     ]
     return JsonResponse(data, safe=False)
+
+
+def send_sms(to, body):
+    """Send an SMS via Twilio REST API."""
+    if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        return
+    url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
+    data = urllib.parse.urlencode({
+        'To': to,
+        'From': settings.TWILIO_PHONE_NUMBER,
+        'Body': body,
+    }).encode()
+    req = urllib.request.Request(url, data=data)
+    credentials = f'{settings.TWILIO_ACCOUNT_SID}:{settings.TWILIO_AUTH_TOKEN}'
+    import base64
+    auth = base64.b64encode(credentials.encode()).decode()
+    req.add_header('Authorization', f'Basic {auth}')
+    try:
+        urllib.request.urlopen(req, timeout=10)
+    except Exception:
+        pass
+
+
+def notify_managers_time_off(time_off_request):
+    """Text all managers about a new time off request."""
+    tor = time_off_request
+    time_str = 'All Day' if not tor.start_time else f'{tor.start_time:%I:%M %p} - {tor.end_time:%I:%M %p}'
+    reason_str = f' — {tor.reason}' if tor.reason else ''
+    body = (
+        f'Time Off Request #{tor.id}\n'
+        f'{tor.rep.name} requests {tor.date:%m/%d/%Y} {time_str}{reason_str}\n\n'
+        f'Reply "APPROVE {tor.id}" or "DENY {tor.id}"'
+    )
+    for manager in Manager.objects.all():
+        send_sms(manager.phone_number, body)
 
 
 def is_in_massachusetts(lat, lng):
@@ -154,6 +191,26 @@ def leads_bulk_delete(request):
     ids = data.get('ids', [])
     Lead.objects.filter(id__in=ids).delete()
     return JsonResponse({'status': 'ok'})
+
+
+@csrf_exempt
+def manager_api(request):
+    """List, create, or delete managers."""
+    if request.method == 'GET':
+        managers = list(Manager.objects.all().values('id', 'name', 'phone_number'))
+        return JsonResponse({'managers': managers})
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        Manager.objects.create(
+            name=data.get('name', ''),
+            phone_number=data.get('phone_number', ''),
+        )
+        return JsonResponse({'status': 'ok'})
+    if request.method == 'DELETE':
+        data = json.loads(request.body)
+        Manager.objects.filter(pk=data.get('id')).delete()
+        return JsonResponse({'status': 'ok'})
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
 def time_off_view(request):
@@ -672,13 +729,39 @@ def sms_webhook(request):
     body = request.POST.get('Body', '').strip()
     from_number = request.POST.get('From', '')
 
+    # Check if sender is a manager replying APPROVE/DENY
+    if from_number and body:
+        upper = body.strip().upper()
+        approve_match = re.match(r'^APPROVE\s+(\d+)$', upper)
+        deny_match = re.match(r'^DENY\s+(\d+)$', upper)
+        if approve_match or deny_match:
+            is_manager = Manager.objects.filter(phone_number__icontains=from_number[-10:]).exists()
+            if is_manager:
+                tor_id = int((approve_match or deny_match).group(1))
+                try:
+                    tor = TimeOffRequest.objects.select_related('rep').get(pk=tor_id)
+                    new_status = 'approved' if approve_match else 'denied'
+                    tor.status = new_status
+                    tor.save(update_fields=['status'])
+                    send_sms(from_number, f'{tor.rep.name} time off {tor.date:%m/%d/%Y} has been {new_status}.')
+                    # Notify the rep
+                    if tor.rep.phone_number:
+                        status_word = 'approved' if approve_match else 'denied'
+                        send_sms(tor.rep.phone_number, f'Your time off request for {tor.date:%m/%d/%Y} has been {status_word}.')
+                except TimeOffRequest.DoesNotExist:
+                    send_sms(from_number, f'Time off request #{tor_id} not found.')
+                return HttpResponse(
+                    '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                    content_type='text/xml',
+                )
+
     # Check if sender is a rep — if so, treat as time off request
     rep = Rep.objects.filter(phone_number__icontains=from_number[-10:]).first() if from_number else None
     if rep and body:
         time_off = parse_time_off_request(body, rep)
         if time_off:
             for req_date, start_t, end_t, reason in time_off:
-                TimeOffRequest.objects.create(
+                tor = TimeOffRequest.objects.create(
                     rep=rep,
                     date=req_date,
                     start_time=start_t,
@@ -686,6 +769,7 @@ def sms_webhook(request):
                     reason=reason,
                     raw_message=body,
                 )
+                notify_managers_time_off(tor)
             return HttpResponse(
                 '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
                 content_type='text/xml',
