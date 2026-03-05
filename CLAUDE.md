@@ -46,6 +46,7 @@ Mapping and Dispo — a Django app for mapping MA utility providers with SMS int
 ## Important Rules
 
 - **NEVER change map pin colors** — Solar=yellow (#f1c40f), HVAC=red (#e74c3c), Both=green (#27ae60), Unknown/missing=pink (#ff69b4). These colors are critical for the business.
+- **NEVER change city/utility provider colors** — The colors assigned to cities on the map correspond to their utility company. These are business-critical and must not be modified.
 - Lead pins use inline styles for color (`.lead-pin` CSS class must stay transparent to avoid double pins).
 - **App color scheme**: #293241 (dark navy), #3d5a80 (blue), #98c1d9 (light blue), #e0fbfc (ice blue), #ee6c4d (coral). Use these consistently.
 - SMS parser recognizes "Product Type" for appointment type and "Meeting Type" for appointment format.
