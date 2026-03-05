@@ -1,13 +1,16 @@
 import math
 from datetime import datetime, timedelta
+from itertools import permutations
 from .models import Lead, Rep
 
-APPOINTMENT_DURATION = 90  # minutes (1.5 hours buffer)
-WORK_START_HOUR = 9        # 9:00 AM
-WORK_END_HOUR = 20         # 8:00 PM
-AVG_SPEED_MPH = 30         # average MA driving speed
+APPOINTMENT_DURATION = 90   # minutes per appointment
+WORK_START_HOUR = 9         # 9:00 AM
+WORK_END_HOUR = 22          # 10:00 PM
+AVG_SPEED_MPH = 30          # average MA driving speed
 TARGET_PER_REP = 3
 MAX_PER_REP = 5
+LATE_WINDOW = 30            # minutes — max acceptable lateness
+LATE_STRETCH = 60           # minutes — absolute max (deprioritized)
 
 
 def haversine_miles(lat1, lon1, lat2, lon2):
@@ -35,62 +38,118 @@ def is_compatible(rep, lead):
     return rep.specialty == lead.appointment_type
 
 
-def order_stops_by_appointment_time(leads):
-    """Order leads by their actual appointment time."""
-    return sorted(leads, key=lambda l: l.appointment_datetime or datetime.max)
+def can_rep_make_it(rep_lat, rep_lng, free_at, lead):
+    """Check if a rep can reach a lead's appointment within the late window.
 
-
-def order_stops_nearest_neighbor(start_lat, start_lng, leads):
-    if not leads:
-        return []
-    remaining = list(leads)
-    ordered = []
-    cur_lat, cur_lng = start_lat, start_lng
-
-    while remaining:
-        nearest = min(
-            remaining,
-            key=lambda l: haversine_miles(cur_lat, cur_lng, l.latitude, l.longitude)
-        )
-        ordered.append(nearest)
-        cur_lat, cur_lng = nearest.latitude, nearest.longitude
-        remaining.remove(nearest)
-
-    return ordered
-
-
-def compute_schedule(rep, ordered_leads, target_date):
-    """Build schedule respecting actual appointment times.
-
-    Rep cannot arrive before the appointment time — they wait until
-    the scheduled time if they'd get there early.
+    Returns (lateness_minutes, travel_minutes) or None if impossible.
+    lateness_minutes: 0 = on time or early, >0 = minutes late.
     """
-    schedule = []
-    current_time = datetime(target_date.year, target_date.month, target_date.day,
-                            WORK_START_HOUR, 0)
-    end_of_day = datetime(target_date.year, target_date.month, target_date.day,
-                          WORK_END_HOUR, 0)
+    travel = travel_minutes(rep_lat, rep_lng, lead.latitude, lead.longitude)
+    if not lead.appointment_datetime:
+        return (0, travel)
+
+    appt_time = lead.appointment_datetime.replace(tzinfo=None)
+    earliest_arrival = free_at + timedelta(minutes=travel)
+
+    # How late would the rep be?
+    if earliest_arrival <= appt_time:
+        # On time or early — arrives at appt_time
+        return (0, travel)
+
+    lateness = (earliest_arrival - appt_time).total_seconds() / 60
+    if lateness <= LATE_STRETCH:
+        return (lateness, travel)
+
+    return None  # Too late
+
+
+def score_schedule(schedule, rep):
+    """Score a schedule. Lower is better.
+
+    Prioritizes:
+    1. Number of appointments covered (more = better, so negative weight)
+    2. Total lateness (less = better)
+    3. Total driving distance (less = better)
+    """
+    total_lateness = 0
+    total_drive = 0
     cur_lat, cur_lng = rep.latitude, rep.longitude
 
-    for lead in ordered_leads:
-        travel = travel_minutes(cur_lat, cur_lng, lead.latitude, lead.longitude)
-        earliest_arrival = current_time + timedelta(minutes=travel)
+    for lead, arrival in schedule:
+        drive = travel_minutes(cur_lat, cur_lng, lead.latitude, lead.longitude)
+        total_drive += drive
 
-        # If the lead has a scheduled appointment time, don't arrive before it
         if lead.appointment_datetime:
             appt_time = lead.appointment_datetime.replace(tzinfo=None)
-            arrival = max(earliest_arrival, appt_time)
-        else:
-            arrival = earliest_arrival
+            if arrival > appt_time:
+                lateness = (arrival - appt_time).total_seconds() / 60
+                # Heavier penalty past the 30-min comfort window
+                if lateness > LATE_WINDOW:
+                    total_lateness += lateness * 3
+                else:
+                    total_lateness += lateness
 
-        if arrival + timedelta(minutes=APPOINTMENT_DURATION) > end_of_day:
-            return None
-
-        schedule.append((lead, arrival))
-        current_time = arrival + timedelta(minutes=APPOINTMENT_DURATION)
         cur_lat, cur_lng = lead.latitude, lead.longitude
 
-    return schedule
+    # Coverage is king: -1000 per appointment covered
+    coverage_score = -1000 * len(schedule)
+    return coverage_score + total_lateness * 2 + total_drive
+
+
+def build_best_schedule(rep, leads, target_date):
+    """Find the best ordering of leads for a rep.
+
+    For small sets (<=6), try all permutations.
+    For larger sets, use appointment-time ordering with nearest-neighbor tiebreak.
+    """
+    end_of_day = datetime(target_date.year, target_date.month, target_date.day,
+                          WORK_END_HOUR, 0)
+
+    def try_schedule(ordered_leads):
+        schedule = []
+        current_time = datetime(target_date.year, target_date.month, target_date.day,
+                                WORK_START_HOUR, 0)
+        cur_lat, cur_lng = rep.latitude, rep.longitude
+
+        for lead in ordered_leads:
+            travel = travel_minutes(cur_lat, cur_lng, lead.latitude, lead.longitude)
+            earliest_arrival = current_time + timedelta(minutes=travel)
+
+            if lead.appointment_datetime:
+                appt_time = lead.appointment_datetime.replace(tzinfo=None)
+                arrival = max(earliest_arrival, appt_time)
+                lateness = (earliest_arrival - appt_time).total_seconds() / 60 if earliest_arrival > appt_time else 0
+                if lateness > LATE_STRETCH:
+                    continue  # Skip — can't make it
+            else:
+                arrival = earliest_arrival
+
+            if arrival + timedelta(minutes=APPOINTMENT_DURATION) > end_of_day:
+                continue  # Skip — won't finish before end of day
+
+            schedule.append((lead, arrival))
+            current_time = arrival + timedelta(minutes=APPOINTMENT_DURATION)
+            cur_lat, cur_lng = lead.latitude, lead.longitude
+
+        return schedule
+
+    if len(leads) <= 6:
+        # Try all permutations to find optimal coverage + minimal driving
+        best_schedule = []
+        best_score = float('inf')
+        for perm in permutations(leads):
+            sched = try_schedule(list(perm))
+            s = score_schedule(sched, rep)
+            if s < best_score:
+                best_score = s
+                best_schedule = sched
+        return best_schedule
+    else:
+        # Heuristic: sort by appointment time, tiebreak by proximity
+        sorted_leads = sorted(leads, key=lambda l: (
+            l.appointment_datetime.replace(tzinfo=None) if l.appointment_datetime else datetime.max,
+        ))
+        return try_schedule(sorted_leads)
 
 
 def auto_assign_leads(target_date, save=True):
@@ -133,89 +192,96 @@ def auto_assign_leads(target_date, save=True):
         for rep in reps:
             if not clusters[rep.id]:
                 continue
-            ordered = order_stops_by_appointment_time(clusters[rep.id])
-            schedule = compute_schedule(rep, ordered, target_date)
+            schedule = build_best_schedule(rep, clusters[rep.id], target_date)
             if schedule:
                 assignments.append({'rep': rep, 'stops': schedule})
         return {'assignments': assignments, 'unassigned': []}
 
-    # Sort unassigned leads furthest-from-nearest-rep first (prevents orphans)
-    def min_compatible_rep_distance(lead):
-        dists = []
-        for rep in reps:
-            if is_compatible(rep, lead):
-                d = haversine_miles(rep.latitude, rep.longitude,
-                                    lead.latitude, lead.longitude)
-                dists.append(d)
-        return min(dists) if dists else float('inf')
+    # --- Assignment strategy ---
+    # For each lead, figure out which reps can reach it on time (or close).
+    # Assign leads to maximize total coverage, then minimize driving.
 
-    remaining_leads = sorted(unassigned_leads, key=min_compatible_rep_distance, reverse=True)
+    # Sort leads by appointment time — earlier appts get assigned first
+    # so reps' schedules build forward naturally
+    sorted_leads = sorted(unassigned_leads, key=lambda l: (
+        l.appointment_datetime.replace(tzinfo=None) if l.appointment_datetime else datetime.max,
+    ))
+
     unassigned = []
 
-    # Greedy assignment: each lead to nearest compatible rep under capacity
-    # Locked leads count toward capacity
-    # Balance load among same-rated reps to avoid burnout
-    def get_min_load_for_rating(rating):
-        """Find the minimum cluster size among reps with this rating."""
-        return min(
-            (len(clusters[r.id]) for r in reps if r.rating == rating),
-            default=0,
-        )
+    def get_rep_free_time_and_location(rep_id):
+        """Where will this rep be and when will they be free after their current stops?"""
+        rep_obj = next(r for r in reps if r.id == rep_id)
+        if not clusters[rep_id]:
+            free_at = datetime(target_date.year, target_date.month, target_date.day,
+                               WORK_START_HOUR, 0)
+            return rep_obj.latitude, rep_obj.longitude, free_at
 
-    for lead in remaining_leads:
+        # Build a quick schedule to find last stop's end time
+        schedule = build_best_schedule(rep_obj, clusters[rep_id], target_date)
+        if schedule:
+            last_lead, last_arrival = schedule[-1]
+            free_at = last_arrival + timedelta(minutes=APPOINTMENT_DURATION)
+            return last_lead.latitude, last_lead.longitude, free_at
+        else:
+            free_at = datetime(target_date.year, target_date.month, target_date.day,
+                               WORK_START_HOUR, 0)
+            return rep_obj.latitude, rep_obj.longitude, free_at
+
+    for lead in sorted_leads:
         best_rep_id = None
-        best_dist = float('inf')
+        best_lateness = float('inf')
+        best_drive = float('inf')
 
         for rep in reps:
             if not is_compatible(rep, lead):
                 continue
             if len(clusters[rep.id]) >= MAX_PER_REP:
                 continue
-            dist = haversine_miles(rep.latitude, rep.longitude,
-                                   lead.latitude, lead.longitude)
-            # Soft penalty for reps already at target capacity
-            if len(clusters[rep.id]) >= TARGET_PER_REP:
-                dist *= 1.5
-            # Load-balancing: penalize reps that have more leads than
-            # the least-loaded rep at the same rating tier
-            min_load = get_min_load_for_rating(rep.rating)
-            excess = len(clusters[rep.id]) - min_load
-            if excess > 0:
-                dist *= (1.0 + 0.3 * excess)
-            if dist < best_dist:
-                best_dist = dist
+
+            lat, lng, free_at = get_rep_free_time_and_location(rep.id)
+            result = can_rep_make_it(lat, lng, free_at, lead)
+
+            if result is None:
+                continue
+
+            lateness, drive = result
+
+            # Prefer: on-time > within 30min late > stretch
+            # Among same lateness tier, prefer less driving
+            lateness_tier = 0 if lateness == 0 else (1 if lateness <= LATE_WINDOW else 2)
+            current_best_tier = 0 if best_lateness == 0 else (1 if best_lateness <= LATE_WINDOW else 2)
+
+            # Load balancing: soft penalty for overloaded reps
+            load_penalty = max(0, len(clusters[rep.id]) - TARGET_PER_REP) * 10
+
+            if (lateness_tier < current_best_tier or
+                (lateness_tier == current_best_tier and drive + load_penalty < best_drive)):
                 best_rep_id = rep.id
+                best_lateness = lateness
+                best_drive = drive + load_penalty
 
         if best_rep_id is not None:
             clusters[best_rep_id].append(lead)
         else:
             unassigned.append(lead)
 
-    # Order each cluster and validate schedule
-    # Locked leads are never dropped — only auto-assigned leads can be dropped
+    # Build final optimized schedules for each rep
     assignments = []
+    still_unassigned = list(unassigned)
+
     for rep in reps:
         cluster_leads = clusters[rep.id]
         if not cluster_leads:
             continue
 
-        # Order by appointment time so reps follow the scheduled sequence
-        ordered = order_stops_by_appointment_time(cluster_leads)
+        schedule = build_best_schedule(rep, cluster_leads, target_date)
 
-        schedule = compute_schedule(rep, ordered, target_date)
-        while schedule is None and len(ordered) > 0:
-            # Only drop auto-assigned leads, never locked ones
-            drop_candidate = None
-            for i in range(len(ordered) - 1, -1, -1):
-                if ordered[i].id not in locked_ids:
-                    drop_candidate = i
-                    break
-            if drop_candidate is None:
-                # All remaining are locked — can't drop any, keep as-is
-                break
-            dropped = ordered.pop(drop_candidate)
-            unassigned.append(dropped)
-            schedule = compute_schedule(rep, ordered, target_date)
+        # Any leads that didn't make the schedule go back to unassigned
+        scheduled_ids = {lead.id for lead, _ in schedule}
+        for lead in cluster_leads:
+            if lead.id not in scheduled_ids and lead.id not in locked_ids:
+                still_unassigned.append(lead)
 
         if schedule:
             assignments.append({
@@ -233,5 +299,5 @@ def auto_assign_leads(target_date, save=True):
 
     return {
         'assignments': assignments,
-        'unassigned': unassigned,
+        'unassigned': still_unassigned,
     }
