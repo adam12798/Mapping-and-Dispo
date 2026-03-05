@@ -732,24 +732,44 @@ def sms_webhook(request):
     # Check if sender is a manager replying APPROVE/DENY
     if from_number and body:
         upper = body.strip().upper()
-        approve_match = re.match(r'^APPROVE\s+(\d+)$', upper)
-        deny_match = re.match(r'^DENY\s+(\d+)$', upper)
-        if approve_match or deny_match:
+        approve_with_id = re.match(r'^APPROVE\s+(\d+)$', upper)
+        deny_with_id = re.match(r'^DENY\s+(\d+)$', upper)
+        approve_plain = upper == 'APPROVE'
+        deny_plain = upper == 'DENY'
+
+        if approve_with_id or deny_with_id or approve_plain or deny_plain:
             is_manager = Manager.objects.filter(phone_number__icontains=from_number[-10:]).exists()
             if is_manager:
-                tor_id = int((approve_match or deny_match).group(1))
-                try:
-                    tor = TimeOffRequest.objects.select_related('rep').get(pk=tor_id)
-                    new_status = 'approved' if approve_match else 'denied'
+                is_approve = approve_with_id or approve_plain
+                tor = None
+
+                if approve_with_id or deny_with_id:
+                    tor_id = int((approve_with_id or deny_with_id).group(1))
+                    tor = TimeOffRequest.objects.select_related('rep').filter(pk=tor_id).first()
+                    if not tor:
+                        send_sms(from_number, f'Time off request #{tor_id} not found.')
+                else:
+                    # Plain APPROVE/DENY — find pending requests
+                    pending = list(TimeOffRequest.objects.filter(status='pending').select_related('rep').order_by('-created_at'))
+                    if len(pending) == 1:
+                        tor = pending[0]
+                    elif len(pending) > 1:
+                        lines = [f'Multiple pending requests. Reply with the ID:']
+                        for p in pending:
+                            time_str = 'All Day' if not p.start_time else f'{p.start_time:%I:%M %p}-{p.end_time:%I:%M %p}'
+                            lines.append(f'  #{p.id} — {p.rep.name} {p.date:%m/%d/%Y} {time_str}')
+                        send_sms(from_number, '\n'.join(lines))
+                    else:
+                        send_sms(from_number, 'No pending time off requests.')
+
+                if tor:
+                    new_status = 'approved' if is_approve else 'denied'
                     tor.status = new_status
                     tor.save(update_fields=['status'])
                     send_sms(from_number, f'{tor.rep.name} time off {tor.date:%m/%d/%Y} has been {new_status}.')
-                    # Notify the rep
                     if tor.rep.phone_number:
-                        status_word = 'approved' if approve_match else 'denied'
-                        send_sms(tor.rep.phone_number, f'Your time off request for {tor.date:%m/%d/%Y} has been {status_word}.')
-                except TimeOffRequest.DoesNotExist:
-                    send_sms(from_number, f'Time off request #{tor_id} not found.')
+                        send_sms(tor.rep.phone_number, f'Your time off request for {tor.date:%m/%d/%Y} has been {new_status}.')
+
                 return HttpResponse(
                     '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
                     content_type='text/xml',
