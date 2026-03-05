@@ -82,8 +82,8 @@
         <table class="crm-table">
             <thead>
                 <tr>
-                    <th class="checkbox-col"><input type="checkbox" id="select-all"></th>
-                    <th class="sortable" onclick="sortTable(1)">Homeowner Name <span class="sort-arrow"></span></th>
+                    <th class="checkbox-col sticky-col sticky-check"><input type="checkbox" id="select-all"></th>
+                    <th class="sortable sticky-col sticky-name" onclick="sortTable(1)">Homeowner Name <span class="sort-arrow"></span></th>
                     <th class="sortable" onclick="sortTable(2)">Phone Number <span class="sort-arrow"></span></th>
                     <th class="sortable" onclick="sortTable(3)">Street Address <span class="sort-arrow"></span></th>
                     <th class="sortable" onclick="sortTable(4)">City <span class="sort-arrow"></span></th>
@@ -98,8 +98,8 @@
             <tbody>
                 {% for lead in leads %}
                 <tr data-id="{{ lead.id }}">
-                    <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
-                    <td><input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}"></td>
+                    <td class="checkbox-col sticky-col sticky-check"><input type="checkbox" class="row-select"></td>
+                    <td class="sticky-col sticky-name"><input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}"></td>
                     <td><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number }}"></td>
                     <td><input type="text" class="crm-input" data-field="address" value="{{ lead.address }}"></td>
                     <td><input type="text" class="crm-input" data-field="city" value="{{ lead.city }}"></td>

@@ -167,6 +167,35 @@ html, body {
     white-space: nowrap;
 }
 
+.sticky-col {
+    position: sticky;
+    z-index: 2;
+}
+
+.sticky-check {
+    left: 0;
+    min-width: 36px;
+}
+
+.sticky-name {
+    left: 36px;
+    min-width: 160px;
+    border-right: 2px solid #98c1d9;
+}
+
+thead .sticky-col {
+    z-index: 3;
+    background: #293241;
+}
+
+tbody .sticky-col {
+    background: #fff;
+}
+
+tbody tr:hover .sticky-col {
+    background: #e0fbfc;
+}
+
 .crm-table thead th {
     background: #293241;
     color: #e0fbfc;
