@@ -14,6 +14,7 @@ class Lead(models.Model):
     DISPOSITION_CHOICES = [
         ('sale', 'Sale'),
         ('no_sale', 'No Sale'),
+        ('follow_up', 'Follow Up'),
         ('credit_fail', 'Credit Fail'),
         ('cancel_door', 'Cancel at Door'),
         ('cpfu', 'CPFU'),
