@@ -18,6 +18,15 @@ from .assignment import auto_assign_leads
 from .models import Lead, Rep, TimeOffRequest, Manager
 
 
+def twilio_check(request):
+    """Quick check if Twilio env vars are loaded (no secrets exposed)."""
+    return JsonResponse({
+        'sid_set': bool(settings.TWILIO_ACCOUNT_SID),
+        'token_set': bool(settings.TWILIO_AUTH_TOKEN),
+        'phone_set': bool(settings.TWILIO_PHONE_NUMBER),
+    })
+
+
 def index(request):
     return render(request, 'maps/index.html')
 

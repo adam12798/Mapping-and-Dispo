@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path('', views.index, name='index'),
+    path('api/twilio-check/', views.twilio_check, name='twilio_check'),
     path('crm/', views.crm_view, name='crm'),
     path('api/leads/', views.leads_api, name='leads_api'),
     path('api/leads/<int:pk>/', views.lead_update, name='lead_update'),
