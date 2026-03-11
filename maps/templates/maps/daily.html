@@ -9,6 +9,22 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
+    <style>
+        .crm-table th { position: relative; }
+        .crm-table th .col-resize {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 5px;
+            cursor: col-resize;
+            user-select: none;
+        }
+        .crm-table th .col-resize:hover,
+        .crm-table th .col-resize.active {
+            background: #ee6c4d;
+        }
+    </style>
 </head>
 <body>
     <nav class="top-nav">
@@ -90,15 +106,15 @@
             <thead>
                 <tr>
                     <th class="checkbox-col sticky-col sticky-check"><input type="checkbox" id="select-all"></th>
-                    <th class="sortable sticky-col sticky-name" onclick="sortTable(1)">Homeowner Name <span class="sort-arrow"></span></th>
-                    <th class="sortable" onclick="sortTable(2)">Phone <span class="sort-arrow"></span></th>
-                    <th class="sortable" onclick="sortTable(3)">Street Address <span class="sort-arrow"></span></th>
-                    <th class="sortable" onclick="sortTable(4)">City <span class="sort-arrow"></span></th>
-                    <th class="sortable" onclick="sortTable(5)">Appt Type <span class="sort-arrow"></span></th>
-                    <th class="sortable" onclick="sortTable(6)">Appt Format <span class="sort-arrow"></span></th>
-                    <th class="sortable" onclick="sortTable(7)">Appt Time <span class="sort-arrow"></span></th>
-                    <th class="sortable" onclick="sortTable(8)">Status <span class="sort-arrow"></span></th>
-                    <th class="sortable" onclick="sortTable(9)">Dispo <span class="sort-arrow"></span></th>
+                    <th class="sortable sticky-col sticky-name" onclick="sortTable(1)">Homeowner Name <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(2)">Phone <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(3)">Street Address <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(4)">City <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(5)">Appt Type <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(6)">Appt Format <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(7)">Appt Time <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(8)">Status <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(9)">Dispo <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -371,6 +387,38 @@
                 saveField(leadId, field, this.value);
             });
         });
+
+        // Column resize
+        (function() {
+            var resizing = null;
+            var startX, startWidth;
+
+            document.querySelectorAll('.col-resize').forEach(function(handle) {
+                handle.addEventListener('mousedown', function(e) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    resizing = this.parentElement;
+                    startX = e.pageX;
+                    startWidth = resizing.offsetWidth;
+                    this.classList.add('active');
+                });
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (!resizing) return;
+                var diff = e.pageX - startX;
+                var newWidth = Math.max(50, startWidth + diff);
+                resizing.style.width = newWidth + 'px';
+                resizing.style.minWidth = newWidth + 'px';
+            });
+
+            document.addEventListener('mouseup', function() {
+                if (resizing) {
+                    resizing.querySelector('.col-resize').classList.remove('active');
+                    resizing = null;
+                }
+            });
+        })();
     </script>
 </body>
 </html>
