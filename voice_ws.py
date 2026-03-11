@@ -2,6 +2,7 @@
 FastAPI WebSocket handler that bridges Twilio Media Streams ↔ OpenAI Realtime API.
 
 Twilio sends g711_ulaw audio over WebSocket, which OpenAI Realtime API accepts natively.
+On connect, looks up the caller's appointments from the CRM to provide real schedule data.
 After the call ends, GPT-4o-mini extracts time off requests from the transcript.
 """
 import os
@@ -21,9 +22,11 @@ app = FastAPI()
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime'
 
-SYSTEM_PROMPT = """You are a friendly scheduling assistant for a solar and HVAC sales company in Massachusetts.
+SYSTEM_PROMPT = """You are Alfred, a British scheduling assistant for a solar and HVAC sales company in Massachusetts. You speak with a warm British manner — use British expressions naturally (e.g. "brilliant", "straightaway", "right then", "cheers") but don't overdo it.
 
 Reps call you to talk about their schedule, appointments, availability, or anything work-related. Help them with whatever they need.
+
+Reps can view their schedule and ask questions about appointments, but they CANNOT change, cancel, reschedule, or modify appointments. If a rep asks to change an appointment, politely let them know they'll need to talk to their manager for that.
 
 Do NOT bring up time off unless the rep mentions it first. If they do request time off:
 - Confirm the date(s) they want off
@@ -35,6 +38,87 @@ Do NOT bring up time off unless the rep mentions it first. If they do request ti
 Be conversational, warm, and efficient. Keep responses brief since this is a phone call.
 If you hear something unclear, garbled, or that doesn't make sense, don't guess — just ask them to repeat it.
 If the input seems like background noise or doesn't contain a clear question or statement, ignore it and wait for the rep to speak clearly."""
+
+
+def clean_phone(number):
+    """Normalize a phone number for comparison."""
+    return number.replace('+1', '').replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
+
+
+async def get_rep_context(caller_number):
+    """Look up rep and their upcoming appointments by phone number."""
+    import django
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
+    django.setup()
+
+    from asgiref.sync import sync_to_async
+    from maps.models import Rep, Lead, TimeOffRequest
+    from datetime import date, timedelta
+
+    if not caller_number:
+        return {'rep': None, 'prompt_context': ''}
+
+    clean = clean_phone(caller_number)
+    reps = await sync_to_async(list)(Rep.objects.filter(is_active=True))
+    rep = None
+    for r in reps:
+        r_clean = clean_phone(r.phone_number)
+        if r_clean and r_clean == clean:
+            rep = r
+            break
+
+    if not rep:
+        return {'rep': None, 'prompt_context': ''}
+
+    today = date.today()
+    # Get appointments for next 3 days
+    leads = await sync_to_async(list)(
+        Lead.objects.filter(
+            rep=rep,
+            appointment_datetime__date__gte=today,
+            appointment_datetime__date__lte=today + timedelta(days=3),
+        ).order_by('appointment_datetime')
+    )
+
+    # Get approved time off
+    time_off = await sync_to_async(list)(
+        TimeOffRequest.objects.filter(
+            rep=rep,
+            date__gte=today,
+            date__lte=today + timedelta(days=3),
+            status='approved',
+        ).order_by('date')
+    )
+
+    lines = [f'You are speaking with {rep.name}.']
+
+    if leads:
+        lines.append(f"\n{rep.name}'s upcoming appointments:")
+        for lead in leads:
+            dt = lead.appointment_datetime
+            appt_type = lead.appointment_type or 'unknown'
+            fmt = lead.appointment_format or ''
+            dispo = lead.disposition or 'none'
+            lines.append(
+                f"- {dt:%a %m/%d at %I:%M %p}: {lead.homeowner_name or 'Unknown'} "
+                f"at {lead.address}, {lead.city} ({appt_type}, {fmt}) [dispo: {dispo}]"
+            )
+    else:
+        lines.append(f"\n{rep.name} has no upcoming appointments in the next 3 days.")
+
+    if time_off:
+        lines.append('\nApproved time off:')
+        for t in time_off:
+            if t.start_time:
+                time_str = f'{t.start_time:%I:%M %p} - {t.end_time:%I:%M %p}'
+            else:
+                time_str = 'All Day'
+            lines.append(f"- {t.date:%a %m/%d}: {time_str}")
+
+    return {
+        'rep': rep,
+        'prompt_context': '\n'.join(lines),
+    }
 
 
 @app.websocket('/media-stream')
@@ -49,6 +133,9 @@ async def media_stream(ws: WebSocket):
     transcript_parts = []
     openai_ws = None
     session_ready = asyncio.Event()
+    caller_identified = asyncio.Event()
+    rep_context = {}
+    session_update_count = 0
 
     try:
         # Connect to OpenAI Realtime API
@@ -64,7 +151,7 @@ async def media_stream(ws: WebSocket):
 
         async def forward_twilio_to_openai():
             """Forward audio from Twilio to OpenAI."""
-            nonlocal stream_sid, caller_number, call_sid
+            nonlocal stream_sid, caller_number, call_sid, rep_context
             try:
                 while True:
                     data = await ws.receive_text()
@@ -76,10 +163,14 @@ async def media_stream(ws: WebSocket):
                         call_sid = custom.get('callSid', msg['start'].get('callSid', ''))
                         caller_number = custom.get('callerNumber', '')
                         logger.info(f'Stream started: sid={stream_sid}, call={call_sid}, caller={caller_number}')
-                        logger.info(f'Custom params: {custom}')
+
+                        # Look up rep and their appointments
+                        rep_context = await get_rep_context(caller_number)
+                        logger.info(f'Rep context: {rep_context.get("rep")}')
+                        caller_identified.set()
 
                     elif msg['event'] == 'media':
-                        # Wait until OpenAI session is configured
+                        # Wait until OpenAI session is fully configured
                         await session_ready.wait()
                         # Forward audio to OpenAI
                         audio_event = {
@@ -99,15 +190,15 @@ async def media_stream(ws: WebSocket):
 
         async def forward_openai_to_twilio():
             """Forward audio from OpenAI back to Twilio and collect transcript."""
-            nonlocal transcript_parts
+            nonlocal transcript_parts, session_update_count
             try:
                 async for raw_msg in openai_ws:
                     msg = json.loads(raw_msg)
                     msg_type = msg.get('type', '')
 
                     if msg_type == 'session.created':
-                        logger.info('OpenAI session created, sending config...')
-                        # Now configure the session
+                        logger.info('OpenAI session created, sending initial config...')
+                        # Phase 1: Send generic config to get OpenAI ready fast
                         session_config = {
                             'type': 'session.update',
                             'session': {
@@ -131,23 +222,55 @@ async def media_stream(ws: WebSocket):
                         await openai_ws.send(json.dumps(session_config))
 
                     elif msg_type == 'session.updated':
-                        logger.info('OpenAI session configured, sending initial greeting...')
-                        session_ready.set()
-                        # Trigger OpenAI to speak just "Hi!" and wait for the rep
-                        await openai_ws.send(json.dumps({
-                            'type': 'conversation.item.create',
-                            'item': {
-                                'type': 'message',
-                                'role': 'user',
-                                'content': [{
-                                    'type': 'input_text',
-                                    'text': 'The call just connected. Say only "Hi!" and nothing else, then wait for me to speak.',
-                                }],
-                            },
-                        }))
-                        await openai_ws.send(json.dumps({
-                            'type': 'response.create',
-                        }))
+                        session_update_count += 1
+
+                        if session_update_count == 1:
+                            # Generic config confirmed. Wait for caller ID, then enrich.
+                            logger.info('Generic config set, waiting for caller identification...')
+                            try:
+                                await asyncio.wait_for(caller_identified.wait(), timeout=5.0)
+                            except asyncio.TimeoutError:
+                                logger.warning('Caller identification timed out, using generic prompt')
+
+                            # Build enriched prompt with real appointment data
+                            if rep_context.get('prompt_context'):
+                                enriched_prompt = SYSTEM_PROMPT + '\n\n' + rep_context['prompt_context']
+                            else:
+                                enriched_prompt = SYSTEM_PROMPT
+
+                            logger.info('Sending enriched session config...')
+                            await openai_ws.send(json.dumps({
+                                'type': 'session.update',
+                                'session': {
+                                    'instructions': enriched_prompt,
+                                },
+                            }))
+
+                        elif session_update_count == 2:
+                            # Enriched config confirmed. Now greet the rep.
+                            logger.info('Enriched config set, sending greeting...')
+                            session_ready.set()
+
+                            rep = rep_context.get('rep')
+                            if rep:
+                                greeting_text = f'The call just connected with {rep.name}. Say "Hey {rep.name}!" and wait for them to speak. Keep it very short.'
+                            else:
+                                greeting_text = 'The call just connected. Say only "Hi!" and nothing else, then wait for me to speak.'
+
+                            await openai_ws.send(json.dumps({
+                                'type': 'conversation.item.create',
+                                'item': {
+                                    'type': 'message',
+                                    'role': 'user',
+                                    'content': [{
+                                        'type': 'input_text',
+                                        'text': greeting_text,
+                                    }],
+                                },
+                            }))
+                            await openai_ws.send(json.dumps({
+                                'type': 'response.create',
+                            }))
 
                     elif msg_type == 'response.audio.delta':
                         # Send audio back to Twilio
@@ -212,12 +335,12 @@ async def media_stream(ws: WebSocket):
         logger.info(f'Call ended. Caller: {caller_number}, SID: {call_sid}, transcript parts: {len(transcript_parts)}')
         logger.info(f'Transcript: {full_transcript[:300] if full_transcript else "(empty)"}')
         try:
-            await save_call_and_extract(caller_number, call_sid, full_transcript)
+            await save_call_and_extract(caller_number, call_sid, full_transcript, rep=rep_context.get('rep'))
         except Exception as e:
             logger.error(f'Failed to save call log: {e}')
 
 
-async def save_call_and_extract(caller_number, call_sid, transcript):
+async def save_call_and_extract(caller_number, call_sid, transcript, rep=None):
     """Save the call log and extract time off requests using GPT-4o-mini."""
     import django
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
@@ -247,13 +370,12 @@ async def save_call_and_extract(caller_number, call_sid, transcript):
         except Exception as e:
             logger.error(f'Summary generation failed: {e}')
 
-    # Match caller to a rep
-    rep = None
-    if caller_number:
-        clean = caller_number.replace('+1', '').replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
+    # Match caller to a rep if not already matched
+    if not rep and caller_number:
+        clean = clean_phone(caller_number)
         reps = await sync_to_async(list)(Rep.objects.filter(is_active=True))
         for r in reps:
-            r_clean = r.phone_number.replace('+1', '').replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
+            r_clean = clean_phone(r.phone_number)
             if r_clean and r_clean == clean:
                 rep = r
                 break
