@@ -23,7 +23,7 @@ def voice_debug(request):
             }
             ws = await websockets.connect(
                 'wss://api.openai.com/v1/realtime?model=gpt-realtime',
-                additional_headers=headers,
+                extra_headers=headers,
             )
             # Wait for session.created
             msg = await asyncio.wait_for(ws.recv(), timeout=5)

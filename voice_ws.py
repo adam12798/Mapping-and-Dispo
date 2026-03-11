@@ -61,7 +61,7 @@ async def media_stream(ws: WebSocket):
         }
         openai_ws = await websockets.connect(
             OPENAI_REALTIME_URL,
-            additional_headers=headers,
+            extra_headers=headers,
         )
         logger.info('Connected to OpenAI Realtime API')
 
