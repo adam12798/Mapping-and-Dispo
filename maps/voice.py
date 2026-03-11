@@ -1,0 +1,19 @@
+from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
+
+
+@csrf_exempt
+def voice_answer(request):
+    """Twilio Voice webhook — returns TwiML that connects to our WebSocket media stream."""
+    host = request.get_host()
+    protocol = 'wss' if request.is_secure() else 'ws'
+
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say>Hello! This is the scheduling assistant. How can I help you today?</Say>
+    <Connect>
+        <Stream url="{protocol}://{host}/media-stream" />
+    </Connect>
+</Response>"""
+
+    return HttpResponse(twiml, content_type='text/xml')

@@ -92,3 +92,16 @@ class TimeOffRequest(models.Model):
     def __str__(self):
         time_str = 'All Day' if not self.start_time else f'{self.start_time:%I:%M %p} - {self.end_time:%I:%M %p}'
         return f"{self.rep.name} — {self.date:%m/%d/%Y} {time_str} ({self.status})"
+
+
+class VoiceCallLog(models.Model):
+    rep = models.ForeignKey(Rep, null=True, blank=True, on_delete=models.SET_NULL, related_name='voice_calls')
+    caller_number = models.CharField(max_length=20)
+    twilio_call_sid = models.CharField(max_length=64, blank=True)
+    transcript = models.TextField(blank=True)
+    summary = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        name = self.rep.name if self.rep else self.caller_number
+        return f"Voice call from {name} ({self.created_at:%m/%d/%Y %I:%M %p})"
