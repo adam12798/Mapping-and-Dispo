@@ -39,6 +39,24 @@ def voice_debug(request):
     return JsonResponse(results)
 
 
+def voice_logs(request):
+    """Debug endpoint to check voice call logs."""
+    from maps.models import VoiceCallLog
+    logs = VoiceCallLog.objects.order_by('-created_at')[:10]
+    data = []
+    for log in logs:
+        data.append({
+            'id': log.id,
+            'rep': log.rep.name if log.rep else None,
+            'caller_number': log.caller_number,
+            'call_sid': log.twilio_call_sid,
+            'transcript': log.transcript[:500] if log.transcript else '',
+            'summary': log.summary,
+            'created_at': str(log.created_at),
+        })
+    return JsonResponse({'logs': data})
+
+
 @csrf_exempt
 def voice_answer(request):
     """Twilio Voice webhook — returns TwiML that connects to our WebSocket media stream."""
