@@ -60,6 +60,7 @@ CRITICAL RULES:
 - If credit was run and failed, it is ALWAYS credit_fail
 - Do NOT tell the rep the disposition category name. Just confirm naturally: "Alright, I've got that noted" or "Very good, I'll update that straightaway"
 - Do NOT use the no_coverage disposition — that is not something reps report
+- After updating a disposition, if the rep has another appointment the same day, remind them of the time and drive time (if available). Example: "Right then, you've got the Smiths at 3 PM — about 25 minutes from here."
 
 Do NOT bring up time off unless the rep mentions it first. If they do request time off:
 - Confirm the date(s) they want off
@@ -97,6 +98,23 @@ DISPOSITION_TOOL = {
 def clean_phone(number):
     """Normalize a phone number for comparison."""
     return number.replace('+1', '').replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
+
+
+async def get_drive_time(lat1, lng1, lat2, lng2):
+    """Get driving time in minutes between two points using OSRM (free, no API key)."""
+    import aiohttp
+    try:
+        url = f'http://router.project-osrm.org/route/v1/driving/{lng1},{lat1};{lng2},{lat2}?overview=false'
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get('routes'):
+                        duration_min = round(data['routes'][0]['duration'] / 60)
+                        return duration_min
+    except Exception as e:
+        logger.error(f'OSRM drive time error: {e}')
+    return None
 
 
 async def get_rep_context(caller_number):
@@ -148,15 +166,27 @@ async def get_rep_context(caller_number):
 
     if leads:
         lines.append(f"\n{rep.name}'s upcoming appointments:")
-        for lead in leads:
+        for i, lead in enumerate(leads):
             dt = lead.appointment_datetime
             appt_type = lead.appointment_type or 'unknown'
             fmt = lead.appointment_format or ''
             dispo = lead.disposition or 'none'
-            lines.append(
+            line = (
                 f"- [ID: {lead.id}] {dt:%a %m/%d at %I:%M %p}: {lead.homeowner_name or 'Unknown'} "
                 f"at {lead.address}, {lead.city} ({appt_type}, {fmt}) [dispo: {dispo}]"
             )
+            # Calculate drive time to next appointment on the same day
+            if i < len(leads) - 1:
+                next_lead = leads[i + 1]
+                if (lead.latitude and lead.longitude and next_lead.latitude and next_lead.longitude
+                        and lead.appointment_datetime.date() == next_lead.appointment_datetime.date()):
+                    drive_min = await get_drive_time(
+                        lead.latitude, lead.longitude,
+                        next_lead.latitude, next_lead.longitude,
+                    )
+                    if drive_min is not None:
+                        line += f" → ~{drive_min} min drive to next"
+            lines.append(line)
     else:
         lines.append(f"\n{rep.name} has no upcoming appointments in the next 3 days.")
 
