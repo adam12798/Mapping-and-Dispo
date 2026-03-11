@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
-OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17'
+OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime'
 
 SYSTEM_PROMPT = """You are a friendly scheduling assistant for a solar and HVAC sales company in Massachusetts.
 

@@ -5,6 +5,7 @@ from . import voice
 urlpatterns = [
     path('', views.index, name='index'),
     path('voice/answer/', voice.voice_answer, name='voice_answer'),
+    path('voice/debug/', voice.voice_debug, name='voice_debug'),
     path('api/twilio-check/', views.twilio_check, name='twilio_check'),
     path('crm/', views.crm_view, name='crm'),
     path('api/leads/', views.leads_api, name='leads_api'),
