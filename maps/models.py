@@ -20,6 +20,7 @@ class Lead(models.Model):
         ('cpfu', 'CPFU'),
         ('rep_no_show', 'Rep No Show'),
         ('no_coverage', 'No Coverage'),
+        ('needs_reschedule', 'Needs Reschedule'),
     ]
 
     address = models.CharField(max_length=500)

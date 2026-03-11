@@ -3,6 +3,7 @@ FastAPI WebSocket handler that bridges Twilio Media Streams ↔ OpenAI Realtime 
 
 Twilio sends g711_ulaw audio over WebSocket, which OpenAI Realtime API accepts natively.
 On connect, looks up the caller's appointments from the CRM to provide real schedule data.
+Alfred can update lead dispositions via function calling during the conversation.
 After the call ends, GPT-4o-mini extracts time off requests from the transcript.
 """
 import os
@@ -28,6 +29,32 @@ Reps call you to talk about their schedule, appointments, availability, or anyth
 
 Reps can view their schedule and ask questions about appointments, but they CANNOT change, cancel, reschedule, or modify appointments. If a rep asks to change an appointment, politely let them know they'll need to talk to their manager for that.
 
+## Appointment Debriefs & Dispositions
+When a rep tells you about how an appointment went, you need to determine the correct disposition. Ask smart follow-up questions to figure out what really happened. Here is the decision tree:
+
+1. Did the rep NOT make it to the appointment?
+   - They got caught up / couldn't make it → **needs_reschedule**
+   - They refused to go → **rep_no_show** (rare, only if clearly refusing)
+
+2. Did the rep get to the house but never got inside?
+   - Homeowner cancelled at the door → **cancel_door**
+
+3. The rep got in and presented. Did they run credit?
+   - YES, credit PASSED + ALL contracts signed → **sale**
+   - YES, credit PASSED + contracts NOT completed → **cpfu** (Credit Pass Follow Up)
+   - YES, credit FAILED → **credit_fail**
+   - NO credit run:
+     - Still sounds like life in the deal → **follow_up**
+     - Dead deal, no interest → **no_sale**
+
+CRITICAL RULES:
+- ALWAYS ask "Did you run credit?" — this is the most important question
+- Be skeptical of reps claiming a sale. A sale means credit passed AND all contracts were signed. If contracts weren't completed, it's a CPFU, not a sale.
+- If credit was run and passed, it is ALWAYS cpfu (never follow_up) unless all contracts were signed (then it's a sale)
+- If credit was run and failed, it is ALWAYS credit_fail
+- Confirm the disposition with the rep before calling update_disposition
+- Do NOT use the no_coverage disposition — that is not something reps report
+
 Do NOT bring up time off unless the rep mentions it first. If they do request time off:
 - Confirm the date(s) they want off
 - Ask if it's a full day or specific hours
@@ -38,6 +65,27 @@ Do NOT bring up time off unless the rep mentions it first. If they do request ti
 Be conversational, warm, and efficient. Keep responses brief since this is a phone call.
 If you hear something unclear, garbled, or that doesn't make sense, don't guess — just ask them to repeat it.
 If the input seems like background noise or doesn't contain a clear question or statement, ignore it and wait for the rep to speak clearly."""
+
+DISPOSITION_TOOL = {
+    'type': 'function',
+    'name': 'update_disposition',
+    'description': 'Update the disposition/outcome of a lead after an appointment. Only call this after confirming the disposition with the rep.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'lead_id': {
+                'type': 'integer',
+                'description': 'The ID of the lead to update',
+            },
+            'disposition': {
+                'type': 'string',
+                'enum': ['sale', 'no_sale', 'follow_up', 'credit_fail', 'cancel_door', 'cpfu', 'rep_no_show', 'needs_reschedule'],
+                'description': 'The disposition to set on the lead',
+            },
+        },
+        'required': ['lead_id', 'disposition'],
+    },
+}
 
 
 def clean_phone(number):
@@ -100,7 +148,7 @@ async def get_rep_context(caller_number):
             fmt = lead.appointment_format or ''
             dispo = lead.disposition or 'none'
             lines.append(
-                f"- {dt:%a %m/%d at %I:%M %p}: {lead.homeowner_name or 'Unknown'} "
+                f"- [ID: {lead.id}] {dt:%a %m/%d at %I:%M %p}: {lead.homeowner_name or 'Unknown'} "
                 f"at {lead.address}, {lead.city} ({appt_type}, {fmt}) [dispo: {dispo}]"
             )
     else:
@@ -119,6 +167,37 @@ async def get_rep_context(caller_number):
         'rep': rep,
         'prompt_context': '\n'.join(lines),
     }
+
+
+async def execute_tool(fn_name, fn_args, rep):
+    """Execute a function call from the AI and return the result."""
+    import django
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
+    django.setup()
+
+    from asgiref.sync import sync_to_async
+    from maps.models import Lead
+
+    if fn_name == 'update_disposition':
+        lead_id = fn_args.get('lead_id')
+        disposition = fn_args.get('disposition')
+
+        if not rep:
+            return {'success': False, 'error': 'Could not identify rep'}
+
+        # Only allow updating leads assigned to this rep
+        updated = await sync_to_async(
+            Lead.objects.filter(id=lead_id, rep=rep).update
+        )(disposition=disposition)
+
+        if updated:
+            logger.info(f'Updated lead {lead_id} disposition to {disposition} for rep {rep.name}')
+            return {'success': True, 'message': f'Disposition updated to {disposition}'}
+        else:
+            logger.warning(f'Failed to update lead {lead_id} — not found or not assigned to {rep.name}')
+            return {'success': False, 'error': 'Lead not found or not assigned to you'}
+
+    return {'success': False, 'error': f'Unknown function: {fn_name}'}
 
 
 @app.websocket('/media-stream')
@@ -238,12 +317,17 @@ async def media_stream(ws: WebSocket):
                             else:
                                 enriched_prompt = SYSTEM_PROMPT
 
+                            # Include disposition tool if we have a matched rep
+                            enriched_session = {
+                                'instructions': enriched_prompt,
+                            }
+                            if rep_context.get('rep'):
+                                enriched_session['tools'] = [DISPOSITION_TOOL]
+
                             logger.info('Sending enriched session config...')
                             await openai_ws.send(json.dumps({
                                 'type': 'session.update',
-                                'session': {
-                                    'instructions': enriched_prompt,
-                                },
+                                'session': enriched_session,
                             }))
 
                         elif session_update_count == 2:
@@ -272,6 +356,30 @@ async def media_stream(ws: WebSocket):
                             await openai_ws.send(json.dumps({
                                 'type': 'response.create',
                             }))
+
+                    elif msg_type == 'response.function_call_arguments.done':
+                        # AI is calling a function (e.g. update_disposition)
+                        fn_name = msg.get('name', '')
+                        fn_args = json.loads(msg.get('arguments', '{}'))
+                        call_id = msg.get('call_id', '')
+
+                        logger.info(f'Function call: {fn_name}({fn_args})')
+
+                        result = await execute_tool(fn_name, fn_args, rep_context.get('rep'))
+
+                        # Send result back to OpenAI
+                        await openai_ws.send(json.dumps({
+                            'type': 'conversation.item.create',
+                            'item': {
+                                'type': 'function_call_output',
+                                'call_id': call_id,
+                                'output': json.dumps(result),
+                            },
+                        }))
+                        # Trigger AI to respond with confirmation
+                        await openai_ws.send(json.dumps({
+                            'type': 'response.create',
+                        }))
 
                     elif msg_type == 'response.audio.delta':
                         # Send audio back to Twilio
