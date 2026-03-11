@@ -13,8 +13,11 @@ Mapping and Dispo — a Django app for mapping MA utility providers with SMS int
 
 ## Tech Stack
 
-- Python / Django
-- Twilio for SMS (credentials in `.env`)
+- Python / Django (ASGI via Uvicorn)
+- FastAPI for WebSocket handling (voice assistant)
+- Twilio for SMS + Voice (credentials in `.env`)
+- OpenAI Realtime API for voice AI assistant
+- OpenAI GPT-4o-mini for transcript extraction
 - Leaflet.js for maps (OpenStreetMap tiles)
 - Nominatim for geocoding (free, no API key)
 - Static maps UI (HTML/CSS/JS in `maps/`)
@@ -27,14 +30,17 @@ Mapping and Dispo — a Django app for mapping MA utility providers with SMS int
    - `TWILIO_ACCOUNT_SID`
    - `TWILIO_AUTH_TOKEN`
    - `TWILIO_PHONE_NUMBER`
+   - `OPENAI_API_KEY`
 4. Get Twilio credentials from your Twilio dashboard (do NOT commit them)
+5. Get OpenAI API key from https://platform.openai.com/api-keys
 
 ## Twilio
 
 - Phone number: +18337990424
 - Credentials stored in `.env` (gitignored) and as env vars on Railway
-- Inbound: SMS webhook receives leads (from setters) and time off requests (from reps, matched by phone number)
-- Outbound: Notifies managers of time off requests, confirms approve/deny to reps
+- **SMS Inbound**: Webhook receives leads (from setters), time off requests (from reps, matched by phone number), and manager APPROVE/DENY replies
+- **SMS Outbound**: Notifies managers of time off requests, confirms approve/deny to reps
+- **Voice Inbound**: Webhook at `/voice/answer/` returns TwiML with `<Connect><Stream>` to bridge to OpenAI Realtime API via WebSocket at `/media-stream`
 - Timezone: America/New_York (EST/EDT)
 
 ## App Features
@@ -44,6 +50,7 @@ Mapping and Dispo — a Django app for mapping MA utility providers with SMS int
 - **Reps** (`/reps/`) — Sales rep management with star ratings, color picker (route lines), specialty, and active/inactive status dropdown.
 - **Auto-Assign** — Algorithm distributes appointments to active reps based on appointment time, specialty, travel distance, and workload balance. Priority 1: maximize coverage, Priority 2: minimize driving. Reps arrive at appointment time or up to 30 min late (stretch to 60 min). Tries all orderings for ≤6 stops. Target 2-3 appts/day, max 5. Work window 9am-10pm. User-assigned leads are locked (non-negotiable). Leads with no appointment type cannot be assigned.
 - **Time Off** (`/time-off/`) — Reps text time off requests (e.g. "I cant work friday"). Managers get SMS notifications and can reply APPROVE/DENY. Approved time off blocks reps from auto-assign. Time Off page shows pending requests, approved history, and notification manager list.
+- **Voice Assistant** — Reps call +18337990424 to speak with an AI scheduling assistant (OpenAI Realtime API). Handles time off requests conversationally. Post-call: transcript saved to VoiceCallLog, time off requests auto-extracted via GPT-4o-mini and created as pending. Debug endpoint at `/voice/debug/`.
 - **Route API** (`/api/route/?date=YYYY-MM-DD`) — Pre-computed route for a given date, returns ordered stops + rep info.
 - **Disposition** — Each lead has a dispo dropdown: Sale (green), No Sale (purple), Follow Up (orange), Credit Fail (pink), Cancel at Door (gray), CPFU (light blue), Rep No Show (black), No Coverage (cherry red).
 
@@ -76,13 +83,17 @@ Mapping and Dispo — a Django app for mapping MA utility providers with SMS int
 
 ## Key Files
 
-- `maps/models.py` — Lead, Rep, TimeOffRequest, Manager models
+- `maps/models.py` — Lead, Rep, TimeOffRequest, Manager, VoiceCallLog models
 - `maps/views.py` — All API endpoints, views, SMS webhook, Twilio outbound
+- `maps/voice.py` — Voice TwiML endpoint + debug endpoint
 - `maps/assignment.py` — Auto-assignment algorithm (respects appt times, time off, specialty)
+- `voice_ws.py` — FastAPI WebSocket handler bridging Twilio ↔ OpenAI Realtime API
+- `dispo/asgi.py` — ASGI router (WebSocket → FastAPI, HTTP → Django)
 - `maps/templates/maps/index.html` — Map page with sidebar (shows reps off section)
 - `maps/templates/maps/crm.html` — CRM page
 - `maps/templates/maps/reps.html` — Reps page
 - `maps/templates/maps/time_off.html` — Time Off page (requests, approvals, managers)
 - `maps/static/maps/style.css` — All styles
 - `maps/urls.py` — URL routing
-- `dispo/settings.py` — Django settings (timezone, Twilio config, database)
+- `dispo/settings.py` — Django settings (timezone, Twilio/OpenAI config, database)
+- `Procfile` — Railway deployment (uvicorn ASGI server)
