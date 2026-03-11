@@ -65,10 +65,17 @@ def voice_answer(request):
     forwarded_proto = request.headers.get('X-Forwarded-Proto', '')
     protocol = 'wss' if (request.is_secure() or forwarded_proto == 'https') else 'ws'
 
+    # Twilio sends caller info in POST params
+    caller = request.POST.get('From', '') or request.GET.get('From', '')
+    call_sid = request.POST.get('CallSid', '') or request.GET.get('CallSid', '')
+
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
-        <Stream url="{protocol}://{host}/media-stream" />
+        <Stream url="{protocol}://{host}/media-stream">
+            <Parameter name="callerNumber" value="{caller}" />
+            <Parameter name="callSid" value="{call_sid}" />
+        </Stream>
     </Connect>
 </Response>"""
 

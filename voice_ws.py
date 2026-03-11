@@ -75,9 +75,11 @@ async def media_stream(ws: WebSocket):
 
                     if msg['event'] == 'start':
                         stream_sid = msg['start']['streamSid']
-                        call_sid = msg['start'].get('callSid', '')
-                        caller_number = msg['start'].get('customParameters', {}).get('From', '')
+                        custom = msg['start'].get('customParameters', {})
+                        call_sid = custom.get('callSid', msg['start'].get('callSid', ''))
+                        caller_number = custom.get('callerNumber', '')
                         logger.info(f'Stream started: sid={stream_sid}, call={call_sid}, caller={caller_number}')
+                        logger.info(f'Custom params: {custom}')
 
                     elif msg['event'] == 'media':
                         # Wait until OpenAI session is configured
