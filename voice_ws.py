@@ -117,7 +117,7 @@ async def media_stream(ws: WebSocket):
                                 'turn_detection': {'type': 'server_vad'},
                                 'input_audio_format': 'g711_ulaw',
                                 'output_audio_format': 'g711_ulaw',
-                                'voice': 'alloy',
+                                'voice': 'shimmer',
                                 'instructions': SYSTEM_PROMPT,
                                 'modalities': ['text', 'audio'],
                                 'temperature': 0.8,
