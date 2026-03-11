@@ -203,10 +203,14 @@ async def media_stream(ws: WebSocket):
             await openai_ws.close()
         logger.info('Media stream connection closed')
 
-        # Post-call: save transcript and extract time off requests
+        # Post-call: always save call log
         full_transcript = '\n'.join(transcript_parts)
-        if full_transcript.strip():
+        logger.info(f'Call ended. Caller: {caller_number}, SID: {call_sid}, transcript parts: {len(transcript_parts)}')
+        logger.info(f'Transcript: {full_transcript[:300] if full_transcript else "(empty)"}')
+        try:
             await save_call_and_extract(caller_number, call_sid, full_transcript)
+        except Exception as e:
+            logger.error(f'Failed to save call log: {e}')
 
 
 async def save_call_and_extract(caller_number, call_sid, transcript):
@@ -215,6 +219,7 @@ async def save_call_and_extract(caller_number, call_sid, transcript):
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
     django.setup()
 
+    from asgiref.sync import sync_to_async
     from maps.models import VoiceCallLog, Rep, TimeOffRequest
     from openai import OpenAI
     from datetime import datetime, date
@@ -223,26 +228,26 @@ async def save_call_and_extract(caller_number, call_sid, transcript):
     client = OpenAI(api_key=OPENAI_API_KEY)
 
     # Generate summary
-    try:
-        summary_resp = client.chat.completions.create(
-            model='gpt-4o-mini',
-            messages=[
-                {'role': 'system', 'content': 'Summarize this phone call transcript in 1-2 sentences.'},
-                {'role': 'user', 'content': transcript},
-            ],
-            max_tokens=150,
-        )
-        summary = summary_resp.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f'Summary generation failed: {e}')
-        summary = ''
+    summary = ''
+    if transcript.strip():
+        try:
+            summary_resp = client.chat.completions.create(
+                model='gpt-4o-mini',
+                messages=[
+                    {'role': 'system', 'content': 'Summarize this phone call transcript in 1-2 sentences.'},
+                    {'role': 'user', 'content': transcript},
+                ],
+                max_tokens=150,
+            )
+            summary = summary_resp.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f'Summary generation failed: {e}')
 
     # Match caller to a rep
     rep = None
     if caller_number:
-        # Normalize number for lookup
         clean = caller_number.replace('+1', '').replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
-        reps = Rep.objects.filter(is_active=True)
+        reps = await sync_to_async(list)(Rep.objects.filter(is_active=True))
         for r in reps:
             r_clean = r.phone_number.replace('+1', '').replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
             if r_clean and r_clean == clean:
@@ -250,7 +255,7 @@ async def save_call_and_extract(caller_number, call_sid, transcript):
                 break
 
     # Save call log
-    call_log = VoiceCallLog.objects.create(
+    call_log = await sync_to_async(VoiceCallLog.objects.create)(
         rep=rep,
         caller_number=caller_number,
         twilio_call_sid=call_sid,
@@ -258,6 +263,10 @@ async def save_call_and_extract(caller_number, call_sid, transcript):
         summary=summary,
     )
     logger.info(f'Saved voice call log #{call_log.id}')
+
+    if not transcript.strip():
+        logger.info('No transcript to extract time off from')
+        return
 
     # Extract time off requests
     try:
@@ -281,7 +290,6 @@ Return ONLY the JSON array, no other text."""},
             max_tokens=500,
         )
         raw = extract_resp.choices[0].message.content.strip()
-        # Strip markdown code fences if present
         if raw.startswith('```'):
             raw = re.sub(r'^```\w*\n?', '', raw)
             raw = re.sub(r'\n?```$', '', raw)
@@ -307,7 +315,7 @@ Return ONLY the JSON array, no other text."""},
                 start_time = dt_time(sh, sm)
                 end_time = dt_time(eh, em)
 
-            TimeOffRequest.objects.create(
+            await sync_to_async(TimeOffRequest.objects.create)(
                 rep=rep,
                 date=req_date,
                 start_time=start_time,
