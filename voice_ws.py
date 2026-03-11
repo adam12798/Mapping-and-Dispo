@@ -33,7 +33,8 @@ Do NOT bring up time off unless the rep mentions it first. If they do request ti
 - Confirm the details back to them
 
 Be conversational, warm, and efficient. Keep responses brief since this is a phone call.
-If you don't understand something, ask them to repeat it."""
+If you hear something unclear, garbled, or that doesn't make sense, don't guess — just ask them to repeat it.
+If the input seems like background noise or doesn't contain a clear question or statement, ignore it and wait for the rep to speak clearly."""
 
 
 @app.websocket('/media-stream')
@@ -112,8 +113,9 @@ async def media_stream(ws: WebSocket):
                             'session': {
                                 'turn_detection': {
                                     'type': 'server_vad',
-                                    'threshold': 0.7,
+                                    'threshold': 0.85,
                                     'silence_duration_ms': 700,
+                                    'prefix_padding_ms': 500,
                                 },
                                 'input_audio_format': 'g711_ulaw',
                                 'output_audio_format': 'g711_ulaw',
