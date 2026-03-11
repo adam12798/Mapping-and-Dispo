@@ -131,15 +131,15 @@ async def media_stream(ws: WebSocket):
                     elif msg_type == 'session.updated':
                         logger.info('OpenAI session configured, sending initial greeting...')
                         session_ready.set()
-                        # Trigger OpenAI to speak first with a simple greeting
+                        # Trigger OpenAI to speak just "Hi!" and wait for the rep
                         await openai_ws.send(json.dumps({
                             'type': 'conversation.item.create',
                             'item': {
                                 'type': 'message',
-                                'role': 'assistant',
+                                'role': 'user',
                                 'content': [{
                                     'type': 'input_text',
-                                    'text': 'Hi!',
+                                    'text': 'The call just connected. Say only "Hi!" and nothing else, then wait for me to speak.',
                                 }],
                             },
                         }))
