@@ -13,6 +13,7 @@ import logging
 import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
@@ -50,6 +51,7 @@ async def media_stream(ws: WebSocket):
     call_sid = ''
     transcript_parts = []
     openai_ws = None
+    session_ready = asyncio.Event()
 
     try:
         # Connect to OpenAI Realtime API
@@ -63,21 +65,6 @@ async def media_stream(ws: WebSocket):
         )
         logger.info('Connected to OpenAI Realtime API')
 
-        # Configure the session
-        session_config = {
-            'type': 'session.update',
-            'session': {
-                'turn_detection': {'type': 'server_vad'},
-                'input_audio_format': 'g711_ulaw',
-                'output_audio_format': 'g711_ulaw',
-                'voice': 'alloy',
-                'instructions': SYSTEM_PROMPT,
-                'modalities': ['text', 'audio'],
-                'temperature': 0.8,
-            },
-        }
-        await openai_ws.send(json.dumps(session_config))
-
         async def forward_twilio_to_openai():
             """Forward audio from Twilio to OpenAI."""
             nonlocal stream_sid, caller_number, call_sid
@@ -89,11 +76,12 @@ async def media_stream(ws: WebSocket):
                     if msg['event'] == 'start':
                         stream_sid = msg['start']['streamSid']
                         call_sid = msg['start'].get('callSid', '')
-                        custom = msg['start'].get('customParameters', {})
-                        caller_number = custom.get('callerNumber', '')
-                        logger.info(f'Stream started: {stream_sid}, caller: {caller_number}')
+                        caller_number = msg['start'].get('customParameters', {}).get('From', '')
+                        logger.info(f'Stream started: sid={stream_sid}, call={call_sid}, caller={caller_number}')
 
                     elif msg['event'] == 'media':
+                        # Wait until OpenAI session is configured
+                        await session_ready.wait()
                         # Forward audio to OpenAI
                         audio_event = {
                             'type': 'input_audio_buffer.append',
@@ -118,30 +106,63 @@ async def media_stream(ws: WebSocket):
                     msg = json.loads(raw_msg)
                     msg_type = msg.get('type', '')
 
-                    if msg_type == 'response.audio.delta':
-                        # Send audio back to Twilio
-                        audio_payload = msg['delta']
-                        twilio_msg = {
-                            'event': 'media',
-                            'streamSid': stream_sid,
-                            'media': {'payload': audio_payload},
+                    if msg_type == 'session.created':
+                        logger.info('OpenAI session created, sending config...')
+                        # Now configure the session
+                        session_config = {
+                            'type': 'session.update',
+                            'session': {
+                                'turn_detection': {'type': 'server_vad'},
+                                'input_audio_format': 'g711_ulaw',
+                                'output_audio_format': 'g711_ulaw',
+                                'voice': 'alloy',
+                                'instructions': SYSTEM_PROMPT,
+                                'modalities': ['text', 'audio'],
+                                'temperature': 0.8,
+                                'input_audio_transcription': {
+                                    'model': 'whisper-1',
+                                },
+                            },
                         }
-                        await ws.send_json(twilio_msg)
+                        await openai_ws.send(json.dumps(session_config))
+
+                    elif msg_type == 'session.updated':
+                        logger.info('OpenAI session configured, ready for audio')
+                        session_ready.set()
+
+                    elif msg_type == 'response.audio.delta':
+                        # Send audio back to Twilio
+                        if stream_sid:
+                            audio_payload = msg['delta']
+                            twilio_msg = {
+                                'event': 'media',
+                                'streamSid': stream_sid,
+                                'media': {'payload': audio_payload},
+                            }
+                            await ws.send_json(twilio_msg)
 
                     elif msg_type == 'response.audio_transcript.done':
                         # Collect assistant transcript
                         text = msg.get('transcript', '')
                         if text:
                             transcript_parts.append(f'Assistant: {text}')
+                            logger.info(f'Assistant said: {text[:100]}')
 
                     elif msg_type == 'conversation.item.input_audio_transcription.completed':
                         # Collect user (rep) transcript
                         text = msg.get('transcript', '')
                         if text:
                             transcript_parts.append(f'Rep: {text}')
+                            logger.info(f'Rep said: {text[:100]}')
 
                     elif msg_type == 'error':
                         logger.error(f'OpenAI error: {msg}')
+
+                    elif msg_type in ('response.created', 'response.done',
+                                      'input_audio_buffer.speech_started',
+                                      'input_audio_buffer.speech_stopped',
+                                      'input_audio_buffer.committed'):
+                        logger.info(f'OpenAI event: {msg_type}')
 
             except websockets.exceptions.ConnectionClosed:
                 logger.info('OpenAI WebSocket closed')
@@ -149,10 +170,16 @@ async def media_stream(ws: WebSocket):
                 logger.error(f'Error forwarding OpenAI→Twilio: {e}')
 
         # Run both directions concurrently
-        await asyncio.gather(
-            forward_twilio_to_openai(),
-            forward_openai_to_twilio(),
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(forward_twilio_to_openai()),
+                asyncio.create_task(forward_openai_to_twilio()),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
         )
+        # Cancel remaining tasks when one side disconnects
+        for task in pending:
+            task.cancel()
 
     except Exception as e:
         logger.error(f'Media stream error: {e}')
