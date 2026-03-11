@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Mapping and Dispo — a Django app for mapping MA utility providers with SMS integration, auto-assignment, and CRM.
+**Sutton** — a Django app for mapping MA utility providers with SMS integration, auto-assignment, CRM, and AI voice assistant.
 
 ## GitHub
 
@@ -97,3 +97,8 @@ Mapping and Dispo — a Django app for mapping MA utility providers with SMS int
 - `maps/urls.py` — URL routing
 - `dispo/settings.py` — Django settings (timezone, Twilio/OpenAI config, database)
 - `Procfile` — Railway deployment (uvicorn ASGI server)
+
+## Future / Roadmap
+
+- **Sutton Dashboard** — central landing page with branding, quick stats, and navigation. Integrate "Sutton" branding across all page titles and headers.
+- **Voice Agent Phase 2** — allow reps to update appointment info through conversation with Alfred (OpenAI function calling)
