@@ -156,6 +156,20 @@ def crm_view(request):
     return render(request, 'maps/crm.html', {'leads': leads, 'reps': reps})
 
 
+def daily_view(request):
+    from datetime import date as dt_date
+    selected_date = request.GET.get('date', dt_date.today().isoformat())
+    leads = Lead.objects.select_related('rep').filter(
+        appointment_datetime__date=selected_date
+    ).order_by('appointment_datetime')
+    reps = Rep.objects.filter(is_active=True).order_by('name')
+    return render(request, 'maps/daily.html', {
+        'leads': leads,
+        'reps': reps,
+        'selected_date': selected_date,
+    })
+
+
 @csrf_exempt
 def lead_update(request, pk):
     """Update or delete a lead's CRM fields."""
