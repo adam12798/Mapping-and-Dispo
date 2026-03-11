@@ -253,7 +253,8 @@ async def media_stream(ws: WebSocket):
 
                             rep = rep_context.get('rep')
                             if rep:
-                                greeting_text = f'The call just connected with {rep.name}. Say "Hey {rep.name}!" and wait for them to speak. Keep it very short.'
+                                first_name = rep.name.split()[0]
+                                greeting_text = f'The call just connected with {first_name}. Say "Hey {first_name}!" and wait for them to speak. Keep it very short.'
                             else:
                                 greeting_text = 'The call just connected. Say only "Hi!" and nothing else, then wait for me to speak.'
 
