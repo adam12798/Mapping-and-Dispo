@@ -12,7 +12,6 @@ def voice_answer(request):
 
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say>Hello! This is the scheduling assistant. How can I help you today?</Say>
     <Connect>
         <Stream url="{protocol}://{host}/media-stream" />
     </Connect>

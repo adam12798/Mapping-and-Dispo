@@ -127,8 +127,23 @@ async def media_stream(ws: WebSocket):
                         await openai_ws.send(json.dumps(session_config))
 
                     elif msg_type == 'session.updated':
-                        logger.info('OpenAI session configured, ready for audio')
+                        logger.info('OpenAI session configured, sending initial greeting...')
                         session_ready.set()
+                        # Trigger OpenAI to speak first with a greeting
+                        await openai_ws.send(json.dumps({
+                            'type': 'conversation.item.create',
+                            'item': {
+                                'type': 'message',
+                                'role': 'user',
+                                'content': [{
+                                    'type': 'input_text',
+                                    'text': 'Hello, I just called in.',
+                                }],
+                            },
+                        }))
+                        await openai_ws.send(json.dumps({
+                            'type': 'response.create',
+                        }))
 
                     elif msg_type == 'response.audio.delta':
                         # Send audio back to Twilio
