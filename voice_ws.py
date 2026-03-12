@@ -236,6 +236,27 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
 
         if updated:
             logger.info(f'Updated lead {lead_id} disposition to {disposition}, notes: {call_notes}')
+
+            # Send webhook to Go High Level
+            try:
+                import aiohttp
+                lead = await sync_to_async(Lead.objects.filter(id=lead_id).first)()
+                if lead:
+                    ghl_payload = {
+                        'phone': lead.phone_number,
+                        'name': lead.homeowner_name,
+                        'disposition': disposition,
+                    }
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                            json=ghl_payload,
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as resp:
+                            logger.info(f'GHL webhook sent for lead {lead_id}: {resp.status}')
+            except Exception as e:
+                logger.error(f'GHL webhook failed for lead {lead_id}: {e}')
+
             return {'success': True, 'message': f'Disposition updated to {disposition}'}
         else:
             logger.warning(f'Failed to update lead {lead_id} — not found or not assigned to {rep.name}')
