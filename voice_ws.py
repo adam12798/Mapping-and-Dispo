@@ -89,8 +89,12 @@ DISPOSITION_TOOL = {
                 'enum': ['sale', 'no_sale', 'follow_up', 'credit_fail', 'cancel_door', 'cpfu', 'rep_no_show', 'needs_reschedule'],
                 'description': 'The disposition to set on the lead',
             },
+            'call_notes': {
+                'type': 'string',
+                'description': 'A brief paraphrase of what happened at the appointment, under 20 words. Example: "Wife blew up the deal" or "Homeowner needs to talk to friend who has solar"',
+            },
         },
-        'required': ['lead_id', 'disposition'],
+        'required': ['lead_id', 'disposition', 'call_notes'],
     },
 }
 
@@ -205,7 +209,7 @@ async def get_rep_context(caller_number):
     }
 
 
-async def execute_tool(fn_name, fn_args, rep):
+async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
     """Execute a function call from the AI and return the result."""
     import django
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
@@ -217,17 +221,21 @@ async def execute_tool(fn_name, fn_args, rep):
     if fn_name == 'update_disposition':
         lead_id = fn_args.get('lead_id')
         disposition = fn_args.get('disposition')
+        call_notes = fn_args.get('call_notes', '')
 
         if not rep:
             return {'success': False, 'error': 'Could not identify rep'}
 
+        # Build current transcript
+        call_transcript = '\n'.join(transcript_parts) if transcript_parts else ''
+
         # Only allow updating leads assigned to this rep
         updated = await sync_to_async(
             Lead.objects.filter(id=lead_id, rep=rep).update
-        )(disposition=disposition)
+        )(disposition=disposition, call_notes=call_notes, call_transcript=call_transcript)
 
         if updated:
-            logger.info(f'Updated lead {lead_id} disposition to {disposition} for rep {rep.name}')
+            logger.info(f'Updated lead {lead_id} disposition to {disposition}, notes: {call_notes}')
             return {'success': True, 'message': f'Disposition updated to {disposition}'}
         else:
             logger.warning(f'Failed to update lead {lead_id} — not found or not assigned to {rep.name}')
@@ -401,7 +409,7 @@ async def media_stream(ws: WebSocket):
 
                         logger.info(f'Function call: {fn_name}({fn_args})')
 
-                        result = await execute_tool(fn_name, fn_args, rep_context.get('rep'))
+                        result = await execute_tool(fn_name, fn_args, rep_context.get('rep'), transcript_parts)
 
                         # Send result back to OpenAI
                         await openai_ws.send(json.dumps({

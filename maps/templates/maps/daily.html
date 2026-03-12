@@ -115,6 +115,8 @@
                     <th class="sortable" onclick="sortTable(7)">Appt Time <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(8)">Status <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(9)">Dispo <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(10)">Call Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(11)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -164,10 +166,12 @@
                             <option value="needs_reschedule" {% if lead.disposition == "needs_reschedule" %}selected{% endif %}>Needs Reschedule</option>
                         </select>
                     </td>
+                    <td><input type="text" class="crm-input" data-field="call_notes" value="{{ lead.call_notes }}" placeholder="—"></td>
+                    <td><textarea class="crm-input" data-field="call_transcript" rows="1" style="resize:vertical;min-height:28px;max-width:300px;">{{ lead.call_transcript }}</textarea></td>
                     <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)">X</button></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="11" class="empty-row">No appointments for this date</td></tr>
+                <tr><td colspan="13" class="empty-row">No appointments for this date</td></tr>
                 {% endfor %}
             </tbody>
         </table>

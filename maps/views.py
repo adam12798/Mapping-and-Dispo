@@ -184,7 +184,7 @@ def lead_update(request, pk):
     allowed_fields = [
         'homeowner_name', 'phone_number', 'address', 'city',
         'appointment_type', 'appointment_format', 'appointment_datetime',
-        'disposition',
+        'disposition', 'call_notes', 'call_transcript',
     ]
     if 'rep_id' in data:
         rep_val = data['rep_id']
