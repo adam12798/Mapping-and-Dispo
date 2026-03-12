@@ -1,0 +1,204 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Mapping & Dispo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="/" class="nav-tab">Map</a>
+        <a href="/crm/" class="nav-tab">CRM</a>
+        <a href="/reps/" class="nav-tab">Reps</a>
+        <a href="/time-off/" class="nav-tab">Time Off</a>
+        <a href="/daily/" class="nav-tab">Daily</a>
+        <a href="/dashboard/" class="nav-tab active">Dashboard</a>
+    </nav>
+    <div class="dashboard-container">
+        <div class="dashboard-toolbar">
+            <div class="crm-header">
+                <h2>Dashboard</h2>
+                <div class="summary-pills">
+                    <span>Total: <strong id="kpi-total">—</strong></span>
+                    <span>Sales: <strong id="kpi-sales">—</strong></span>
+                    <span>Conv. Rate: <strong id="kpi-rate">—</strong></span>
+                </div>
+            </div>
+            <div class="crm-filters">
+                <div class="filter-group">
+                    <label>From</label>
+                    <input type="date" id="filter-start" onchange="fetchData()">
+                </div>
+                <div class="filter-group">
+                    <label>To</label>
+                    <input type="date" id="filter-end" onchange="fetchData()">
+                </div>
+                <div class="filter-group">
+                    <label>Rep</label>
+                    <select id="filter-rep" onchange="fetchData()">
+                        <option value="">All Reps</option>
+                        {% for rep in reps %}
+                        <option value="{{ rep.id }}">{{ rep.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Group By</label>
+                    <select id="filter-group-by" onchange="fetchData()">
+                        <option value="">None</option>
+                        <option value="rep">Rep</option>
+                        <option value="product">Product Type</option>
+                    </select>
+                </div>
+                <button class="filter-clear" onclick="resetFilters()">Clear</button>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="chart-card">
+                <h3>Appointments by Disposition</h3>
+                <canvas id="chart-dispo"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Appointments by Rep</h3>
+                <canvas id="chart-rep"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Conversion Rate by Rep</h3>
+                <canvas id="chart-conversion"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Appointments by Product Type</h3>
+                <canvas id="chart-product"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        let chartDispo = null;
+        let chartRep = null;
+        let chartConversion = null;
+        let chartProduct = null;
+
+        function fetchData() {
+            const params = new URLSearchParams();
+            const start = document.getElementById('filter-start').value;
+            const end = document.getElementById('filter-end').value;
+            const rep = document.getElementById('filter-rep').value;
+            const groupBy = document.getElementById('filter-group-by').value;
+
+            if (start) params.set('start', start);
+            if (end) params.set('end', end);
+            if (rep) params.set('rep_ids', rep);
+            if (groupBy) params.set('group_by', groupBy);
+
+            fetch('/api/dashboard/?' + params.toString())
+                .then(r => r.json())
+                .then(data => renderCharts(data))
+                .catch(err => console.error('Dashboard fetch error:', err));
+        }
+
+        function renderCharts(data) {
+            // Update KPIs
+            document.getElementById('kpi-total').textContent = data.summary.total;
+            document.getElementById('kpi-sales').textContent = data.summary.total_sales;
+            document.getElementById('kpi-rate').textContent = data.summary.conversion_rate + '%';
+
+            // Destroy existing charts
+            if (chartDispo) chartDispo.destroy();
+            if (chartRep) chartRep.destroy();
+            if (chartConversion) chartConversion.destroy();
+            if (chartProduct) chartProduct.destroy();
+
+            const fontFamily = "'Montserrat', sans-serif";
+            const gridColor = '#e0fbfc';
+            const textColor = '#293241';
+
+            // Disposition chart
+            chartDispo = new Chart(document.getElementById('chart-dispo'), {
+                type: 'bar',
+                data: data.by_disposition,
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: data.by_disposition.datasets.length > 1, labels: { font: { family: fontFamily, size: 11 }, color: textColor } },
+                    },
+                    scales: {
+                        x: { grid: { color: gridColor }, ticks: { font: { family: fontFamily }, color: textColor } },
+                        y: { grid: { display: false }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } },
+                    },
+                },
+            });
+
+            // By rep chart
+            chartRep = new Chart(document.getElementById('chart-rep'), {
+                type: 'bar',
+                data: data.by_rep,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } },
+                        y: { grid: { color: gridColor }, ticks: { font: { family: fontFamily }, color: textColor } },
+                    },
+                },
+            });
+
+            // Conversion chart
+            chartConversion = new Chart(document.getElementById('chart-conversion'), {
+                type: 'bar',
+                data: data.conversion_by_rep,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: { label: function(ctx) { return ctx.parsed.y + '%'; } },
+                        },
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } },
+                        y: { min: 0, max: 100, grid: { color: gridColor }, ticks: { font: { family: fontFamily }, color: textColor, callback: function(v) { return v + '%'; } } },
+                    },
+                },
+            });
+
+            // Product type chart (doughnut)
+            chartProduct = new Chart(document.getElementById('chart-product'), {
+                type: 'doughnut',
+                data: data.by_product,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { font: { family: fontFamily, size: 12 }, color: textColor, padding: 16 } },
+                    },
+                },
+            });
+        }
+
+        function resetFilters() {
+            document.getElementById('filter-start').value = '';
+            document.getElementById('filter-end').value = '';
+            document.getElementById('filter-rep').value = '';
+            document.getElementById('filter-group-by').value = '';
+            fetchData();
+        }
+
+        // Load on page ready
+        fetchData();
+    </script>
+</body>
+</html>

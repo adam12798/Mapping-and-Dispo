@@ -679,3 +679,58 @@ tbody tr:hover .sticky-col {
 .redo-btn:hover {
     background: #d4583a !important;
 }
+
+/* Dashboard */
+.dashboard-container {
+    min-height: calc(100vh - 44px);
+    background: #e0fbfc;
+}
+
+.dashboard-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #fff;
+    padding: 16px 24px 8px 24px;
+    border-bottom: 2px solid #98c1d9;
+}
+
+.summary-pills {
+    display: flex;
+    gap: 20px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #293241;
+    margin-left: auto;
+}
+
+.summary-pills strong {
+    color: #3d5a80;
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    padding: 24px;
+}
+
+.chart-card {
+    background: #fff;
+    border-radius: 8px;
+    border: 1px solid #98c1d9;
+    padding: 20px;
+    height: 380px;
+}
+
+.chart-card h3 {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: #293241;
+    margin-bottom: 12px;
+}
+
+.chart-card canvas {
+    max-height: 320px;
+}

@@ -586,6 +586,135 @@ def confirm_assignments_api(request):
     return JsonResponse({'status': 'ok', 'confirmed': count})
 
 
+def dashboard_view(request):
+    reps = Rep.objects.filter(is_active=True).order_by('name')
+    return render(request, 'maps/dashboard.html', {'reps': reps})
+
+
+def dashboard_api(request):
+    """Return aggregated appointment stats for the dashboard charts."""
+    from django.db.models import Count, Q
+
+    start = request.GET.get('start', '')
+    end = request.GET.get('end', '')
+    rep_ids_raw = request.GET.get('rep_ids', '')
+    group_by = request.GET.get('group_by', '')
+
+    qs = Lead.objects.select_related('rep')
+    if start:
+        qs = qs.filter(appointment_datetime__date__gte=start)
+    if end:
+        qs = qs.filter(appointment_datetime__date__lte=end)
+    if rep_ids_raw:
+        rep_ids = [int(x) for x in rep_ids_raw.split(',') if x.strip().isdigit()]
+        qs = qs.filter(rep_id__in=rep_ids)
+
+    DISPO_KEYS = ['sale', 'no_sale', 'follow_up', 'credit_fail', 'cancel_door',
+                  'cpfu', 'rep_no_show', 'no_coverage', 'needs_reschedule']
+    DISPO_LABELS = {
+        'sale': 'Sale', 'no_sale': 'No Sale', 'follow_up': 'Follow Up',
+        'credit_fail': 'Credit Fail', 'cancel_door': 'Cancel at Door',
+        'cpfu': 'CPFU', 'rep_no_show': 'Rep No Show',
+        'no_coverage': 'No Coverage', 'needs_reschedule': 'Needs Reschedule',
+    }
+    DISPO_COLORS = {
+        'sale': '#27ae60', 'no_sale': '#8e44ad', 'follow_up': '#e67e22',
+        'credit_fail': '#ff69b4', 'cancel_door': '#95a5a6', 'cpfu': '#98c1d9',
+        'rep_no_show': '#111111', 'no_coverage': '#c0392b', 'needs_reschedule': '#3498db',
+    }
+    PRODUCT_COLORS = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
+
+    # --- by_disposition ---
+    if group_by == 'rep':
+        grouped = qs.values('rep__name', 'rep__color', 'disposition').annotate(count=Count('id'))
+        pivot = {}
+        for row in grouped:
+            rep_name = row['rep__name'] or 'Unassigned'
+            rep_color = row['rep__color'] or '#98c1d9'
+            if rep_name not in pivot:
+                pivot[rep_name] = {'color': rep_color, 'counts': {d: 0 for d in DISPO_KEYS}}
+            if row['disposition'] in pivot[rep_name]['counts']:
+                pivot[rep_name]['counts'][row['disposition']] = row['count']
+        dispo_datasets = [
+            {'label': name, 'data': [v['counts'][d] for d in DISPO_KEYS], 'backgroundColor': v['color']}
+            for name, v in pivot.items()
+        ]
+    elif group_by == 'product':
+        grouped = qs.values('appointment_type', 'disposition').annotate(count=Count('id'))
+        pivot = {pt: {d: 0 for d in DISPO_KEYS} for pt in ['solar', 'hvac', 'both']}
+        for row in grouped:
+            pt = row['appointment_type'] or ''
+            if pt in pivot and row['disposition'] in pivot[pt]:
+                pivot[pt][row['disposition']] = row['count']
+        dispo_datasets = [
+            {'label': pt.capitalize(), 'data': [pivot[pt][d] for d in DISPO_KEYS],
+             'backgroundColor': PRODUCT_COLORS[pt]}
+            for pt in ['solar', 'hvac', 'both']
+        ]
+    else:
+        flat = qs.values('disposition').annotate(count=Count('id'))
+        counts = {r['disposition']: r['count'] for r in flat}
+        dispo_datasets = [{
+            'label': 'All',
+            'data': [counts.get(d, 0) for d in DISPO_KEYS],
+            'backgroundColor': [DISPO_COLORS[d] for d in DISPO_KEYS],
+        }]
+
+    # --- by_rep ---
+    rep_rows = list(qs.filter(rep__isnull=False).values('rep__name', 'rep__color').annotate(
+        total=Count('id')).order_by('-total'))
+    by_rep = {
+        'labels': [r['rep__name'] for r in rep_rows],
+        'datasets': [{
+            'label': 'Appointments',
+            'data': [r['total'] for r in rep_rows],
+            'backgroundColor': [r['rep__color'] or '#98c1d9' for r in rep_rows],
+        }],
+    }
+
+    # --- conversion_by_rep ---
+    conv_rows = list(qs.filter(rep__isnull=False).values('rep__name', 'rep__color').annotate(
+        total=Count('id'), sales=Count('id', filter=Q(disposition='sale'))
+    ).order_by('rep__name'))
+    by_conversion = {
+        'labels': [r['rep__name'] for r in conv_rows],
+        'datasets': [{
+            'label': 'Sale %',
+            'data': [round(r['sales'] / r['total'] * 100, 1) if r['total'] else 0 for r in conv_rows],
+            'backgroundColor': [r['rep__color'] or '#98c1d9' for r in conv_rows],
+        }],
+    }
+
+    # --- by_product ---
+    PRODUCT_LABELS = {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'}
+    PRODUCT_COLORS_FLAT = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
+    prod_rows = list(qs.filter(appointment_type__in=['solar', 'hvac', 'both']).values(
+        'appointment_type').annotate(count=Count('id')))
+    by_product = {
+        'labels': [PRODUCT_LABELS.get(r['appointment_type'], r['appointment_type']) for r in prod_rows],
+        'datasets': [{
+            'label': 'Appointments',
+            'data': [r['count'] for r in prod_rows],
+            'backgroundColor': [PRODUCT_COLORS_FLAT.get(r['appointment_type'], '#98c1d9') for r in prod_rows],
+        }],
+    }
+
+    total = qs.count()
+    sales = qs.filter(disposition='sale').count()
+
+    return JsonResponse({
+        'by_disposition': {'labels': [DISPO_LABELS[d] for d in DISPO_KEYS], 'datasets': dispo_datasets},
+        'by_rep': by_rep,
+        'conversion_by_rep': by_conversion,
+        'by_product': by_product,
+        'summary': {
+            'total': total,
+            'total_sales': sales,
+            'conversion_rate': round(sales / total * 100, 1) if total else 0,
+        },
+    })
+
+
 def parse_sms_fields(body):
     """Parse structured SMS line by line, matching 'label: value' patterns."""
     # Strip unsubscribe footers

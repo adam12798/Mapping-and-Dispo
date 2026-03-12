@@ -28,4 +28,6 @@ urlpatterns = [
     path('api/time-off/', views.time_off_api, name='time_off_api'),
     path('api/time-off/by-date/', views.time_off_by_date_api, name='time_off_by_date'),
     path('api/time-off/<int:pk>/', views.time_off_update, name='time_off_update'),
+    path('dashboard/', views.dashboard_view, name='dashboard'),
+    path('api/dashboard/', views.dashboard_api, name='dashboard_api'),
 ]
