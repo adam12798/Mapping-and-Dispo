@@ -202,6 +202,24 @@ def lead_update(request, pk):
             geocode_address = f"{lead.address}, {lead.city}, MA"
         lead.latitude, lead.longitude = geocode(geocode_address) if lead.address else (None, None)
     lead.save()
+
+    # Send webhook to Go High Level if disposition was updated
+    if 'disposition' in data and lead.disposition:
+        try:
+            ghl_payload = json.dumps({
+                'phone': lead.phone_number,
+                'name': lead.homeowner_name,
+                'disposition': lead.disposition,
+            }).encode()
+            ghl_req = urllib.request.Request(
+                'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                data=ghl_payload,
+                headers={'Content-Type': 'application/json'},
+            )
+            urllib.request.urlopen(ghl_req, timeout=10)
+        except Exception:
+            pass
+
     return JsonResponse({'status': 'ok'})
 
 
