@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**Sutton** — a Django app for mapping MA utility providers with SMS integration, auto-assignment, CRM, and AI voice assistant.
+**Sutton** — a Django app for mapping MA utility providers with SMS integration, auto-assignment, CRM, and AI voice assistant (Alfred).
 
 ## GitHub
 
@@ -16,10 +16,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Python / Django (ASGI via Uvicorn)
 - FastAPI for WebSocket handling (voice assistant)
 - Twilio for SMS + Voice (credentials in `.env`)
-- OpenAI Realtime API for voice AI assistant
+- OpenAI Realtime API for voice AI assistant (Alfred)
 - OpenAI GPT-4o-mini for transcript extraction
+- OSRM for drive time estimates (free, no API key)
 - Leaflet.js for maps (OpenStreetMap tiles)
 - Nominatim for geocoding (free, no API key)
+- aiohttp for async HTTP calls
 - Static maps UI (HTML/CSS/JS in `maps/`)
 
 ## Environment Setup (for new machines)
@@ -46,13 +48,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## App Features
 
 - **Map** (`/`) — MA map with lead pins color-coded by appointment type (Solar=yellow, HVAC=red, Both=green, Unknown=pink). Right sidebar shows appointments for selected date with rep assignment dropdowns. Route planner (bottom-left) with auto-assign, confirm/redo flow. Star icon marks rep's home/start.
-- **CRM** (`/crm/`) — Inline-editable lead table with search bar, filters (date, product type, meeting type, rep, status, disposition), column sorting, and horizontal scroll with frozen name column. Leads come in via Twilio SMS webhook.
+- **CRM** (`/crm/`) — Inline-editable lead table with search bar, filters (date, product type, meeting type, rep, status, disposition), column sorting, resizable columns, and horizontal scroll with frozen name column. Includes Call Notes and Transcript columns. Leads come in via Twilio SMS webhook.
+- **Daily** (`/daily/`) — Daily appointment view with date picker (defaults to today). Same features as CRM (search, filters, sticky columns, resizable columns, inline editing, bulk delete) but filtered to a single day's appointments sorted by time.
 - **Reps** (`/reps/`) — Sales rep management with star ratings, color picker (route lines), specialty, and active/inactive status dropdown.
 - **Auto-Assign** — Algorithm distributes appointments to active reps based on appointment time, specialty, travel distance, and workload balance. Priority 1: maximize coverage, Priority 2: minimize driving. Reps arrive at appointment time or up to 30 min late (stretch to 60 min). Tries all orderings for ≤6 stops. Target 2-3 appts/day, max 5. Work window 9am-10pm. User-assigned leads are locked (non-negotiable). Leads with no appointment type cannot be assigned.
 - **Time Off** (`/time-off/`) — Reps text time off requests (e.g. "I cant work friday"). Managers get SMS notifications and can reply APPROVE/DENY. Approved time off blocks reps from auto-assign. Time Off page shows pending requests, approved history, and notification manager list.
-- **Voice Assistant** — Reps call +18337990424 to speak with an AI scheduling assistant (OpenAI Realtime API, model `gpt-realtime`). Audio bridged via WebSocket: Twilio ↔ FastAPI ↔ OpenAI (g711_ulaw, no transcoding). Caller number passed as TwiML Stream Parameter for rep matching. Post-call: transcript saved to VoiceCallLog, time off requests auto-extracted via GPT-4o-mini and created as pending. Debug: `/voice/debug/` (tests OpenAI connection), `/voice/logs/` (recent call logs).
+- **Voice Assistant (Alfred)** — Reps call +18337990424 to speak with Alfred, a 60-year-old British AI scheduling assistant (OpenAI Realtime API, voice: echo). Two-phase session config: generic first, then enriched with real appointment data after caller identification. Features:
+  - Greets rep by first name
+  - Knows rep's appointments for next 3 days with drive times between stops (OSRM)
+  - Can update lead dispositions via function calling (`update_disposition` tool)
+  - Follows disposition decision tree: asks "Did you sit?" then "Did you run credit?" to determine correct dispo
+  - Writes call_notes (<20 word paraphrase) and saves call_transcript to the lead
+  - Reminds reps of next appointment + drive time after debrief
+  - Post-call: transcript saved to VoiceCallLog, time off requests auto-extracted via GPT-4o-mini
+  - VAD tuned: threshold 0.85, silence 700ms, prefix padding 500ms
+  - Debug: `/voice/debug/`, `/voice/logs/`
 - **Route API** (`/api/route/?date=YYYY-MM-DD`) — Pre-computed route for a given date, returns ordered stops + rep info.
-- **Disposition** — Each lead has a dispo dropdown: Sale (green), No Sale (purple), Follow Up (orange), Credit Fail (pink), Cancel at Door (gray), CPFU (light blue), Rep No Show (black), No Coverage (cherry red).
+- **Disposition** — Sale (green), No Sale (purple), Follow Up (orange), Credit Fail (pink), Cancel at Door (gray), CPFU (light blue), Rep No Show (black), No Coverage (cherry red), Needs Reschedule (blue).
+
+## Disposition Decision Tree (Alfred)
+
+1. Did the rep sit the appointment? No → Cancel at Door / Needs Reschedule / Rep No Show
+2. Did they run credit?
+   - Credit passed + all contracts signed → **Sale**
+   - Credit passed + contracts NOT completed → **CPFU** (always, never follow_up)
+   - Credit failed → **Credit Fail**
+3. No credit run? Still life → **Follow Up**, dead → **No Sale**
+- Alfred does NOT tell reps the disposition name, just confirms casually
+- No Coverage is never rep-reported
 
 ## Important Rules
 
@@ -83,14 +106,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Key Files
 
-- `maps/models.py` — Lead, Rep, TimeOffRequest, Manager, VoiceCallLog models
-- `maps/views.py` — All API endpoints, views, SMS webhook, Twilio outbound
+- `maps/models.py` — Lead (incl. call_notes, call_transcript), Rep, TimeOffRequest, Manager, VoiceCallLog models
+- `maps/views.py` — All API endpoints, views, SMS webhook, Twilio outbound, daily_view
 - `maps/voice.py` — Voice TwiML endpoint + debug endpoint
 - `maps/assignment.py` — Auto-assignment algorithm (respects appt times, time off, specialty)
-- `voice_ws.py` — FastAPI WebSocket handler bridging Twilio ↔ OpenAI Realtime API
+- `voice_ws.py` — FastAPI WebSocket handler: Twilio ↔ OpenAI Realtime API, rep context lookup, disposition function calling, drive time via OSRM
 - `dispo/asgi.py` — ASGI router (WebSocket → FastAPI, HTTP → Django)
 - `maps/templates/maps/index.html` — Map page with sidebar (shows reps off section)
-- `maps/templates/maps/crm.html` — CRM page
+- `maps/templates/maps/crm.html` — CRM page (resizable columns, call notes/transcript)
+- `maps/templates/maps/daily.html` — Daily appointments page (date picker, same features as CRM)
 - `maps/templates/maps/reps.html` — Reps page
 - `maps/templates/maps/time_off.html` — Time Off page (requests, approvals, managers)
 - `maps/static/maps/style.css` — All styles
@@ -101,4 +125,4 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Future / Roadmap
 
 - **Sutton Dashboard** — central landing page with branding, quick stats, and navigation. Integrate "Sutton" branding across all page titles and headers.
-- **Voice Agent Phase 2** — allow reps to update appointment info through conversation with Alfred (OpenAI function calling)
+- **Voice Agent Enhancements** — more function calling tools (e.g. schedule lookups, appointment notes), smarter context handling
