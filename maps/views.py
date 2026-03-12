@@ -204,21 +204,24 @@ def lead_update(request, pk):
     lead.save()
 
     # Send webhook to Go High Level if disposition was updated
-    if 'disposition' in data and lead.disposition:
+    if 'disposition' in data:
+        import logging
+        ghl_logger = logging.getLogger('ghl_webhook')
         try:
             ghl_payload = json.dumps({
                 'phone': lead.phone_number,
                 'name': lead.homeowner_name,
-                'disposition': lead.disposition,
+                'disposition': lead.disposition or '',
             }).encode()
             ghl_req = urllib.request.Request(
                 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
                 data=ghl_payload,
                 headers={'Content-Type': 'application/json'},
             )
-            urllib.request.urlopen(ghl_req, timeout=10)
-        except Exception:
-            pass
+            resp = urllib.request.urlopen(ghl_req, timeout=10)
+            ghl_logger.info(f'GHL webhook sent for lead {pk}: status {resp.status}')
+        except Exception as e:
+            ghl_logger.error(f'GHL webhook failed for lead {pk}: {e}')
 
     return JsonResponse({'status': 'ok'})
 
