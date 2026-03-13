@@ -155,6 +155,14 @@ def geocode(address):
         if lat2 is not None and is_in_massachusetts(lat2, lng2):
             return lat2, lng2
 
+        # Last resort: try just the city/town from the address
+        parts = address.split(',')
+        if len(parts) >= 2:
+            city_part = parts[-2].strip() if 'MA' in parts[-1].upper() else parts[-1].strip()
+            city_lat, city_lng = _nominatim_search(f"{city_part}, Massachusetts")
+            if city_lat is not None and is_in_massachusetts(city_lat, city_lng):
+                return city_lat, city_lng
+
     return lat, lng
 
 
@@ -206,11 +214,14 @@ def lead_update(request, pk):
                 value = {'true': True, 'false': False, 'yes': True, 'no': False}.get(str(value).lower().strip()) if value != '' else None
             setattr(lead, field, value)
     # Re-geocode if address or city changed
+    geocode_failed = False
     if 'address' in data or 'city' in data:
         geocode_address = lead.address
         if lead.city:
             geocode_address = f"{lead.address}, {lead.city}, MA"
         lead.latitude, lead.longitude = geocode(geocode_address) if lead.address else (None, None)
+        if lead.address and lead.latitude is None:
+            geocode_failed = True
     lead.save()
 
     # Send webhook to Go High Level if disposition was updated
@@ -234,7 +245,10 @@ def lead_update(request, pk):
         except Exception as e:
             ghl_logger.error(f'GHL webhook failed for lead {pk}: {e}')
 
-    return JsonResponse({'status': 'ok'})
+    response = {'status': 'ok'}
+    if geocode_failed:
+        response['geocode_failed'] = True
+    return JsonResponse(response)
 
 
 @csrf_exempt

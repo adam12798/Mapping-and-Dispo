@@ -132,7 +132,9 @@
                     <td class="checkbox-col sticky-col sticky-check"><input type="checkbox" class="row-select"></td>
                     <td class="sticky-col sticky-name"><input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}"></td>
                     <td><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number }}"></td>
-                    <td><input type="text" class="crm-input" data-field="address" value="{{ lead.address }}"></td>
+                    <td>
+                        <input type="text" class="crm-input" data-field="address" value="{{ lead.address }}"{% if not lead.latitude %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this lead won't appear on the map or daily view"{% endif %}>
+                    </td>
                     <td><input type="text" class="crm-input" data-field="city" value="{{ lead.city }}"></td>
                     <td><input type="text" class="crm-input" data-field="state" value="{{ lead.state }}"></td>
                     <td>
@@ -285,13 +287,28 @@
             if (arrow) arrow.textContent = currentSortAsc ? ' \u25B2' : ' \u25BC';
         }
 
-        function saveField(leadId, field, value) {
+        function saveField(leadId, field, value, inputEl) {
             var body = {};
             body[field] = value;
             fetch('/api/leads/' + leadId + '/', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.geocode_failed) {
+                    var addrInput = inputEl ? inputEl.closest('tr').querySelector('[data-field="address"]') : null;
+                    if (addrInput) {
+                        addrInput.style.border = '2px solid #e74c3c';
+                        addrInput.title = 'Address could not be geocoded — this lead won\'t appear on the map or daily view';
+                    }
+                    alert('Warning: Could not geocode this address. The lead won\'t appear on the map or daily view until the address is corrected.');
+                } else if ((field === 'address' || field === 'city') && inputEl) {
+                    var addrInput = inputEl.closest('tr').querySelector('[data-field="address"]');
+                    if (addrInput) {
+                        addrInput.style.border = '';
+                        addrInput.title = '';
+                    }
+                }
             });
         }
 
@@ -433,7 +450,7 @@
                 var row = this.closest('tr');
                 var leadId = row.dataset.id;
                 var field = this.dataset.field;
-                saveField(leadId, field, this.value);
+                saveField(leadId, field, this.value, this);
             });
         });
 
