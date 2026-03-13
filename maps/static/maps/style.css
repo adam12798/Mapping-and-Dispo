@@ -445,10 +445,32 @@ tbody tr:hover .sticky-col {
 }
 
 .route-panel h4 {
-    margin: 0 0 8px 0;
+    margin: 0;
     font-size: 13px;
     font-weight: 700;
     color: #293241;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    user-select: none;
+}
+
+.route-panel-arrow {
+    font-size: 10px;
+    color: #98c1d9;
+}
+
+.route-panel-body {
+    margin-top: 8px;
+}
+
+.route-panel.collapsed .route-panel-body {
+    display: none;
+}
+
+.route-panel.collapsed {
+    padding: 10px 14px;
 }
 
 .route-panel input,

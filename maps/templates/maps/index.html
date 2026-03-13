@@ -28,21 +28,23 @@
     </div>
     <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()">&#9664;</button>
     </div>
-    <div class="route-panel">
-        <h4>Route Planner</h4>
-        <input type="date" id="route-date" />
-        <div style="display:flex;gap:6px;margin-top:2px;">
-            <button onclick="showRoute()">Show Route</button>
-            <button class="tomorrow-btn" onclick="setTomorrow()">Tomorrow</button>
-        </div>
-        <button class="tomorrow-btn" style="margin-top:4px;width:100%;" onclick="clearRoute()">Clear Route</button>
-        <hr style="margin:8px 0;border:none;border-top:1px solid #ddd;">
-        <button class="add-btn" style="width:100%;font-size:12px;padding:6px 12px;" onclick="autoAssign()">Auto-Assign</button>
-        <button class="tomorrow-btn" style="margin-top:4px;width:100%;" onclick="clearAssignments()">Clear Assignments</button>
-        <div id="assign-status" style="margin-top:6px;font-size:11px;color:#666;"></div>
-        <div class="confirm-bar" id="confirm-bar">
-            <button class="confirm-btn" onclick="confirmAssignments()">Confirm</button>
-            <button class="redo-btn" onclick="redoAssignments()">Redo</button>
+    <div class="route-panel collapsed" id="route-panel">
+        <h4 onclick="toggleRoutePanel()">Route Planner <span class="route-panel-arrow" id="route-panel-arrow">&#9654;</span></h4>
+        <div class="route-panel-body" id="route-panel-body">
+            <input type="date" id="route-date" />
+            <div style="display:flex;gap:6px;margin-top:2px;">
+                <button onclick="showRoute()">Show Route</button>
+                <button class="tomorrow-btn" onclick="setTomorrow()">Tomorrow</button>
+            </div>
+            <button class="tomorrow-btn" style="margin-top:4px;width:100%;" onclick="clearRoute()">Clear Route</button>
+            <hr style="margin:8px 0;border:none;border-top:1px solid #ddd;">
+            <button class="add-btn" style="width:100%;font-size:12px;padding:6px 12px;" onclick="autoAssign()">Auto-Assign</button>
+            <button class="tomorrow-btn" style="margin-top:4px;width:100%;" onclick="clearAssignments()">Clear Assignments</button>
+            <div id="assign-status" style="margin-top:6px;font-size:11px;color:#666;"></div>
+            <div class="confirm-bar" id="confirm-bar">
+                <button class="confirm-btn" onclick="confirmAssignments()">Confirm</button>
+                <button class="redo-btn" onclick="redoAssignments()">Redo</button>
+            </div>
         </div>
     </div>
 
@@ -582,6 +584,14 @@
                         map.fitBounds(L.latLngBounds(points), { padding: [50, 50] });
                     }
                 });
+        }
+
+        // Route panel toggle
+        function toggleRoutePanel() {
+            var panel = document.getElementById('route-panel');
+            var arrow = document.getElementById('route-panel-arrow');
+            panel.classList.toggle('collapsed');
+            arrow.innerHTML = panel.classList.contains('collapsed') ? '&#9654;' : '&#9660;';
         }
 
         // Sidebar
