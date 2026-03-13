@@ -6,7 +6,7 @@ from .models import Lead, Rep, TimeOffRequest
 APPOINTMENT_DURATION = 90   # minutes per appointment
 WORK_START_HOUR = 8         # 8:00 AM
 WORK_END_HOUR = 22          # 10:00 PM
-AVG_SPEED_MPH = 30          # average MA driving speed
+AVG_SPEED_MPH = 45          # average MA driving speed (haversine, not road distance)
 TARGET_PER_REP = 3
 MAX_PER_REP = 5
 LATE_WINDOW = 30            # minutes — max acceptable lateness
@@ -333,6 +333,39 @@ def auto_assign_leads(target_date, save=True):
             clusters[best_rep_id].append(lead)
         else:
             unassigned.append(lead)
+
+    # Second pass: assign any still-unassigned leads to best available rep
+    # regardless of lateness — every appointment should be covered if possible
+    if unassigned:
+        for lead in list(unassigned):
+            best_rep_id = None
+            best_drive = float('inf')
+
+            for rep in available_reps:
+                if not is_compatible(rep, lead):
+                    continue
+                if len(clusters[rep.id]) >= MAX_PER_REP:
+                    continue
+
+                lat, lng, free_at = get_rep_free_time_and_location(rep.id)
+                drive = travel_minutes(lat, lng, lead.latitude, lead.longitude)
+                arrival = free_at + timedelta(minutes=drive)
+
+                # Just needs to arrive before end of work day
+                end_of_day = datetime(target_date.year, target_date.month, target_date.day,
+                                      WORK_END_HOUR, 0)
+                if arrival + timedelta(minutes=APPOINTMENT_DURATION) > end_of_day:
+                    continue
+                if is_blocked_by_time_off(arrival, APPOINTMENT_DURATION, rep_time_off[rep.id]):
+                    continue
+
+                if drive < best_drive:
+                    best_rep_id = rep.id
+                    best_drive = drive
+
+            if best_rep_id is not None:
+                clusters[best_rep_id].append(lead)
+                unassigned.remove(lead)
 
     # Build final optimized schedules for each rep
     assignments = []
