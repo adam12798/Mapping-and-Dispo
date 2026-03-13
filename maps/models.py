@@ -24,6 +24,13 @@ class Lead(models.Model):
         ('incomplete_deal', 'Incomplete Deal'),
         ('future_contact', 'Future Contact'),
     ]
+    DISPO_COLORS = {
+        'sale': '#27ae60', 'no_sale': '#8e44ad', 'follow_up': '#e67e22',
+        'credit_fail': '#ff69b4', 'cancel_door': '#95a5a6', 'cpfu': '#98c1d9',
+        'rep_no_show': '#111111', 'no_coverage': '#c0392b', 'needs_reschedule': '#3498db',
+        'incomplete_deal': '#d4a017', 'future_contact': '#1abc9c',
+    }
+    DISPO_LABELS = {k: v for k, v in DISPOSITION_CHOICES}
 
     address = models.CharField(max_length=500)
     city = models.CharField(max_length=200, blank=True)

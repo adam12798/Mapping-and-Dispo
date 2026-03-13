@@ -161,7 +161,10 @@ def geocode(address):
 def crm_view(request):
     leads = Lead.objects.select_related('rep').order_by('-created_at')
     reps = Rep.objects.order_by('name')
-    return render(request, 'maps/crm.html', {'leads': leads, 'reps': reps})
+    return render(request, 'maps/crm.html', {
+        'leads': leads, 'reps': reps,
+        'dispo_colors_json': json.dumps(Lead.DISPO_COLORS),
+    })
 
 
 def daily_view(request):
@@ -175,6 +178,7 @@ def daily_view(request):
         'leads': leads,
         'reps': reps,
         'selected_date': selected_date,
+        'dispo_colors_json': json.dumps(Lead.DISPO_COLORS),
     })
 
 
@@ -225,7 +229,7 @@ def lead_update(request, pk):
                 'call_transcript': lead.call_transcript or '',
             }).encode()
             ghl_req = urllib.request.Request(
-                'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                settings.GHL_WEBHOOK_URL,
                 data=ghl_payload,
                 headers={'Content-Type': 'application/json'},
             )
@@ -655,22 +659,9 @@ def dashboard_api(request):
         rep_ids = [int(x) for x in rep_ids_raw.split(',') if x.strip().isdigit()]
         qs = qs.filter(rep_id__in=rep_ids)
 
-    DISPO_KEYS = ['sale', 'no_sale', 'follow_up', 'credit_fail', 'cancel_door',
-                  'cpfu', 'rep_no_show', 'no_coverage', 'needs_reschedule',
-                  'incomplete_deal', 'future_contact']
-    DISPO_LABELS = {
-        'sale': 'Sale', 'no_sale': 'No Sale', 'follow_up': 'Follow Up',
-        'credit_fail': 'Credit Fail', 'cancel_door': 'Cancel at Door',
-        'cpfu': 'CPFU', 'rep_no_show': 'Rep No Show',
-        'no_coverage': 'No Coverage', 'needs_reschedule': 'Needs Reschedule',
-        'incomplete_deal': 'Incomplete Deal', 'future_contact': 'Future Contact',
-    }
-    DISPO_COLORS = {
-        'sale': '#27ae60', 'no_sale': '#8e44ad', 'follow_up': '#e67e22',
-        'credit_fail': '#ff69b4', 'cancel_door': '#95a5a6', 'cpfu': '#98c1d9',
-        'rep_no_show': '#111111', 'no_coverage': '#c0392b', 'needs_reschedule': '#3498db',
-        'incomplete_deal': '#d4a017', 'future_contact': '#1abc9c',
-    }
+    DISPO_KEYS = [k for k, v in Lead.DISPOSITION_CHOICES]
+    DISPO_LABELS = Lead.DISPO_LABELS
+    DISPO_COLORS = Lead.DISPO_COLORS
     PRODUCT_COLORS = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
 
     # --- by_disposition ---
