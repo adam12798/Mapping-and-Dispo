@@ -212,6 +212,7 @@ def lead_update(request, pk):
                 'phone': lead.phone_number,
                 'name': lead.homeowner_name,
                 'disposition': lead.disposition or '',
+                'call_transcript': lead.call_transcript or '',
             }).encode()
             ghl_req = urllib.request.Request(
                 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',

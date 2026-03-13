@@ -246,6 +246,7 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
                         'phone': lead.phone_number,
                         'name': lead.homeowner_name,
                         'disposition': disposition,
+                        'call_transcript': lead.call_transcript or '',
                     }
                     async with aiohttp.ClientSession() as session:
                         async with session.post(
