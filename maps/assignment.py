@@ -332,8 +332,8 @@ def auto_assign_leads(target_date, save=True):
             lateness_tier = 0 if lateness == 0 else (1 if lateness <= LATE_WINDOW else 2)
             current_best_tier = 0 if best_lateness == 0 else (1 if best_lateness <= LATE_WINDOW else 2)
 
-            # Load balancing: soft penalty for overloaded reps
-            load_penalty = max(0, len(clusters[rep.id]) - TARGET_PER_REP) * 10
+            # Load balancing: penalize from first lead to spread work evenly
+            load_penalty = len(clusters[rep.id]) * 30
 
             if (lateness_tier < current_best_tier or
                 (lateness_tier == current_best_tier and drive + load_penalty < best_drive)):
