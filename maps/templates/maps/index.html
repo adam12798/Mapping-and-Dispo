@@ -62,18 +62,8 @@
 
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Create a custom pane for the mask so it always renders above tiles but below markers
-        map.createPane('maskPane');
-        map.getPane('maskPane').style.zIndex = 450; // above tiles (200) and overlays (400), below markers (600)
-
-        // Base tiles for roads/buildings inside MA
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap &copy; CARTO',
-            maxZoom: 19,
-            keepBuffer: 10,
-            updateWhenZooming: false,
-            updateWhenIdle: true
-        }).addTo(map);
+        // Use Canvas renderer for smooth zoom/pan — no SVG redraw flicker
+        var canvasRenderer = L.canvas({ padding: 1.0 });
 
         // Provider color map
         var providerColors = {
@@ -273,7 +263,7 @@
             .then(function(data) {
                 // Add town polygons colored by provider
                 L.geoJSON(data, {
-                    pane: 'maskPane',
+                    renderer: canvasRenderer,
                     style: function(feature) {
                         var name = feature.properties.census_name || '';
                         var normalized = name.replace(/ Town$/, '').replace(/^Manchester-by-the-Sea$/, 'Manchester');
@@ -328,7 +318,7 @@
 
                 // Single mask polygon with all town shapes as holes
                 L.polygon([outer].concat(allHoles), {
-                    pane: 'maskPane',
+                    renderer: canvasRenderer,
                     color: '#333',
                     weight: 1,
                     fillColor: '#ffffff',
