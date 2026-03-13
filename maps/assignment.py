@@ -1,4 +1,5 @@
 import math
+from collections import defaultdict
 from datetime import datetime, timedelta
 from itertools import permutations
 try:
@@ -236,8 +237,22 @@ def auto_assign_leads(target_date, save=True):
     if not reps:
         return {'assignments': [], 'unassigned': unassigned_leads}
 
-    # Load approved time off blocks for each rep on this date
-    rep_time_off = {rep.id: get_rep_time_off(rep.id, target_date) for rep in reps}
+    rep_dict = {r.id: r for r in reps}
+
+    # Load approved time off blocks for all reps in a single query
+    rep_time_off = defaultdict(list)
+    for req in TimeOffRequest.objects.filter(
+        rep_id__in=[r.id for r in reps],
+        date=target_date,
+        status='approved',
+    ):
+        if req.start_time and req.end_time:
+            start = datetime.combine(target_date, req.start_time)
+            end = datetime.combine(target_date, req.end_time)
+        else:
+            start = datetime(target_date.year, target_date.month, target_date.day, 0, 0)
+            end = datetime(target_date.year, target_date.month, target_date.day, 23, 59)
+        rep_time_off[req.rep_id].append((start, end))
 
     # Filter out reps who have full-day off
     available_reps = []
@@ -282,7 +297,7 @@ def auto_assign_leads(target_date, save=True):
 
     def get_rep_free_time_and_location(rep_id):
         """Where will this rep be and when will they be free after their current stops?"""
-        rep_obj = next(r for r in reps if r.id == rep_id)
+        rep_obj = rep_dict[rep_id]
         if not clusters[rep_id]:
             free_at = datetime(target_date.year, target_date.month, target_date.day,
                                WORK_START_HOUR, 0)

@@ -54,6 +54,13 @@ class Lead(models.Model):
     call_notes = models.CharField(max_length=200, blank=True)
     call_transcript = models.TextField(blank=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['appointment_datetime']),
+            models.Index(fields=['rep']),
+            models.Index(fields=['disposition']),
+        ]
+
     def __str__(self):
         return f"{self.address} ({self.created_at:%m/%d/%Y})"
 
@@ -103,6 +110,11 @@ class TimeOffRequest(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     raw_message = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['rep', 'date', 'status']),
+        ]
 
     def __str__(self):
         time_str = 'All Day' if not self.start_time else f'{self.start_time:%I:%M %p} - {self.end_time:%I:%M %p}'
