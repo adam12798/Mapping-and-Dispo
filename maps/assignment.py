@@ -160,9 +160,6 @@ def build_best_schedule(rep, leads, target_date, time_off_blocks=None):
             if lead.appointment_datetime:
                 appt_time = lead.appointment_datetime.replace(tzinfo=None)
                 arrival = max(earliest_arrival, appt_time)
-                lateness = (earliest_arrival - appt_time).total_seconds() / 60 if earliest_arrival > appt_time else 0
-                if lateness > LATE_STRETCH:
-                    continue  # Skip — can't make it
             else:
                 arrival = earliest_arrival
 
