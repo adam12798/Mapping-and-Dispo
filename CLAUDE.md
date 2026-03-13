@@ -18,8 +18,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Twilio for SMS + Voice (credentials in `.env`)
 - OpenAI Realtime API for voice AI assistant (Alfred)
 - OpenAI GPT-4o-mini for transcript extraction
+- Chart.js v4 for dashboard charts (CDN, no build step)
 - OSRM for drive time estimates (free, no API key)
-- Leaflet.js for maps (OpenStreetMap tiles)
+- Leaflet.js for maps (Canvas renderer, no tile layer outside MA)
 - Nominatim for geocoding (free, no API key)
 - aiohttp for async HTTP calls
 - Static maps UI (HTML/CSS/JS in `maps/`)
@@ -47,24 +48,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## App Features
 
-- **Map** (`/`) — MA map with lead pins color-coded by appointment type (Solar=yellow, HVAC=red, Both=green, Unknown=pink). Right sidebar shows appointments for selected date with rep assignment dropdowns. Route planner (bottom-left) with auto-assign, confirm/redo flow. Star icon marks rep's home/start.
-- **CRM** (`/crm/`) — Inline-editable lead table with search bar, filters (date, product type, meeting type, rep, status, disposition), column sorting, resizable columns, and horizontal scroll with frozen name column. Includes Call Notes and Transcript columns. Leads come in via Twilio SMS webhook.
+- **Map** (`/`) — MA map with lead pins color-coded by appointment type (Solar=yellow, HVAC=red, Both=green, Unknown=pink). Canvas renderer for flicker-free zoom/pan. Right sidebar overlays the map (doesn't resize it) and shows appointments for selected date with rep assignment dropdowns. Collapsible route planner (bottom-left) with auto-assign, confirm/redo flow. Star icon marks rep's home/start.
+- **CRM** (`/crm/`) — Inline-editable lead table with search bar, filters (date, product type, meeting type, rep, status, disposition), column sorting, resizable columns, and horizontal scroll with frozen name column. Includes Follow Up Date, Call Notes, and Transcript columns. Leads come in via Twilio SMS webhook.
 - **Daily** (`/daily/`) — Daily appointment view with date picker (defaults to today). Same features as CRM (search, filters, sticky columns, resizable columns, inline editing, bulk delete) but filtered to a single day's appointments sorted by time.
+- **Dashboard** (`/dashboard/`) — Analytics page with Chart.js. Four charts: Appointments by Disposition (horizontal bar), by Rep (bar), Conversion Rate by Rep (bar, %), by Product Type (doughnut). Filters: date range, rep, group by (none/rep/product). KPI pills show total, sales, conversion rate. All data fetched via `/api/dashboard/` without page reload.
 - **Reps** (`/reps/`) — Sales rep management with star ratings, color picker (route lines), specialty, and active/inactive status dropdown.
-- **Auto-Assign** — Algorithm distributes appointments to active reps based on appointment time, specialty, travel distance, and workload balance. Priority 1: maximize coverage, Priority 2: minimize driving. Reps arrive at appointment time or up to 30 min late (stretch to 60 min). Tries all orderings for ≤6 stops. Target 2-3 appts/day, max 5. Work window 9am-10pm. User-assigned leads are locked (non-negotiable). Leads with no appointment type cannot be assigned.
+- **Auto-Assign** — Algorithm distributes appointments to active reps based on appointment time, specialty, travel distance, and workload balance. Priority 1: maximize coverage, Priority 2: spread evenly across reps, Priority 3: minimize driving. Load penalty of 30 min per existing lead keeps workload balanced. Two-pass system: first pass assigns with lateness preference, second pass assigns remaining leads to any available rep regardless of lateness. Tries all orderings for ≤6 stops. Target 2-3 appts/day, max 5. Work window 8am-10pm. Avg speed: 45 mph (haversine). User-assigned leads are locked (non-negotiable). Leads with no appointment type cannot be assigned. All datetime comparisons use Eastern time (converted from UTC via `to_naive_eastern()`).
 - **Time Off** (`/time-off/`) — Reps text time off requests (e.g. "I cant work friday"). Managers get SMS notifications and can reply APPROVE/DENY. Approved time off blocks reps from auto-assign. Time Off page shows pending requests, approved history, and notification manager list.
 - **Voice Assistant (Alfred)** — Reps call +18337990424 to speak with Alfred, a 60-year-old British AI scheduling assistant (OpenAI Realtime API, voice: echo). Two-phase session config: generic first, then enriched with real appointment data after caller identification. Features:
   - Greets rep by first name
   - Knows rep's appointments for next 3 days with drive times between stops (OSRM)
   - Can update lead dispositions via function calling (`update_disposition` tool)
   - Follows disposition decision tree: asks "Did you sit?" then "Did you run credit?" to determine correct dispo
+  - Asks for follow-up date on follow_up and cpfu outcomes; auto-sets `future_contact` if date >1 month out
   - Writes call_notes (<20 word paraphrase) and saves call_transcript to the lead
+  - Sends webhook to Go High Level on disposition update (phone, name, disposition, call_transcript)
   - Reminds reps of next appointment + drive time after debrief
   - Post-call: transcript saved to VoiceCallLog, time off requests auto-extracted via GPT-4o-mini
   - VAD tuned: threshold 0.85, silence 700ms, prefix padding 500ms
   - Debug: `/voice/debug/`, `/voice/logs/`
 - **Route API** (`/api/route/?date=YYYY-MM-DD`) — Pre-computed route for a given date, returns ordered stops + rep info.
-- **Disposition** — Sale (green), No Sale (purple), Follow Up (orange), Credit Fail (pink), Cancel at Door (gray), CPFU (light blue), Rep No Show (black), No Coverage (cherry red), Needs Reschedule (blue).
+- **Disposition** — Sale (green #27ae60), No Sale (purple #8e44ad), Follow Up (orange #e67e22), Credit Fail (pink #e91e63), Cancel at Door (gray #95a5a6), CPFU (light blue #00bcd4), Rep No Show (black #2c3e50), No Coverage (cherry red #c0392b), Needs Reschedule (blue #3498db), Incomplete Deal (amber #d4a017, manager-set only), Future Contact (teal #1abc9c, auto-set when follow-up date >1 month out).
+- **Go High Level Webhook** — Disposition updates (from Alfred or manual CRM edits) POST to GHL webhook with phone, name, disposition, and call_transcript. Fires from both `voice_ws.py` (async via aiohttp) and `views.py` (sync via urllib).
 
 ## Disposition Decision Tree (Alfred)
 
@@ -107,7 +112,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Key Files
 
-- `maps/models.py` — Lead (incl. call_notes, call_transcript), Rep, TimeOffRequest, Manager, VoiceCallLog models
+- `maps/models.py` — Lead (incl. call_notes, call_transcript, follow_up_date), Rep, TimeOffRequest, Manager, VoiceCallLog models
 - `maps/views.py` — All API endpoints, views, SMS webhook, Twilio outbound, daily_view
 - `maps/voice.py` — Voice TwiML endpoint + debug endpoint
 - `maps/assignment.py` — Auto-assignment algorithm (respects appt times, time off, specialty)
@@ -117,6 +122,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `maps/templates/maps/crm.html` — CRM page (resizable columns, call notes/transcript)
 - `maps/templates/maps/daily.html` — Daily appointments page (date picker, same features as CRM)
 - `maps/templates/maps/reps.html` — Reps page
+- `maps/templates/maps/dashboard.html` — Dashboard page (Chart.js charts, filters, KPI pills)
 - `maps/templates/maps/time_off.html` — Time Off page (requests, approvals, managers)
 - `maps/static/maps/style.css` — All styles
 - `maps/urls.py` — URL routing
@@ -125,5 +131,5 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Future / Roadmap
 
-- **Sutton Dashboard** — central landing page with branding, quick stats, and navigation. Integrate "Sutton" branding across all page titles and headers.
+- **Sutton Branding** — Integrate "Sutton" branding across all page titles and headers. Central landing page with navigation.
 - **Voice Agent Enhancements** — more function calling tools (e.g. schedule lookups, appointment notes), smarter context handling
