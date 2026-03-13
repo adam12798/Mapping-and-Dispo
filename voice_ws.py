@@ -94,12 +94,16 @@ DISPOSITION_TOOL = {
                 'type': 'string',
                 'description': 'A brief paraphrase of what happened at the appointment, under 20 words. Example: "Wife blew up the deal" or "Homeowner needs to talk to friend who has solar"',
             },
+            'sat': {
+                'type': 'boolean',
+                'description': 'Whether the rep sat the appointment (got in the house and presented). True if they sat, false if they did not.',
+            },
             'follow_up_date': {
                 'type': 'string',
                 'description': 'The follow-up date in YYYY-MM-DD format. Required when disposition is follow_up or cpfu.',
             },
         },
-        'required': ['lead_id', 'disposition', 'call_notes'],
+        'required': ['lead_id', 'disposition', 'call_notes', 'sat'],
     },
 }
 
@@ -227,6 +231,7 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
         lead_id = fn_args.get('lead_id')
         disposition = fn_args.get('disposition')
         call_notes = fn_args.get('call_notes', '')
+        sat = fn_args.get('sat')
         follow_up_date_str = fn_args.get('follow_up_date', '')
 
         if not rep:
@@ -249,6 +254,8 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
 
         # Only allow updating leads assigned to this rep
         update_kwargs = dict(disposition=disposition, call_notes=call_notes, call_transcript=call_transcript)
+        if sat is not None:
+            update_kwargs['sat'] = sat
         if follow_up_date is not None:
             update_kwargs['follow_up_date'] = follow_up_date
         updated = await sync_to_async(

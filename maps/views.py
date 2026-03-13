@@ -192,7 +192,7 @@ def lead_update(request, pk):
     allowed_fields = [
         'homeowner_name', 'phone_number', 'address', 'city',
         'appointment_type', 'appointment_format', 'appointment_datetime',
-        'disposition', 'follow_up_date', 'call_notes', 'call_transcript',
+        'disposition', 'sat', 'follow_up_date', 'call_notes', 'call_transcript',
     ]
     if 'rep_id' in data:
         rep_val = data['rep_id']
@@ -202,6 +202,8 @@ def lead_update(request, pk):
             value = data[field]
             if field in ('appointment_datetime', 'follow_up_date') and value == '':
                 value = None
+            if field == 'sat':
+                value = {'true': True, 'false': False, 'yes': True, 'no': False}.get(str(value).lower().strip()) if value != '' else None
             setattr(lead, field, value)
     # Re-geocode if address or city changed
     if 'address' in data or 'city' in data:

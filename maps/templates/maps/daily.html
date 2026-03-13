@@ -117,10 +117,11 @@
                     <th class="sortable" onclick="sortTable(6)">Appt Format <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(7)">Appt Time <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(8)">Status <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(9)">Dispo <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(10)">Follow Up Date <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(11)">Call Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(12)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(9)">Sit <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(10)">Dispo <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(11)">Follow Up Date <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(12)">Call Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(13)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -157,6 +158,13 @@
                         </select>
                     </td>
                     <td>
+                        <select class="crm-select sat-select" data-field="sat" onchange="updateSatColor(this)">
+                            <option value="">—</option>
+                            <option value="true" {% if lead.sat == True %}selected{% endif %}>Sit</option>
+                            <option value="false" {% if lead.sat == False %}selected{% endif %}>No Sit</option>
+                        </select>
+                    </td>
+                    <td>
                         <select class="crm-select dispo-select" data-field="disposition" onchange="updateDispoColor(this)">
                             <option value="">—</option>
                             <option value="sale" {% if lead.disposition == "sale" %}selected{% endif %}>Sale</option>
@@ -178,7 +186,7 @@
                     <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)">X</button></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="14" class="empty-row">No appointments for this date</td></tr>
+                <tr><td colspan="15" class="empty-row">No appointments for this date</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -200,6 +208,14 @@
             future_contact: '#1abc9c'
         };
 
+        function updateSatColor(select) {
+            var colors = { 'true': '#2ecc40', 'false': '#cc0000' };
+            var color = colors[select.value] || '';
+            select.style.backgroundColor = color;
+            select.style.color = color ? '#fff' : '';
+            select.style.fontWeight = color ? '600' : '';
+        }
+
         function updateDispoColor(select) {
             var color = dispoColors[select.value] || '';
             select.style.backgroundColor = color;
@@ -210,6 +226,9 @@
         document.addEventListener('DOMContentLoaded', function() {
             document.querySelectorAll('.dispo-select').forEach(function(sel) {
                 updateDispoColor(sel);
+            });
+            document.querySelectorAll('.sat-select').forEach(function(sel) {
+                updateSatColor(sel);
             });
         });
 
