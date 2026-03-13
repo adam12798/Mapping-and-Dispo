@@ -190,7 +190,7 @@ def lead_update(request, pk):
     lead = get_object_or_404(Lead, pk=pk)
     data = json.loads(request.body)
     allowed_fields = [
-        'homeowner_name', 'phone_number', 'address', 'city',
+        'homeowner_name', 'phone_number', 'address', 'city', 'state',
         'appointment_type', 'appointment_format', 'appointment_datetime',
         'disposition', 'sat', 'follow_up_date', 'call_notes', 'call_transcript',
     ]
@@ -1023,6 +1023,7 @@ def sms_webhook(request):
             Lead.objects.create(
                 address=address,
                 city=city,
+                state=fields.get('state', ''),
                 latitude=lat,
                 longitude=lng,
                 from_number=from_number,
