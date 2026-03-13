@@ -33,6 +33,14 @@ def index(request):
 
 def leads_api(request):
     """Return all leads as JSON for the map to plot."""
+    from django.utils import timezone as tz
+    eastern = tz.get_fixed_timezone(-300)  # EST = UTC-5
+    try:
+        import zoneinfo
+        eastern = zoneinfo.ZoneInfo('America/New_York')
+    except ImportError:
+        pass
+
     leads = Lead.objects.filter(latitude__isnull=False).select_related('rep').order_by('-created_at')
     data = [
         {
@@ -46,8 +54,8 @@ def leads_api(request):
             'phone_number': lead.phone_number,
             'appointment_type': lead.appointment_type,
             'appointment_format': lead.appointment_format,
-            'appointment_datetime': lead.appointment_datetime.strftime('%m/%d/%Y %I:%M %p') if lead.appointment_datetime else '',
-            'created_at': lead.created_at.strftime('%m/%d/%Y %I:%M %p'),
+            'appointment_datetime': lead.appointment_datetime.astimezone(eastern).strftime('%m/%d/%Y %I:%M %p') if lead.appointment_datetime else '',
+            'created_at': lead.created_at.astimezone(eastern).strftime('%m/%d/%Y %I:%M %p'),
             'rep_id': lead.rep_id,
             'rep_name': lead.rep.name if lead.rep else '',
         }
@@ -425,6 +433,13 @@ def route_api(request):
     If leads have rep assignments, returns per-rep routes.
     Otherwise falls back to single-rep mode (highest rated).
     """
+    from django.utils import timezone as tz
+    try:
+        import zoneinfo
+        eastern = zoneinfo.ZoneInfo('America/New_York')
+    except ImportError:
+        eastern = tz.get_fixed_timezone(-300)
+
     date_str = request.GET.get('date', '')
     if not date_str:
         return JsonResponse({'error': 'date parameter required'}, status=400)
@@ -454,7 +469,7 @@ def route_api(request):
                     'name': lead.homeowner_name or lead.address,
                     'address': lead.address,
                     'city': lead.city,
-                    'time': lead.appointment_datetime.strftime('%I:%M %p'),
+                    'time': lead.appointment_datetime.astimezone(eastern).strftime('%I:%M %p'),
                     'type': lead.appointment_type,
                     'lat': lead.latitude,
                     'lng': lead.longitude,
@@ -479,7 +494,7 @@ def route_api(request):
                 'name': lead.homeowner_name or lead.address,
                 'address': lead.address,
                 'city': lead.city,
-                'time': lead.appointment_datetime.strftime('%I:%M %p'),
+                'time': lead.appointment_datetime.astimezone(eastern).strftime('%I:%M %p'),
                 'type': lead.appointment_type,
                 'lat': lead.latitude,
                 'lng': lead.longitude,
@@ -503,6 +518,13 @@ def route_api(request):
 @require_POST
 def auto_assign_api(request):
     """Trigger auto-assignment for a target date."""
+    from django.utils import timezone as tz
+    try:
+        import zoneinfo
+        eastern = zoneinfo.ZoneInfo('America/New_York')
+    except ImportError:
+        eastern = tz.get_fixed_timezone(-300)
+
     data = json.loads(request.body)
     date_str = data.get('date', '')
     if not date_str:
@@ -529,7 +551,7 @@ def auto_assign_api(request):
                 'lat': lead.latitude,
                 'lng': lead.longitude,
                 'estimated_arrival': arrival_time.strftime('%I:%M %p'),
-                'time': lead.appointment_datetime.strftime('%I:%M %p') if lead.appointment_datetime else '',
+                'time': lead.appointment_datetime.astimezone(eastern).strftime('%I:%M %p') if lead.appointment_datetime else '',
             })
         assignments_data.append({
             'rep': {
@@ -551,7 +573,7 @@ def auto_assign_api(request):
             'city': l.city,
             'type': l.appointment_type,
             'phone': l.phone_number,
-            'time': l.appointment_datetime.strftime('%I:%M %p') if l.appointment_datetime else '',
+            'time': l.appointment_datetime.astimezone(eastern).strftime('%I:%M %p') if l.appointment_datetime else '',
         }
         for l in result['unassigned']
     ]
