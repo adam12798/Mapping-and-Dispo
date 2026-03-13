@@ -22,10 +22,6 @@ app = FastAPI()
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime'
-GHL_WEBHOOK_URL = os.environ.get(
-    'GHL_WEBHOOK_URL',
-    'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
-)
 
 SYSTEM_PROMPT = """You are Alfred, a 60-year-old British scheduling assistant for a solar and HVAC sales company in Massachusetts. You're warm, personable, and have a dry wit. You genuinely enjoy chatting with the reps. British charm comes naturally to you.
 
@@ -282,7 +278,7 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
                     }
                     async with aiohttp.ClientSession() as session:
                         async with session.post(
-                            GHL_WEBHOOK_URL,
+                            'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
                             json=ghl_payload,
                             timeout=aiohttp.ClientTimeout(total=10),
                         ) as resp:

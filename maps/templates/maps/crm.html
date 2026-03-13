@@ -96,7 +96,6 @@
                     <option value="cpfu">CPFU</option>
                     <option value="rep_no_show">Rep No Show</option>
                     <option value="no_coverage">No Coverage</option>
-                    <option value="needs_reschedule">Needs Reschedule</option>
                     <option value="incomplete_deal">Incomplete Deal</option>
                     <option value="future_contact">Future Contact</option>
                     <option value="none">No Disposition</option>
@@ -178,7 +177,6 @@
                             <option value="cpfu" {% if lead.disposition == "cpfu" %}selected{% endif %}>CPFU</option>
                             <option value="rep_no_show" {% if lead.disposition == "rep_no_show" %}selected{% endif %}>Rep No Show</option>
                             <option value="no_coverage" {% if lead.disposition == "no_coverage" %}selected{% endif %}>No Coverage</option>
-                            <option value="needs_reschedule" {% if lead.disposition == "needs_reschedule" %}selected{% endif %}>Needs Reschedule</option>
                             <option value="incomplete_deal" {% if lead.disposition == "incomplete_deal" %}selected{% endif %}>Incomplete Deal</option>
                             <option value="future_contact" {% if lead.disposition == "future_contact" %}selected{% endif %}>Future Contact</option>
                         </select>
@@ -197,7 +195,18 @@
     </div>
 
     <script>
-        var dispoColors = {{ dispo_colors_json|safe }};
+        var dispoColors = {
+            sale: '#27ae60',
+            no_sale: '#8e44ad',
+            follow_up: '#e67e22',
+            credit_fail: '#ff69b4',
+            cancel_door: '#95a5a6',
+            cpfu: '#98c1d9',
+            rep_no_show: '#111111',
+            no_coverage: '#c0392b',
+            incomplete_deal: '#d4a017',
+            future_contact: '#1abc9c'
+        };
 
         function updateSatColor(select) {
             var colors = { 'true': '#2ecc40', 'false': '#cc0000' };
