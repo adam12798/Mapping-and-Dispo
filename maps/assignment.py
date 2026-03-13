@@ -1,7 +1,22 @@
 import math
 from datetime import datetime, timedelta
 from itertools import permutations
+try:
+    import zoneinfo
+    EASTERN = zoneinfo.ZoneInfo('America/New_York')
+except ImportError:
+    from django.utils.timezone import get_fixed_timezone
+    EASTERN = get_fixed_timezone(-300)
 from .models import Lead, Rep, TimeOffRequest
+
+
+def to_naive_eastern(dt):
+    """Convert a timezone-aware datetime to naive Eastern time."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(EASTERN)
+    return dt.replace(tzinfo=None)
 
 APPOINTMENT_DURATION = 90   # minutes per appointment
 WORK_START_HOUR = 8         # 8:00 AM
@@ -81,7 +96,7 @@ def can_rep_make_it(rep_lat, rep_lng, free_at, lead):
     if not lead.appointment_datetime:
         return (0, travel)
 
-    appt_time = lead.appointment_datetime.replace(tzinfo=None)
+    appt_time = to_naive_eastern(lead.appointment_datetime)
     earliest_arrival = free_at + timedelta(minutes=travel)
 
     # How late would the rep be?
@@ -113,7 +128,7 @@ def score_schedule(schedule, rep):
         total_drive += drive
 
         if lead.appointment_datetime:
-            appt_time = lead.appointment_datetime.replace(tzinfo=None)
+            appt_time = to_naive_eastern(lead.appointment_datetime)
             if arrival > appt_time:
                 lateness = (arrival - appt_time).total_seconds() / 60
                 # Heavier penalty past the 30-min comfort window
@@ -158,7 +173,7 @@ def build_best_schedule(rep, leads, target_date, time_off_blocks=None):
             earliest_arrival = current_time + timedelta(minutes=travel)
 
             if lead.appointment_datetime:
-                appt_time = lead.appointment_datetime.replace(tzinfo=None)
+                appt_time = to_naive_eastern(lead.appointment_datetime)
                 arrival = max(earliest_arrival, appt_time)
             else:
                 arrival = earliest_arrival
@@ -190,7 +205,7 @@ def build_best_schedule(rep, leads, target_date, time_off_blocks=None):
     else:
         # Heuristic: sort by appointment time, tiebreak by proximity
         sorted_leads = sorted(leads, key=lambda l: (
-            l.appointment_datetime.replace(tzinfo=None) if l.appointment_datetime else datetime.max,
+            to_naive_eastern(l.appointment_datetime) if l.appointment_datetime else datetime.max,
         ))
         return try_schedule(sorted_leads)
 
@@ -260,7 +275,7 @@ def auto_assign_leads(target_date, save=True):
     # Sort leads by appointment time — earlier appts get assigned first
     # so reps' schedules build forward naturally
     sorted_leads = sorted(unassigned_leads, key=lambda l: (
-        l.appointment_datetime.replace(tzinfo=None) if l.appointment_datetime else datetime.max,
+        to_naive_eastern(l.appointment_datetime) if l.appointment_datetime else datetime.max,
     ))
 
     unassigned = []
@@ -305,7 +320,7 @@ def auto_assign_leads(target_date, save=True):
 
             # Check if appointment would overlap rep's time off
             if lead.appointment_datetime:
-                appt_time = lead.appointment_datetime.replace(tzinfo=None)
+                appt_time = to_naive_eastern(lead.appointment_datetime)
                 arrival = max(free_at + timedelta(minutes=drive), appt_time)
             else:
                 arrival = free_at + timedelta(minutes=drive)
