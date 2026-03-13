@@ -21,6 +21,8 @@ class Lead(models.Model):
         ('rep_no_show', 'Rep No Show'),
         ('no_coverage', 'No Coverage'),
         ('needs_reschedule', 'Needs Reschedule'),
+        ('incomplete_deal', 'Incomplete Deal'),
+        ('future_contact', 'Future Contact'),
     ]
 
     address = models.CharField(max_length=500)
@@ -39,6 +41,7 @@ class Lead(models.Model):
     appointment_datetime = models.DateTimeField(null=True, blank=True)
     rep = models.ForeignKey('Rep', null=True, blank=True, on_delete=models.SET_NULL, related_name='leads')
     disposition = models.CharField(max_length=20, choices=DISPOSITION_CHOICES, blank=True)
+    follow_up_date = models.DateField(null=True, blank=True)
     call_notes = models.CharField(max_length=200, blank=True)
     call_transcript = models.TextField(blank=True)
 

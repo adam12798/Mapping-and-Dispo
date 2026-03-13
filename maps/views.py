@@ -184,7 +184,7 @@ def lead_update(request, pk):
     allowed_fields = [
         'homeowner_name', 'phone_number', 'address', 'city',
         'appointment_type', 'appointment_format', 'appointment_datetime',
-        'disposition', 'call_notes', 'call_transcript',
+        'disposition', 'follow_up_date', 'call_notes', 'call_transcript',
     ]
     if 'rep_id' in data:
         rep_val = data['rep_id']
@@ -192,7 +192,7 @@ def lead_update(request, pk):
     for field in allowed_fields:
         if field in data:
             value = data[field]
-            if field == 'appointment_datetime' and value == '':
+            if field in ('appointment_datetime', 'follow_up_date') and value == '':
                 value = None
             setattr(lead, field, value)
     # Re-geocode if address or city changed
@@ -632,17 +632,20 @@ def dashboard_api(request):
         qs = qs.filter(rep_id__in=rep_ids)
 
     DISPO_KEYS = ['sale', 'no_sale', 'follow_up', 'credit_fail', 'cancel_door',
-                  'cpfu', 'rep_no_show', 'no_coverage', 'needs_reschedule']
+                  'cpfu', 'rep_no_show', 'no_coverage', 'needs_reschedule',
+                  'incomplete_deal', 'future_contact']
     DISPO_LABELS = {
         'sale': 'Sale', 'no_sale': 'No Sale', 'follow_up': 'Follow Up',
         'credit_fail': 'Credit Fail', 'cancel_door': 'Cancel at Door',
         'cpfu': 'CPFU', 'rep_no_show': 'Rep No Show',
         'no_coverage': 'No Coverage', 'needs_reschedule': 'Needs Reschedule',
+        'incomplete_deal': 'Incomplete Deal', 'future_contact': 'Future Contact',
     }
     DISPO_COLORS = {
         'sale': '#27ae60', 'no_sale': '#8e44ad', 'follow_up': '#e67e22',
         'credit_fail': '#ff69b4', 'cancel_door': '#95a5a6', 'cpfu': '#98c1d9',
         'rep_no_show': '#111111', 'no_coverage': '#c0392b', 'needs_reschedule': '#3498db',
+        'incomplete_deal': '#d4a017', 'future_contact': '#1abc9c',
     }
     PRODUCT_COLORS = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
 

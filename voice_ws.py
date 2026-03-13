@@ -60,6 +60,7 @@ CRITICAL RULES:
 - If credit was run and failed, it is ALWAYS credit_fail
 - Do NOT tell the rep the disposition category name. Just confirm naturally: "Alright, I've got that noted" or "Very good, I'll update that straightaway"
 - Do NOT use the no_coverage disposition — that is not something reps report
+- After determining follow_up or cpfu, ask "When would be a good time to follow up with the homeowner?" Get a specific date. If the date is more than a month out, the system will automatically mark it as a future contact instead of a regular follow up.
 - After updating a disposition, if the rep has another appointment the same day, remind them of the time and drive time (if available). Example: "Right then, you've got the Smiths at 3 PM — about 25 minutes from here."
 
 Do NOT bring up time off unless the rep mentions it first. If they do request time off:
@@ -92,6 +93,10 @@ DISPOSITION_TOOL = {
             'call_notes': {
                 'type': 'string',
                 'description': 'A brief paraphrase of what happened at the appointment, under 20 words. Example: "Wife blew up the deal" or "Homeowner needs to talk to friend who has solar"',
+            },
+            'follow_up_date': {
+                'type': 'string',
+                'description': 'The follow-up date in YYYY-MM-DD format. Required when disposition is follow_up or cpfu.',
             },
         },
         'required': ['lead_id', 'disposition', 'call_notes'],
@@ -222,17 +227,33 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
         lead_id = fn_args.get('lead_id')
         disposition = fn_args.get('disposition')
         call_notes = fn_args.get('call_notes', '')
+        follow_up_date_str = fn_args.get('follow_up_date', '')
 
         if not rep:
             return {'success': False, 'error': 'Could not identify rep'}
+
+        # Parse follow_up_date and auto-set future_contact if >1 month out
+        follow_up_date = None
+        if follow_up_date_str:
+            try:
+                from datetime import datetime, timedelta
+                follow_up_date = datetime.strptime(follow_up_date_str, '%Y-%m-%d').date()
+                if disposition in ('follow_up', 'cpfu') and follow_up_date > (datetime.now().date() + timedelta(days=30)):
+                    disposition = 'future_contact'
+                    logger.info(f'Auto-set disposition to future_contact (follow_up_date {follow_up_date} is >1 month out)')
+            except ValueError:
+                logger.warning(f'Could not parse follow_up_date: {follow_up_date_str}')
 
         # Build current transcript
         call_transcript = '\n'.join(transcript_parts) if transcript_parts else ''
 
         # Only allow updating leads assigned to this rep
+        update_kwargs = dict(disposition=disposition, call_notes=call_notes, call_transcript=call_transcript)
+        if follow_up_date is not None:
+            update_kwargs['follow_up_date'] = follow_up_date
         updated = await sync_to_async(
             Lead.objects.filter(id=lead_id, rep=rep).update
-        )(disposition=disposition, call_notes=call_notes, call_transcript=call_transcript)
+        )(**update_kwargs)
 
         if updated:
             logger.info(f'Updated lead {lead_id} disposition to {disposition}, notes: {call_notes}')
