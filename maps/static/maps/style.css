@@ -210,6 +210,26 @@ html, body {
     min-width: 36px;
 }
 
+tbody .sticky-check::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    right: 100%;
+    width: 50px;
+    background: inherit;
+}
+
+thead .sticky-check::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    right: 100%;
+    width: 50px;
+    background: #293241;
+}
+
 .sticky-name {
     left: 36px;
     min-width: 160px;
