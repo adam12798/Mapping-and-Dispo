@@ -585,7 +585,7 @@ tbody tr:hover .sticky-col {
     overflow-y: auto;
     font-family: 'Montserrat', sans-serif;
     font-size: 12px;
-    z-index: 1000;
+    z-index: 800;
     transform: translateX(100%);
     transition: transform 0.2s;
 }
@@ -599,7 +599,7 @@ tbody tr:hover .sticky-col {
     right: 0;
     top: 50%;
     transform: translateY(-50%);
-    z-index: 1001;
+    z-index: 801;
     background: #293241;
     color: #e0fbfc;
     border: none;
