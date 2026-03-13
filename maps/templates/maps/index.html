@@ -596,24 +596,24 @@
         }
 
         // Sidebar
-        var sidebarOpen = false;
         var pendingAssignments = null; // holds proposed assignments before confirm
 
         function toggleSidebar() {
             var sidebar = document.getElementById('sidebar');
             var toggle = document.getElementById('sidebar-toggle');
-            sidebarOpen = !sidebarOpen;
-            if (sidebarOpen) {
-                sidebar.classList.add('open');
-                toggle.innerHTML = '&#9654;';
-            } else {
+            var isOpen = sidebar.classList.contains('open');
+            if (isOpen) {
                 sidebar.classList.remove('open');
                 toggle.innerHTML = '&#9664;';
+            } else {
+                sidebar.classList.add('open');
+                toggle.innerHTML = '&#9654;';
             }
         }
 
         function openSidebar() {
-            if (!sidebarOpen) toggleSidebar();
+            var sidebar = document.getElementById('sidebar');
+            if (!sidebar.classList.contains('open')) toggleSidebar();
         }
 
         var typeColorMap = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
