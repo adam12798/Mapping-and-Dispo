@@ -526,8 +526,11 @@ tbody tr:hover .sticky-col {
     height: 100%;
 }
 
-/* Right sidebar */
+/* Right sidebar — absolute overlay so map never resizes */
 .sidebar {
+    position: absolute;
+    right: 0;
+    top: 0;
     width: 320px;
     height: 100%;
     background: #fff;
@@ -535,12 +538,13 @@ tbody tr:hover .sticky-col {
     overflow-y: auto;
     font-family: 'Montserrat', sans-serif;
     font-size: 12px;
-    display: none;
-    flex-shrink: 0;
+    z-index: 1000;
+    transform: translateX(100%);
+    transition: transform 0.2s;
 }
 
 .sidebar.open {
-    display: block;
+    transform: translateX(0);
 }
 
 .sidebar-toggle {
@@ -562,6 +566,7 @@ tbody tr:hover .sticky-col {
 
 .sidebar.open ~ .sidebar-toggle {
     right: 320px;
+    transition: right 0.2s;
 }
 
 .sidebar-header {
