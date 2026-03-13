@@ -62,12 +62,13 @@
 
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Light base tiles (will be mostly hidden by town polygons)
+        // Light base tiles — bounded to MA area to reduce tile loading
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
             maxZoom: 19,
             updateWhenZooming: false,
-            keepBuffer: 8
+            keepBuffer: 8,
+            bounds: [[40.5, -74.5], [43.5, -69.0]]
         }).addTo(map);
 
         // Provider color map
