@@ -132,4 +132,5 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Future / Roadmap
 
 - **Sutton Branding** — Integrate "Sutton" branding across all page titles and headers. Central landing page with navigation.
+- **City Validation** — When an appointment comes in, validate that the city matches one of the existing cities on the map. Can't implement yet because some appointments may come from different states, but once we're MA-only this should be enforced.
 - **Voice Agent Enhancements** — more function calling tools (e.g. schedule lookups, appointment notes), smarter context handling
