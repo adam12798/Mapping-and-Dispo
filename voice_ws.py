@@ -11,6 +11,7 @@ import json
 import base64
 import asyncio
 import logging
+from zoneinfo import ZoneInfo
 
 import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -141,7 +142,7 @@ async def get_rep_context(caller_number):
 
     from asgiref.sync import sync_to_async
     from maps.models import Rep, Lead, TimeOffRequest
-    from datetime import date, timedelta
+    from datetime import date, datetime, timedelta
 
     if not caller_number:
         return {'rep': None, 'prompt_context': ''}
@@ -158,7 +159,7 @@ async def get_rep_context(caller_number):
     if not rep:
         return {'rep': None, 'prompt_context': ''}
 
-    today = date.today()
+    today = datetime.now(ZoneInfo('America/New_York')).date()
     # Get appointments for next 3 days
     leads = await sync_to_async(list)(
         Lead.objects.filter(
@@ -183,7 +184,7 @@ async def get_rep_context(caller_number):
     if leads:
         lines.append(f"\n{rep.name}'s upcoming appointments:")
         for i, lead in enumerate(leads):
-            dt = lead.appointment_datetime
+            dt = lead.appointment_datetime.astimezone(ZoneInfo('America/New_York'))
             appt_type = lead.appointment_type or 'unknown'
             fmt = lead.appointment_format or ''
             dispo = lead.disposition or 'none'
@@ -606,7 +607,7 @@ async def save_call_and_extract(caller_number, call_sid, transcript, rep=None):
             model='gpt-4o-mini',
             messages=[
                 {'role': 'system', 'content': f"""Extract any time off requests from this phone call transcript.
-Today's date is {date.today().isoformat()}.
+Today's date is {datetime.now(ZoneInfo('America/New_York')).date().isoformat()}.
 
 Return a JSON array of objects with these fields:
 - "date": "YYYY-MM-DD"
