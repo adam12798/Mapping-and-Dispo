@@ -227,7 +227,7 @@ html, body {
 
 .crm-filters select,
 .crm-filters input[type="date"] {
-    font-family: 'Courier New', monospace;
+    font-family: 'Montserrat', sans-serif;
     font-size: 12px;
     padding: 4px 8px;
     border: 1px solid var(--color-light-blue);
