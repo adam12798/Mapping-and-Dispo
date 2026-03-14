@@ -55,7 +55,8 @@ html, body {
     align-items: center;
     padding: 0 16px;
     z-index: 2000;
-    position: relative;
+    position: sticky;
+    top: 0;
 }
 
 .nav-brand {
@@ -151,7 +152,7 @@ html, body {
 
 .crm-toolbar {
     position: sticky;
-    top: 0;
+    top: 44px;
     z-index: 10;
     background: var(--color-white);
     padding: 16px 24px 8px 24px;
@@ -160,7 +161,7 @@ html, body {
 }
 
 .crm-table-wrapper {
-    overflow-x: auto;
+    overflow: auto;
     max-width: 100%;
     padding: 0 24px 24px 24px;
 }
@@ -355,7 +356,7 @@ thead .sticky-check::before {
 }
 
 thead .sticky-col {
-    z-index: 3;
+    z-index: 4;
     background: var(--color-navy);
 }
 
@@ -368,6 +369,9 @@ tbody tr:hover .sticky-col {
 }
 
 .crm-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
     background: var(--color-navy);
     color: var(--color-ice);
     padding: 10px 12px;
