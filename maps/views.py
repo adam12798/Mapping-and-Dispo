@@ -28,7 +28,7 @@ def twilio_check(request):
 
 
 def index(request):
-    return render(request, 'maps/index.html')
+    return render(request, 'maps/index.html', {'active_tab': 'map'})
 
 
 def leads_api(request):
@@ -169,7 +169,7 @@ def geocode(address):
 def crm_view(request):
     leads = Lead.objects.select_related('rep').order_by('-created_at')
     reps = Rep.objects.order_by('name')
-    return render(request, 'maps/crm.html', {'leads': leads, 'reps': reps})
+    return render(request, 'maps/crm.html', {'leads': leads, 'reps': reps, 'active_tab': 'crm'})
 
 
 def daily_view(request):
@@ -183,6 +183,7 @@ def daily_view(request):
         'leads': leads,
         'reps': reps,
         'selected_date': selected_date,
+        'active_tab': 'daily',
     })
 
 
@@ -285,7 +286,7 @@ def manager_api(request):
 def time_off_view(request):
     requests = TimeOffRequest.objects.select_related('rep').order_by('-created_at')
     reps = Rep.objects.filter(is_active=True).order_by('name')
-    return render(request, 'maps/time_off.html', {'requests': requests, 'reps': reps})
+    return render(request, 'maps/time_off.html', {'requests': requests, 'reps': reps, 'active_tab': 'time_off'})
 
 
 def time_off_by_date_api(request):
@@ -361,6 +362,7 @@ def reps_view(request):
     return render(request, 'maps/reps.html', {
         'active_reps': active_reps,
         'inactive_reps': inactive_reps,
+        'active_tab': 'reps',
     })
 
 
@@ -648,7 +650,7 @@ def confirm_assignments_api(request):
 
 def dashboard_view(request):
     reps = Rep.objects.filter(is_active=True).order_by('name')
-    return render(request, 'maps/dashboard.html', {'reps': reps})
+    return render(request, 'maps/dashboard.html', {'reps': reps, 'active_tab': 'dashboard'})
 
 
 def dashboard_api(request):

@@ -1,25 +1,9 @@
+{% extends "maps/base.html" %}
 {% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/svg+xml" href="{% static 'maps/favicon.svg' %}">
-    <title>Reps — Mapping & Dispo</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
-</head>
-<body>
-    <nav class="top-nav">
-        <a href="/" class="nav-tab">Map</a>
-        <a href="/crm/" class="nav-tab">CRM</a>
-        <a href="/reps/" class="nav-tab active">Reps</a>
-        <a href="/time-off/" class="nav-tab">Time Off</a>
-        <a href="/daily/" class="nav-tab">Daily</a>
-        <a href="/dashboard/" class="nav-tab">Dashboard</a>
-    </nav>
+
+{% block title %}Reps{% endblock %}
+
+{% block content %}
     <div class="crm-container">
         <div class="crm-header">
             <h2>Representatives</h2>
@@ -74,7 +58,7 @@
                             <option value="false">Inactive</option>
                         </select>
                     </td>
-                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteRep(this)">X</button></td>
+                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteRep(this)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button></td>
                 </tr>
                 {% endfor %}
                 {% for rep in inactive_reps %}
@@ -106,13 +90,15 @@
                             <option value="false" selected>Inactive</option>
                         </select>
                     </td>
-                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteRep(this)">X</button></td>
+                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteRep(this)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button></td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+{% endblock %}
 
+{% block scripts %}
     <script>
         function showAddRow() {
             var empty = document.getElementById('empty-row');
@@ -275,5 +261,4 @@
             });
         });
     </script>
-</body>
-</html>
+{% endblock %}

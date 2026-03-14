@@ -1,15 +1,9 @@
+{% extends "maps/base.html" %}
 {% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/svg+xml" href="{% static 'maps/favicon.svg' %}">
-    <title>CRM — Mapping & Dispo</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
+
+{% block title %}CRM{% endblock %}
+
+{% block head_extra %}
     <style>
         .crm-table th.sortable:not(.sticky-col) { position: relative; }
         .crm-table th .col-resize {
@@ -26,16 +20,9 @@
             background: #ee6c4d;
         }
     </style>
-</head>
-<body>
-    <nav class="top-nav">
-        <a href="/" class="nav-tab">Map</a>
-        <a href="/crm/" class="nav-tab active">CRM</a>
-        <a href="/reps/" class="nav-tab">Reps</a>
-        <a href="/time-off/" class="nav-tab">Time Off</a>
-        <a href="/daily/" class="nav-tab">Daily</a>
-        <a href="/dashboard/" class="nav-tab">Dashboard</a>
-    </nav>
+{% endblock %}
+
+{% block content %}
     <div class="crm-container">
         <div class="crm-toolbar">
             <div class="crm-header">
@@ -186,7 +173,7 @@
                     <td><input type="date" class="crm-input" data-field="follow_up_date" value="{{ lead.follow_up_date|date:'Y-m-d'|default:'' }}"></td>
                     <td><input type="text" class="crm-input" data-field="call_notes" value="{{ lead.call_notes }}" placeholder="—"></td>
                     <td><textarea class="crm-input" data-field="call_transcript" rows="1" style="resize:vertical;min-height:28px;max-width:300px;">{{ lead.call_transcript }}</textarea></td>
-                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)">X</button></td>
+                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button></td>
                 </tr>
                 {% empty %}
                 <tr><td colspan="16" class="empty-row">No leads yet</td></tr>
@@ -195,7 +182,9 @@
         </table>
         </div>
     </div>
+{% endblock %}
 
+{% block scripts %}
     <script>
         var dispoColors = {
             sale: '#27ae60',
@@ -490,5 +479,4 @@
             });
         })();
     </script>
-</body>
-</html>
+{% endblock %}

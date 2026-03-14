@@ -1,15 +1,9 @@
+{% extends "maps/base.html" %}
 {% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/svg+xml" href="{% static 'maps/favicon.svg' %}">
-    <title>Time Off — Mapping & Dispo</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
+
+{% block title %}Time Off{% endblock %}
+
+{% block head_extra %}
     <style>
         .timeoff-container {
             max-width: 1000px;
@@ -208,17 +202,9 @@
             font-size: 13px;
         }
     </style>
-</head>
-<body>
-    <nav class="top-nav">
-        <a href="/" class="nav-tab">Map</a>
-        <a href="/crm/" class="nav-tab">CRM</a>
-        <a href="/reps/" class="nav-tab">Reps</a>
-        <a href="/time-off/" class="nav-tab active">Time Off</a>
-        <a href="/daily/" class="nav-tab">Daily</a>
-        <a href="/dashboard/" class="nav-tab">Dashboard</a>
-    </nav>
+{% endblock %}
 
+{% block content %}
     <div class="timeoff-container">
         <div class="timeoff-header">
             <h2>Time Off Requests</h2>
@@ -337,7 +323,9 @@
             </div>
         </div>
     </div>
+{% endblock %}
 
+{% block scripts %}
     <script>
         function getCookie(name) {
             var v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
@@ -456,5 +444,4 @@
 
         loadManagers();
     </script>
-</body>
-</html>
+{% endblock %}

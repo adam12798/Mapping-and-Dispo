@@ -1,0 +1,28 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="{% static 'maps/favicon.svg' %}">
+    <title>Sutton | {% block title %}{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'maps/style.css' %}" />
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+    <nav class="top-nav">
+        <span class="nav-brand">Sutton</span>
+        <a href="{% url 'index' %}" class="nav-tab {% if active_tab == 'map' %}active{% endif %}">Map</a>
+        <a href="{% url 'crm' %}" class="nav-tab {% if active_tab == 'crm' %}active{% endif %}">CRM</a>
+        <a href="{% url 'reps' %}" class="nav-tab {% if active_tab == 'reps' %}active{% endif %}">Reps</a>
+        <a href="{% url 'time_off' %}" class="nav-tab {% if active_tab == 'time_off' %}active{% endif %}">Time Off</a>
+        <a href="{% url 'daily' %}" class="nav-tab {% if active_tab == 'daily' %}active{% endif %}">Daily</a>
+        <a href="{% url 'dashboard' %}" class="nav-tab {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
+    </nav>
+    {% block content %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>
