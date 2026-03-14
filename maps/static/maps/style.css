@@ -150,6 +150,7 @@ html, body {
     height: calc(100vh - 44px);
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .crm-toolbar {
