@@ -14,7 +14,10 @@
 </head>
 <body>
     <nav class="top-nav">
-        <span class="nav-brand">Sutton</span>
+        <div class="nav-brand">
+            <span class="nav-brand-name">Sutton</span>
+            <span class="nav-brand-sub"><span class="nav-brand-by">by</span> ICEBERG</span>
+        </div>
         <a href="{% url 'index' %}" class="nav-tab {% if active_tab == 'map' %}active{% endif %}">Map</a>
         <a href="{% url 'crm' %}" class="nav-tab {% if active_tab == 'crm' %}active{% endif %}">CRM</a>
         <a href="{% url 'reps' %}" class="nav-tab {% if active_tab == 'reps' %}active{% endif %}">Reps</a>
