@@ -147,12 +147,13 @@ html, body {
     padding: 0;
     max-width: 100%;
     background: var(--color-white);
-    min-height: calc(100vh - 44px);
+    height: calc(100vh - 44px);
+    display: flex;
+    flex-direction: column;
 }
 
 .crm-toolbar {
-    position: sticky;
-    top: 44px;
+    flex-shrink: 0;
     z-index: 10;
     background: var(--color-white);
     padding: 16px 24px 8px 24px;
@@ -161,8 +162,8 @@ html, body {
 }
 
 .crm-table-wrapper {
+    flex: 1;
     overflow: auto;
-    max-width: 100%;
     padding: 0 24px 24px 24px;
 }
 
