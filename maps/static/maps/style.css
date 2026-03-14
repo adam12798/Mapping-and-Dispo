@@ -356,8 +356,8 @@ thead .sticky-check::before {
     background: var(--color-light-blue);
 }
 
-thead .sticky-col {
-    z-index: 4;
+.crm-table thead .sticky-col {
+    z-index: 5;
     background: var(--color-navy);
 }
 
