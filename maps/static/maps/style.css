@@ -280,7 +280,8 @@ html, body {
 .crm-table {
     width: max-content;
     min-width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-family: 'Montserrat', sans-serif;
     font-size: 13px;
 }
