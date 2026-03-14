@@ -342,7 +342,16 @@ thead .sticky-check::before {
 .sticky-name {
     left: 36px;
     min-width: 160px;
-    box-shadow: 2px 0 0 0 var(--color-light-blue);
+}
+
+.sticky-name::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 2px;
+    background: var(--color-light-blue);
 }
 
 thead .sticky-col {
