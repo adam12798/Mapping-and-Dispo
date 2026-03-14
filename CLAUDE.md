@@ -110,6 +110,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `.env` must be recreated manually on each machine
 - Cursor settings sync enabled across machines
 
+## UI Architecture
+
+- **Base template**: `maps/templates/maps/base.html` — shared `<head>`, nav, Google Fonts, and block structure (`title`, `head_extra`, `content`, `scripts`). All 6 pages extend this.
+- **Nav brand**: "Sutton" with "by ICEBERG" subtitle (gold "by", white "ICEBERG")
+- **Active tab**: Driven by `active_tab` context variable passed from each view in `views.py`
+- **CSS custom properties**: `:root` variables in `style.css` for colors (`--color-navy`, `--color-blue`, etc.), border-radius (`--radius-sm/md/lg`), shadows (`--shadow-sm/md/lg`), transitions (`--transition-fast/base`), focus ring (`--focus-ring`)
+- **Fonts**: Montserrat for all UI elements (nav, tables, inputs, buttons, filters). Courier New only for map overlays (legend, city labels, tooltips) and dashboard KPI pills.
+- **Delete buttons**: Use inline SVG × icons, not text "X"
+
 ## Key Files
 
 - `maps/models.py` — Lead (incl. call_notes, call_transcript, follow_up_date), Rep, TimeOffRequest, Manager, VoiceCallLog models
@@ -118,21 +127,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `maps/assignment.py` — Auto-assignment algorithm (respects appt times, time off, specialty)
 - `voice_ws.py` — FastAPI WebSocket handler: Twilio ↔ OpenAI Realtime API, rep context lookup, disposition function calling, drive time via OSRM
 - `dispo/asgi.py` — ASGI router (WebSocket → FastAPI, HTTP → Django)
+- `maps/templates/maps/base.html` — Base template (shared nav, head, blocks)
 - `maps/templates/maps/index.html` — Map page with sidebar (shows reps off section)
 - `maps/templates/maps/crm.html` — CRM page (resizable columns, call notes/transcript)
 - `maps/templates/maps/daily.html` — Daily appointments page (date picker, same features as CRM)
 - `maps/templates/maps/reps.html` — Reps page
 - `maps/templates/maps/dashboard.html` — Dashboard page (Chart.js charts, filters, KPI pills)
 - `maps/templates/maps/time_off.html` — Time Off page (requests, approvals, managers)
-- `maps/static/maps/style.css` — All styles
+- `maps/static/maps/style.css` — All styles (CSS custom properties at top)
 - `maps/urls.py` — URL routing
 - `dispo/settings.py` — Django settings (timezone, Twilio/OpenAI config, database)
 - `Procfile` — Railway deployment (uvicorn ASGI server)
 
-## Future / Roadmap
+## Roadmap
 
-- **Sutton Branding** — Integrate "Sutton" branding across all page titles and headers. Central landing page with navigation.
-- **City Validation** — When an appointment comes in, validate that the city matches one of the existing cities on the map. Can't implement yet because some appointments may come from different states, but once we're MA-only this should be enforced.
-- **Bulk Editing Tool** — Add bulk edit functionality to CRM/Daily pages (select multiple rows, update a field across all at once — e.g. assign rep, set disposition, change date).
-- **Map Metrics by City** — Add interactive metrics overlay on the map sorted by city (e.g. click a city polygon to see appointment count, sit rate, conversion rate, top dispos for that city).
-- **Voice Agent Enhancements** — more function calling tools (e.g. schedule lookups, appointment notes), smarter context handling
+See `ROADMAP.md` for planned future changes.
