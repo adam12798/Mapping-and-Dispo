@@ -159,13 +159,14 @@ async def get_rep_context(caller_number):
     if not rep:
         return {'rep': None, 'prompt_context': ''}
 
-    today = datetime.now(ZoneInfo('America/New_York')).date()
-    # Get appointments for next 3 days
+    now_eastern = datetime.now(ZoneInfo('America/New_York'))
+    today = now_eastern.date()
+    # Get upcoming appointments only (excludes past appointments from today)
     leads = await sync_to_async(list)(
         Lead.objects.filter(
             rep=rep,
-            appointment_datetime__date__gte=today,
-            appointment_datetime__date__lte=today + timedelta(days=3),
+            appointment_datetime__gte=now_eastern,
+            appointment_datetime__lte=now_eastern + timedelta(days=3),
         ).order_by('appointment_datetime')
     )
 
