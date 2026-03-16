@@ -685,7 +685,8 @@ def dashboard_api(request):
         'sale': '#27ae60', 'no_sale': '#8e44ad', 'follow_up': '#e67e22',
         'credit_fail': '#ff69b4', 'cancel_door': '#95a5a6', 'cpfu': '#98c1d9',
         'rep_no_show': '#111111', 'no_coverage': '#c0392b', 'needs_reschedule': '#3498db',
-        'incomplete_deal': '#d4a017', 'future_contact': '#1abc9c',
+        'incomplete_deal': '#d4a017', 'future_contact': '#1abc9c', 'dq': '#8B4513',
+        'no_show': '#800000',
     }
     PRODUCT_COLORS = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
 

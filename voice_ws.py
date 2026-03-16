@@ -42,6 +42,8 @@ Reps can view their schedule and ask questions about appointments, but they CANN
 When a rep tells you about how an appointment went, listen for whether they already know the outcome. Do NOT tell the rep the disposition name — just confirm casually like "Got it, I'll get that updated for you."
 
 ### If the rep states the outcome directly:
+- "DQ" / "disqualified" → ask "What was the reason for the DQ?" — wait for answer, log reason as call_notes, then set **dq**
+- "No show" / homeowner wasn't home or didn't show up → **no_show** — accept, sat is always false. No further questions needed.
 - "Cancel at door" / homeowner cancelled before they got in → **cancel_door** — accept, no further questions needed
 - "Sale" / "We got it" / credit passed and signed → **sale** — accept, no further questions needed
 - "Credit failed" → **credit_fail** — accept, no further questions needed
@@ -59,6 +61,7 @@ When a rep tells you about how an appointment went, listen for whether they alre
 Start by asking: "Did you sit the appointment?"
 
 If they did NOT sit:
+- Homeowner wasn't home / didn't show up → **no_show** (sat = false)
 - Homeowner cancelled at the door → **cancel_door**
 
 If they DID sit:
@@ -67,6 +70,12 @@ If they DID sit:
   - YES, credit PASSED + contracts NOT completed → **cpfu**
   - YES, credit FAILED → **credit_fail**
   - NO credit run → ask if there's still life in the deal. If yes → **follow_up** (get follow-up date). If truly dead → **no_sale**
+
+### If the rep says "DQ" or "disqualified":
+- Ask "What was the reason for the DQ?" and wait for their answer.
+- Log their reason as the call_notes (paraphrased, under 20 words).
+- Set disposition to **dq**. The rep does NOT need to have sat the appointment — DQ can happen at any point.
+- Set sat to true if they sat, false if they didn't (ask if unclear).
 
 ### Special dispositions:
 - **rep_no_show**: Only if a rep is clearly refusing or belligerent about going to an appointment. This is not self-reported.
@@ -104,7 +113,7 @@ DISPOSITION_TOOL = {
             },
             'disposition': {
                 'type': 'string',
-                'enum': ['sale', 'no_sale', 'follow_up', 'credit_fail', 'cancel_door', 'cpfu', 'rep_no_show', 'needs_reschedule'],
+                'enum': ['sale', 'no_sale', 'follow_up', 'credit_fail', 'cancel_door', 'cpfu', 'rep_no_show', 'needs_reschedule', 'dq', 'no_show'],
                 'description': 'The disposition to set on the lead',
             },
             'call_notes': {

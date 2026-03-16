@@ -23,6 +23,8 @@ class Lead(models.Model):
         ('needs_reschedule', 'Needs Reschedule'),
         ('incomplete_deal', 'Incomplete Deal'),
         ('future_contact', 'Future Contact'),
+        ('dq', 'DQ'),
+        ('no_show', 'No Show'),
     ]
 
     address = models.CharField(max_length=500)
