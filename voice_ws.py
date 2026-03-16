@@ -82,11 +82,6 @@ If they DID sit:
 - **needs_reschedule**: Not a rep decision — reps don't report this.
 - **no_coverage**: Not something reps report.
 
-### CRITICAL — Correct lead matching:
-- Before calling update_disposition, you MUST confirm which appointment the rep is talking about. Match the homeowner name they mention to the correct [ID: X] in their appointment list.
-- If the rep's description could match multiple appointments, ask them to clarify which one (e.g. "Just to make sure, that's the appointment with Kyle Pitts, right?").
-- NEVER guess or assume which lead — always verify the name matches before using a lead_id.
-
 ### After determining disposition:
 - Do NOT tell the rep the disposition category name. Just confirm naturally: "Alright, I've got that noted" or "Very good, I'll update that straightaway"
 - For **follow_up** or **cpfu**: ask "When would be a good time to follow up with the homeowner?" Get a specific date. If the date is more than a month out, the system automatically marks it as future contact.
@@ -112,9 +107,9 @@ DISPOSITION_TOOL = {
     'parameters': {
         'type': 'object',
         'properties': {
-            'lead_id': {
-                'type': 'integer',
-                'description': 'The ID of the lead to update',
+            'homeowner_name': {
+                'type': 'string',
+                'description': 'The homeowner name from the appointment list. Use the exact name as shown in the appointment list.',
             },
             'disposition': {
                 'type': 'string',
@@ -134,7 +129,7 @@ DISPOSITION_TOOL = {
                 'description': 'The follow-up date in YYYY-MM-DD format. Required when disposition is follow_up or cpfu.',
             },
         },
-        'required': ['lead_id', 'disposition', 'call_notes', 'sat'],
+        'required': ['homeowner_name', 'disposition', 'call_notes', 'sat'],
     },
 }
 
@@ -260,7 +255,7 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
     from maps.models import Lead
 
     if fn_name == 'update_disposition':
-        lead_id = fn_args.get('lead_id')
+        homeowner_name = fn_args.get('homeowner_name', '')
         disposition = fn_args.get('disposition')
         call_notes = fn_args.get('call_notes', '')
         sat = fn_args.get('sat')
@@ -269,11 +264,46 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
         if not rep:
             return {'success': False, 'error': 'Could not identify rep'}
 
+        # Match lead by homeowner name (case-insensitive, partial match)
+        from datetime import datetime, timedelta
+        now_eastern = datetime.now(ZoneInfo('America/New_York'))
+        rep_leads = await sync_to_async(list)(
+            Lead.objects.filter(
+                rep=rep,
+                appointment_datetime__gte=now_eastern - timedelta(days=1),
+                appointment_datetime__lte=now_eastern + timedelta(days=3),
+            )
+        )
+
+        # Find best match: exact, then case-insensitive, then partial
+        lead = None
+        search_name = homeowner_name.strip().lower()
+        for l in rep_leads:
+            if l.homeowner_name and l.homeowner_name.strip().lower() == search_name:
+                lead = l
+                break
+        if not lead:
+            for l in rep_leads:
+                if l.homeowner_name and search_name in l.homeowner_name.strip().lower():
+                    lead = l
+                    break
+        if not lead:
+            for l in rep_leads:
+                if l.homeowner_name and l.homeowner_name.strip().lower() in search_name:
+                    lead = l
+                    break
+
+        if not lead:
+            logger.warning(f'No lead matching "{homeowner_name}" for rep {rep.name}')
+            return {'success': False, 'error': f'No appointment found for homeowner "{homeowner_name}". Ask the rep to clarify the name.'}
+
+        lead_id = lead.id
+        logger.info(f'Matched homeowner "{homeowner_name}" to lead {lead_id} ({lead.homeowner_name})')
+
         # Parse follow_up_date and auto-set future_contact if >1 month out
         follow_up_date = None
         if follow_up_date_str:
             try:
-                from datetime import datetime, timedelta
                 follow_up_date = datetime.strptime(follow_up_date_str, '%Y-%m-%d').date()
                 if disposition in ('follow_up', 'cpfu') and follow_up_date > (datetime.now().date() + timedelta(days=30)):
                     disposition = 'future_contact'
@@ -284,7 +314,7 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
         # Build current transcript
         call_transcript = '\n'.join(transcript_parts) if transcript_parts else ''
 
-        # Only allow updating leads assigned to this rep
+        # Update the matched lead
         update_kwargs = dict(disposition=disposition, call_notes=call_notes, call_transcript=call_transcript)
         if sat is not None:
             update_kwargs['sat'] = sat
@@ -295,7 +325,7 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
         )(**update_kwargs)
 
         if updated:
-            logger.info(f'Updated lead {lead_id} disposition to {disposition}, notes: {call_notes}')
+            logger.info(f'Updated lead {lead_id} ({lead.homeowner_name}) disposition to {disposition}, notes: {call_notes}')
 
             # Send webhook to Go High Level
             try:
@@ -318,7 +348,7 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
             except Exception as e:
                 logger.error(f'GHL webhook failed for lead {lead_id}: {e}')
 
-            return {'success': True, 'message': f'Disposition updated to {disposition}'}
+            return {'success': True, 'message': f'Disposition updated for {lead.homeowner_name}'}
         else:
             logger.warning(f'Failed to update lead {lead_id} — not found or not assigned to {rep.name}')
             return {'success': False, 'error': 'Lead not found or not assigned to you'}
