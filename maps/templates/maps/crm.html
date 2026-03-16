@@ -85,6 +85,8 @@
                     <option value="no_coverage">No Coverage</option>
                     <option value="incomplete_deal">Incomplete Deal</option>
                     <option value="future_contact">Future Contact</option>
+                    <option value="dq">DQ</option>
+                    <option value="no_show">No Show</option>
                     <option value="none">No Disposition</option>
                 </select>
             </div>
@@ -168,6 +170,8 @@
                             <option value="no_coverage" {% if lead.disposition == "no_coverage" %}selected{% endif %}>No Coverage</option>
                             <option value="incomplete_deal" {% if lead.disposition == "incomplete_deal" %}selected{% endif %}>Incomplete Deal</option>
                             <option value="future_contact" {% if lead.disposition == "future_contact" %}selected{% endif %}>Future Contact</option>
+                            <option value="dq" {% if lead.disposition == "dq" %}selected{% endif %}>DQ</option>
+                            <option value="no_show" {% if lead.disposition == "no_show" %}selected{% endif %}>No Show</option>
                         </select>
                     </td>
                     <td><input type="date" class="crm-input" data-field="follow_up_date" value="{{ lead.follow_up_date|date:'Y-m-d'|default:'' }}"></td>
