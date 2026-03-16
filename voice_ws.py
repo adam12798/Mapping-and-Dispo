@@ -83,6 +83,7 @@ If they DID sit:
 - **no_coverage**: Not something reps report.
 
 ### After determining disposition:
+- BEFORE calling update_disposition, you MUST confirm the homeowner name with the rep. Say something like "Just to confirm, that was the appointment with [name], right?" and WAIT for the rep to confirm before calling the tool. If the rep corrects the name, use the corrected name.
 - Do NOT tell the rep the disposition category name. Just confirm naturally: "Alright, I've got that noted" or "Very good, I'll update that straightaway"
 - For **follow_up** or **cpfu**: ask "When would be a good time to follow up with the homeowner?" Get a specific date. If the date is more than a month out, the system automatically marks it as future contact.
 - After updating, if the rep has another appointment the same day, remind them of the time and drive time (if available). Example: "Right then, you've got the Smiths at 3 PM — about 25 minutes from here."
@@ -212,7 +213,7 @@ async def get_rep_context(caller_number):
             fmt = lead.appointment_format or ''
             dispo = lead.disposition or 'none'
             line = (
-                f"- [ID: {lead.id}] {dt:%a %m/%d at %I:%M %p}: {lead.homeowner_name or 'Unknown'} "
+                f"- {dt:%a %m/%d at %I:%M %p}: {lead.homeowner_name or 'Unknown'} "
                 f"at {lead.address}, {lead.city} ({appt_type}, {fmt}) [dispo: {dispo}]"
             )
             # Calculate drive time to next appointment on the same day
