@@ -184,11 +184,12 @@ async def get_rep_context(caller_number):
 
     now_eastern = datetime.now(ZoneInfo('America/New_York'))
     today = now_eastern.date()
-    # Get upcoming appointments only (excludes past appointments from today)
+    # Get all of today's appointments (including past ones for debriefs) + next 3 days
+    today_start = now_eastern.replace(hour=0, minute=0, second=0, microsecond=0)
     leads = await sync_to_async(list)(
         Lead.objects.filter(
             rep=rep,
-            appointment_datetime__gte=now_eastern,
+            appointment_datetime__gte=today_start,
             appointment_datetime__lte=now_eastern + timedelta(days=3),
         ).order_by('appointment_datetime')
     )
@@ -268,10 +269,11 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
         # Match lead by homeowner name (case-insensitive, partial match)
         from datetime import datetime, timedelta
         now_eastern = datetime.now(ZoneInfo('America/New_York'))
+        today_start = now_eastern.replace(hour=0, minute=0, second=0, microsecond=0)
         rep_leads = await sync_to_async(list)(
             Lead.objects.filter(
                 rep=rep,
-                appointment_datetime__gte=now_eastern - timedelta(days=1),
+                appointment_datetime__gte=today_start,
                 appointment_datetime__lte=now_eastern + timedelta(days=3),
             )
         )
