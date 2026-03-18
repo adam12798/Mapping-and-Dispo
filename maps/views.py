@@ -52,6 +52,15 @@ def twilio_check(request):
     })
 
 
+def setup_admin(request):
+    """One-time setup route to create the first manager account. DELETE AFTER USE."""
+    if User.objects.filter(username='Abahou').exists():
+        return JsonResponse({'status': 'already exists — go to /login/'})
+    user = User.objects.create_user(username='Abahou', password='Solar123')
+    UserProfile.objects.create(user=user, role='manager')
+    return JsonResponse({'status': 'Manager account created — go to /login/'})
+
+
 def login_view(request):
     if request.user.is_authenticated:
         return redirect('/')
