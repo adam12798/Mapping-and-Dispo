@@ -12,6 +12,7 @@ urlpatterns = [
     path('api/leads/', views.leads_api, name='leads_api'),
     path('api/leads/<int:pk>/', views.lead_update, name='lead_update'),
     path('api/leads/bulk-delete/', views.leads_bulk_delete, name='leads_bulk_delete'),
+    path('api/leads/bulk-update/', views.leads_bulk_update, name='leads_bulk_update'),
     path('sms/', views.sms_webhook, name='sms_webhook'),
     path('reps/', views.reps_view, name='reps'),
     path('api/reps/', views.rep_create, name='rep_create'),

@@ -350,6 +350,26 @@
             updateBulkBtn();
         });
 
+        // Shift-click selection
+        var lastCheckedIndex = null;
+        document.addEventListener('click', function(e) {
+            if (!e.target.classList.contains('row-select')) return;
+            var visibleCheckboxes = Array.from(document.querySelectorAll('tbody tr')).filter(function(r) {
+                return r.style.display !== 'none' && r.dataset.id;
+            }).map(function(r) { return r.querySelector('.row-select'); }).filter(Boolean);
+            var currentIndex = visibleCheckboxes.indexOf(e.target);
+            if (e.shiftKey && lastCheckedIndex !== null && currentIndex !== lastCheckedIndex) {
+                var start = Math.min(lastCheckedIndex, currentIndex);
+                var end = Math.max(lastCheckedIndex, currentIndex);
+                var state = e.target.checked;
+                for (var i = start; i <= end; i++) {
+                    visibleCheckboxes[i].checked = state;
+                }
+            }
+            lastCheckedIndex = currentIndex;
+            updateBulkBtn();
+        });
+
         // Individual checkboxes
         document.addEventListener('change', function(e) {
             if (e.target.classList.contains('row-select')) updateBulkBtn();
@@ -439,13 +459,74 @@
             filterTable();
         }
 
-        // Field editing
+        // Bulk-editable fields
+        var BULK_FIELDS = ['rep_id', 'disposition', 'sat', 'appointment_type', 'appointment_format', 'follow_up_date'];
+
+        function showToast(msg) {
+            var toast = document.createElement('div');
+            toast.textContent = msg;
+            toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#27ae60;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;opacity:1;transition:opacity 0.5s;';
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.style.opacity = '0'; }, 1500);
+            setTimeout(function() { toast.remove(); }, 2100);
+        }
+
+        function flashRows(rows) {
+            rows.forEach(function(r) {
+                r.style.transition = 'background 0.3s';
+                r.style.background = 'rgba(39,174,96,0.15)';
+            });
+            setTimeout(function() {
+                rows.forEach(function(r) { r.style.background = ''; });
+            }, 800);
+        }
+
+        // Field editing (with bulk support)
         document.querySelectorAll('.crm-input, .crm-select').forEach(function(el) {
             el.addEventListener('change', function() {
                 var row = this.closest('tr');
                 var leadId = row.dataset.id;
                 var field = this.dataset.field;
-                saveField(leadId, field, this.value, this);
+                var value = this.value;
+                var inputEl = this;
+
+                // Check for bulk edit
+                var rowCheckbox = row.querySelector('.row-select');
+                if (rowCheckbox && rowCheckbox.checked && BULK_FIELDS.indexOf(field) !== -1) {
+                    var checkedRows = Array.from(document.querySelectorAll('.row-select:checked')).map(function(cb) { return cb.closest('tr'); });
+                    if (checkedRows.length > 1) {
+                        if (!confirm('Apply this change to all ' + checkedRows.length + ' selected leads?')) {
+                            saveField(leadId, field, value, inputEl);
+                            return;
+                        }
+                        var ids = checkedRows.map(function(r) { return parseInt(r.dataset.id); });
+                        // Update DOM for all selected rows
+                        var dispoColors = { sale:'#27ae60', no_sale:'#8e44ad', follow_up:'#e67e22', credit_fail:'#ff69b4', cancel_door:'#95a5a6', cpfu:'#98c1d9', rep_no_show:'#111', no_coverage:'#c0392b', needs_reschedule:'#3498db', incomplete_deal:'#d4a017', future_contact:'#1abc9c', dq:'#8B4513', no_show:'#800000' };
+                        checkedRows.forEach(function(r) {
+                            var el = r.querySelector('[data-field="' + field + '"]');
+                            if (el) el.value = value;
+                            if (field === 'disposition') {
+                                r.style.borderLeft = value ? '4px solid ' + (dispoColors[value] || '#ccc') : '';
+                            }
+                            if (field === 'sat') {
+                                var satEl = r.querySelector('[data-field="sat"]');
+                                if (satEl) satEl.style.backgroundColor = value === 'true' ? '#e8f5e9' : value === 'false' ? '#fce4ec' : '';
+                            }
+                        });
+                        var body = {};
+                        body[field] = value;
+                        fetch('/api/leads/bulk-update/', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ids: ids, fields: body })
+                        }).then(function() {
+                            showToast(ids.length + ' leads updated');
+                            flashRows(checkedRows);
+                        });
+                        return;
+                    }
+                }
+                saveField(leadId, field, value, inputEl);
             });
         });
 

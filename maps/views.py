@@ -264,6 +264,62 @@ def leads_bulk_delete(request):
 
 
 @csrf_exempt
+def leads_bulk_update(request):
+    """Update multiple leads' fields at once."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    ids = data.get('ids', [])
+    fields = data.get('fields', {})
+    if not ids or not fields:
+        return JsonResponse({'error': 'ids and fields required'}, status=400)
+
+    BULK_ALLOWED = {'rep_id', 'disposition', 'sat', 'appointment_type', 'appointment_format', 'follow_up_date'}
+    update_kwargs = {}
+    for key, value in fields.items():
+        if key not in BULK_ALLOWED:
+            continue
+        if key == 'rep_id':
+            update_kwargs['rep_id'] = int(value) if value else None
+        elif key == 'sat':
+            update_kwargs['sat'] = {'true': True, 'false': False, 'yes': True, 'no': False}.get(str(value).lower().strip()) if value != '' else None
+        elif key == 'follow_up_date':
+            update_kwargs['follow_up_date'] = value if value else None
+        else:
+            update_kwargs[key] = value
+
+    if not update_kwargs:
+        return JsonResponse({'error': 'No valid fields to update'}, status=400)
+
+    Lead.objects.filter(id__in=ids).update(**update_kwargs)
+
+    # Fire GHL webhook for each lead if disposition was updated
+    if 'disposition' in update_kwargs:
+        import logging
+        ghl_logger = logging.getLogger('ghl_webhook')
+        leads = Lead.objects.filter(id__in=ids)
+        for lead in leads:
+            try:
+                ghl_payload = json.dumps({
+                    'phone': lead.phone_number,
+                    'name': lead.homeowner_name,
+                    'disposition': lead.disposition or '',
+                    'call_transcript': lead.call_transcript or '',
+                }).encode()
+                ghl_req = urllib.request.Request(
+                    'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                    data=ghl_payload,
+                    headers={'Content-Type': 'application/json'},
+                )
+                resp = urllib.request.urlopen(ghl_req, timeout=10)
+                ghl_logger.info(f'GHL webhook sent for lead {lead.id}: status {resp.status}')
+            except Exception as e:
+                ghl_logger.error(f'GHL webhook failed for lead {lead.id}: {e}')
+
+    return JsonResponse({'status': 'ok', 'updated': len(ids)})
+
+
+@csrf_exempt
 def manager_api(request):
     """List, create, or delete managers."""
     if request.method == 'GET':
