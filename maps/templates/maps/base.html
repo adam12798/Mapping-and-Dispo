@@ -20,10 +20,17 @@
         </div>
         <a href="{% url 'index' %}" class="nav-tab {% if active_tab == 'map' %}active{% endif %}">Map</a>
         <a href="{% url 'crm' %}" class="nav-tab {% if active_tab == 'crm' %}active{% endif %}">CRM</a>
+        <a href="{% url 'daily' %}" class="nav-tab {% if active_tab == 'daily' %}active{% endif %}">Daily</a>
+        {% if is_manager %}
         <a href="{% url 'reps' %}" class="nav-tab {% if active_tab == 'reps' %}active{% endif %}">Reps</a>
         <a href="{% url 'time_off' %}" class="nav-tab {% if active_tab == 'time_off' %}active{% endif %}">Time Off</a>
-        <a href="{% url 'daily' %}" class="nav-tab {% if active_tab == 'daily' %}active{% endif %}">Daily</a>
         <a href="{% url 'dashboard' %}" class="nav-tab {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
+        <a href="{% url 'users' %}" class="nav-tab {% if active_tab == 'users' %}active{% endif %}">Users</a>
+        {% endif %}
+        <div style="margin-left:auto;display:flex;align-items:center;gap:12px;">
+            <span style="color:#98c1d9;font-size:13px;">{{ request.user.username }}</span>
+            <a href="{% url 'logout' %}" class="nav-tab" style="font-size:13px;color:#ee6c4d;">Logout</a>
+        </div>
     </nav>
     {% block content %}{% endblock %}
     {% block scripts %}{% endblock %}

@@ -16,7 +16,7 @@
     </div>
     <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()">&#9664;</button>
     </div>
-    <div class="route-panel collapsed" id="route-panel">
+    <div class="route-panel collapsed" id="route-panel" {% if not is_manager %}style="display:none;"{% endif %}>
         <h4 onclick="toggleRoutePanel()">Route Planner <span class="route-panel-arrow" id="route-panel-arrow">&#9654;</span></h4>
         <div class="route-panel-body" id="route-panel-body">
             <input type="date" id="route-date" />
@@ -41,6 +41,7 @@
 {% block scripts %}
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
+        var IS_MANAGER = {% if is_manager %}true{% else %}false{% endif %};
         var map = L.map('map', {
             center: [42.2, -71.8],
             zoom: 9.5,
@@ -1009,6 +1010,17 @@
 
         function clearRoute() {
             routeLayer.clearLayers();
+        }
+
+        // Disable sidebar rep dropdowns for non-managers
+        if (!IS_MANAGER) {
+            var observer = new MutationObserver(function() {
+                document.querySelectorAll('.sidebar-assign-select').forEach(function(s) {
+                    s.disabled = true;
+                    s.style.opacity = '0.7';
+                });
+            });
+            observer.observe(document.getElementById('sidebar-content'), { childList: true, subtree: true });
         }
     </script>
 {% endblock %}

@@ -1,0 +1,40 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sutton | Login</title>
+    <link rel="icon" type="image/svg+xml" href="{% static 'maps/favicon.svg' %}">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Montserrat', sans-serif; background: #293241; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .login-card { background: #fff; border-radius: 12px; padding: 40px; width: 360px; box-shadow: 0 8px 32px rgba(0,0,0,.3); }
+        .login-card h1 { color: #293241; text-align: center; margin: 0 0 4px; font-size: 28px; font-weight: 700; }
+        .login-card .sub { text-align: center; color: #3d5a80; margin-bottom: 28px; font-size: 13px; letter-spacing: 1px; }
+        .login-card .sub .by { color: #d4a017; }
+        .login-card label { display: block; font-size: 12px; font-weight: 600; color: #3d5a80; margin-bottom: 4px; }
+        .login-card input { width: 100%; padding: 10px 12px; margin-bottom: 16px; border: 1px solid #98c1d9; border-radius: 6px; font-family: inherit; font-size: 14px; outline: none; transition: border-color 0.2s; }
+        .login-card input:focus { border-color: #3d5a80; }
+        .login-card button { width: 100%; padding: 12px; background: #ee6c4d; color: #fff; border: none; border-radius: 6px; font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+        .login-card button:hover { background: #d9573a; }
+        .error { color: #e74c3c; text-align: center; margin-bottom: 12px; font-size: 13px; font-weight: 500; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h1>Sutton</h1>
+        <div class="sub"><span class="by">by</span> ICEBERG</div>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="POST">
+            {% csrf_token %}
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" autofocus required>
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+            <button type="submit">Sign In</button>
+        </form>
+    </div>
+</body>
+</html>

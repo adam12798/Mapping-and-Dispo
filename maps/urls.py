@@ -3,6 +3,8 @@ from . import views
 from . import voice
 
 urlpatterns = [
+    path('login/', views.login_view, name='login'),
+    path('logout/', views.logout_view, name='logout'),
     path('', views.index, name='index'),
     path('voice/answer/', voice.voice_answer, name='voice_answer'),
     path('voice/debug/', voice.voice_debug, name='voice_debug'),
@@ -31,4 +33,8 @@ urlpatterns = [
     path('api/time-off/<int:pk>/', views.time_off_update, name='time_off_update'),
     path('dashboard/', views.dashboard_view, name='dashboard'),
     path('api/dashboard/', views.dashboard_api, name='dashboard_api'),
+    path('users/', views.users_view, name='users'),
+    path('api/users/', views.users_api, name='users_api'),
+    path('api/users/<int:pk>/', views.user_update_api, name='user_update_api'),
+    path('api/leads/<int:lead_id>/updates/', views.lead_updates_api, name='lead_updates_api'),
 ]

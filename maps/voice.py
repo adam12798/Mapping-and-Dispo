@@ -5,7 +5,10 @@ import websockets
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
+from maps.views import manager_required
 
+
+@manager_required
 def voice_debug(request):
     """Debug endpoint to test OpenAI Realtime API connection."""
     api_key = os.environ.get('OPENAI_API_KEY', '')
@@ -39,6 +42,7 @@ def voice_debug(request):
     return JsonResponse(results)
 
 
+@manager_required
 def voice_logs(request):
     """Debug endpoint to check voice call logs."""
     from maps.models import VoiceCallLog

@@ -7,17 +7,42 @@ from datetime import datetime
 
 from dateutil import parser as dateparser
 
+from functools import wraps
+
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from django.conf import settings
 
 from .assignment import auto_assign_leads
-from .models import Lead, Rep, TimeOffRequest, Manager
+from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate
 
 
+def manager_required(view_func):
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect(f'/login/?next={request.path}')
+        profile = getattr(request.user, 'profile', None)
+        if not profile or not profile.is_manager:
+            return JsonResponse({'error': 'Forbidden'}, status=403)
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+
+def get_user_rep(user):
+    profile = getattr(user, 'profile', None)
+    if profile and profile.role == 'rep' and profile.rep:
+        return profile.rep
+    return None
+
+
+@manager_required
 def twilio_check(request):
     """Quick check if Twilio env vars are loaded (no secrets exposed)."""
     return JsonResponse({
@@ -27,10 +52,34 @@ def twilio_check(request):
     })
 
 
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect('/')
+    error = ''
+    if request.method == 'POST':
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+        user = authenticate(request, username=username, password=password)
+        if user is not None and user.is_active:
+            login(request, user)
+            next_url = request.GET.get('next', '/')
+            return redirect(next_url)
+        else:
+            error = 'Invalid username or password'
+    return render(request, 'maps/login.html', {'error': error})
+
+
+def logout_view(request):
+    logout(request)
+    return redirect('/login/')
+
+
+@login_required
 def index(request):
     return render(request, 'maps/index.html', {'active_tab': 'map'})
 
 
+@login_required
 def leads_api(request):
     """Return all leads as JSON for the map to plot."""
     from django.utils import timezone as tz
@@ -42,6 +91,9 @@ def leads_api(request):
         pass
 
     leads = Lead.objects.filter(latitude__isnull=False).select_related('rep').order_by('-created_at')
+    user_rep = get_user_rep(request.user)
+    if user_rep:
+        leads = leads.filter(rep=user_rep)
     data = [
         {
             'id': lead.id,
@@ -166,18 +218,26 @@ def geocode(address):
     return lat, lng
 
 
+@login_required
 def crm_view(request):
     leads = Lead.objects.select_related('rep').order_by('-created_at')
+    user_rep = get_user_rep(request.user)
+    if user_rep:
+        leads = leads.filter(rep=user_rep)
     reps = Rep.objects.order_by('name')
     return render(request, 'maps/crm.html', {'leads': leads, 'reps': reps, 'active_tab': 'crm'})
 
 
+@login_required
 def daily_view(request):
     from datetime import date as dt_date
     selected_date = request.GET.get('date', dt_date.today().isoformat())
     leads = Lead.objects.select_related('rep').filter(
         appointment_datetime__date=selected_date
     ).order_by('appointment_datetime')
+    user_rep = get_user_rep(request.user)
+    if user_rep:
+        leads = leads.filter(rep=user_rep)
     reps = Rep.objects.filter(is_active=True).order_by('name')
     return render(request, 'maps/daily.html', {
         'leads': leads,
@@ -188,8 +248,12 @@ def daily_view(request):
 
 
 @csrf_exempt
+@login_required
 def lead_update(request, pk):
     """Update or delete a lead's CRM fields."""
+    is_mgr = getattr(request.user, 'profile', None) and request.user.profile.is_manager
+    if not is_mgr:
+        return JsonResponse({'error': 'Forbidden'}, status=403)
     if request.method == 'DELETE':
         lead = get_object_or_404(Lead, pk=pk)
         lead.delete()
@@ -253,6 +317,7 @@ def lead_update(request, pk):
 
 
 @csrf_exempt
+@manager_required
 def leads_bulk_delete(request):
     """Delete multiple leads by ID."""
     if request.method != 'POST':
@@ -264,6 +329,7 @@ def leads_bulk_delete(request):
 
 
 @csrf_exempt
+@manager_required
 def leads_bulk_update(request):
     """Update multiple leads' fields at once."""
     if request.method != 'POST':
@@ -320,6 +386,7 @@ def leads_bulk_update(request):
 
 
 @csrf_exempt
+@manager_required
 def manager_api(request):
     """List, create, or delete managers."""
     if request.method == 'GET':
@@ -339,12 +406,14 @@ def manager_api(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
+@manager_required
 def time_off_view(request):
     requests = TimeOffRequest.objects.select_related('rep').order_by('-created_at')
     reps = Rep.objects.filter(is_active=True).order_by('name')
     return render(request, 'maps/time_off.html', {'requests': requests, 'reps': reps, 'active_tab': 'time_off'})
 
 
+@login_required
 def time_off_by_date_api(request):
     """Return approved time off for a given date."""
     date_str = request.GET.get('date', '')
@@ -370,6 +439,7 @@ def time_off_by_date_api(request):
 
 
 @csrf_exempt
+@manager_required
 def time_off_api(request):
     """Create a time off request manually."""
     if request.method != 'POST':
@@ -389,6 +459,7 @@ def time_off_api(request):
 
 
 @csrf_exempt
+@manager_required
 def time_off_update(request, pk):
     """Update or delete a time off request."""
     tor = get_object_or_404(TimeOffRequest, pk=pk)
@@ -412,6 +483,7 @@ def time_off_update(request, pk):
     return JsonResponse({'status': 'ok'})
 
 
+@manager_required
 def reps_view(request):
     active_reps = Rep.objects.filter(is_active=True).order_by('-rating', 'name')
     inactive_reps = Rep.objects.filter(is_active=False).order_by('-rating', 'name')
@@ -424,6 +496,7 @@ def reps_view(request):
 
 @csrf_exempt
 @require_POST
+@manager_required
 def rep_create(request):
     """Create a new rep, geocoding their home address."""
     data = json.loads(request.body)
@@ -447,6 +520,7 @@ def rep_create(request):
 
 
 @csrf_exempt
+@manager_required
 def rep_update(request, pk):
     """Update or delete a rep."""
     if request.method == 'DELETE':
@@ -472,6 +546,7 @@ def rep_update(request, pk):
 
 
 @csrf_exempt
+@manager_required
 def reps_bulk_delete(request):
     """Delete multiple reps by ID."""
     if request.method != 'POST':
@@ -482,6 +557,7 @@ def reps_bulk_delete(request):
     return JsonResponse({'status': 'ok'})
 
 
+@login_required
 def reps_api(request):
     """Return all active reps as JSON."""
     reps = Rep.objects.filter(is_active=True).order_by('-rating', 'name')
@@ -501,6 +577,7 @@ def reps_api(request):
     return JsonResponse(data, safe=False)
 
 
+@login_required
 def route_api(request):
     """Return ordered route stops for a given date.
 
@@ -590,6 +667,7 @@ def route_api(request):
 
 @csrf_exempt
 @require_POST
+@manager_required
 def auto_assign_api(request):
     """Trigger auto-assignment for a target date."""
     from django.utils import timezone as tz
@@ -668,6 +746,7 @@ def auto_assign_api(request):
 
 @csrf_exempt
 @require_POST
+@manager_required
 def clear_assignments_api(request):
     """Clear all rep assignments for a given date."""
     data = json.loads(request.body)
@@ -689,6 +768,7 @@ def clear_assignments_api(request):
 
 @csrf_exempt
 @require_POST
+@manager_required
 def confirm_assignments_api(request):
     """Confirm proposed assignments by saving lead-to-rep mappings."""
     data = json.loads(request.body)
@@ -704,11 +784,13 @@ def confirm_assignments_api(request):
     return JsonResponse({'status': 'ok', 'confirmed': count})
 
 
+@manager_required
 def dashboard_view(request):
     reps = Rep.objects.filter(is_active=True).order_by('name')
     return render(request, 'maps/dashboard.html', {'reps': reps, 'active_tab': 'dashboard'})
 
 
+@manager_required
 def dashboard_api(request):
     """Return aggregated appointment stats for the dashboard charts."""
     from django.db.models import Count, Q
@@ -993,6 +1075,114 @@ def parse_time_off_request(body, rep):
         requests.append((target_date, start_t, end_t, reason))
 
     return requests if requests else None
+
+
+@manager_required
+def users_view(request):
+    reps = list(Rep.objects.order_by('name').values('id', 'name'))
+    import json as json_mod
+    return render(request, 'maps/users.html', {'reps_json': json_mod.dumps(reps), 'active_tab': 'users'})
+
+
+@csrf_exempt
+@manager_required
+def users_api(request):
+    """GET: list users. POST: create user."""
+    if request.method == 'GET':
+        users = User.objects.select_related('profile', 'profile__rep').order_by('username')
+        data = [{
+            'id': u.id,
+            'username': u.username,
+            'role': u.profile.role if hasattr(u, 'profile') else 'unknown',
+            'rep_id': u.profile.rep_id if hasattr(u, 'profile') else None,
+            'rep_name': u.profile.rep.name if hasattr(u, 'profile') and u.profile.rep else '',
+            'is_active': u.is_active,
+        } for u in users]
+        return JsonResponse(data, safe=False)
+
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        role = data.get('role', 'rep')
+        rep_id = data.get('rep_id')
+        if not username or not password:
+            return JsonResponse({'error': 'Username and password required'}, status=400)
+        if User.objects.filter(username=username).exists():
+            return JsonResponse({'error': 'Username already taken'}, status=400)
+        user = User.objects.create_user(username=username, password=password)
+        rep = Rep.objects.get(pk=rep_id) if rep_id else None
+        UserProfile.objects.create(user=user, role=role, rep=rep)
+        return JsonResponse({'status': 'ok', 'id': user.id})
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+@manager_required
+def user_update_api(request, pk):
+    """PUT: update user. DELETE: delete user."""
+    user = get_object_or_404(User, pk=pk)
+
+    if request.method == 'DELETE':
+        if user == request.user:
+            return JsonResponse({'error': 'Cannot delete yourself'}, status=400)
+        user.delete()
+        return JsonResponse({'status': 'ok'})
+
+    if request.method == 'PUT':
+        data = json.loads(request.body)
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        if 'role' in data:
+            profile.role = data['role']
+        if 'rep_id' in data:
+            profile.rep = Rep.objects.get(pk=data['rep_id']) if data['rep_id'] else None
+        profile.save()
+        if 'is_active' in data:
+            user.is_active = data['is_active']
+            user.save()
+        if 'password' in data and data['password']:
+            user.set_password(data['password'])
+            user.save()
+        return JsonResponse({'status': 'ok'})
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+@login_required
+def lead_updates_api(request, lead_id):
+    """GET: list updates for a lead. POST: add an update."""
+    lead = get_object_or_404(Lead, pk=lead_id)
+    user_rep = get_user_rep(request.user)
+    if user_rep and lead.rep != user_rep:
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+
+    if request.method == 'GET':
+        updates = lead.updates.select_related('user').order_by('created_at')
+        data = [{
+            'id': u.id,
+            'username': u.user.username,
+            'text': u.text,
+            'created_at': u.created_at.strftime('%m/%d/%Y %I:%M %p'),
+        } for u in updates]
+        return JsonResponse(data, safe=False)
+
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        text = data.get('text', '').strip()
+        if not text:
+            return JsonResponse({'error': 'Text required'}, status=400)
+        update = LeadUpdate.objects.create(lead=lead, user=request.user, text=text)
+        return JsonResponse({
+            'status': 'ok',
+            'id': update.id,
+            'username': request.user.username,
+            'text': update.text,
+            'created_at': update.created_at.strftime('%m/%d/%Y %I:%M %p'),
+        })
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
 @csrf_exempt

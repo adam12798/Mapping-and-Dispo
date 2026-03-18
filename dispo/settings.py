@@ -69,6 +69,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'maps.context_processors.user_role',
             ],
         },
     },
@@ -140,3 +141,8 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 CSRF_TRUSTED_ORIGINS = ['https://*.ngrok-free.dev', 'https://*.up.railway.app']
+
+# Auth
+LOGIN_URL = '/login/'
+LOGIN_REDIRECT_URL = '/'
+LOGOUT_REDIRECT_URL = '/login/'

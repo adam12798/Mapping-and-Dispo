@@ -1,0 +1,135 @@
+{% extends "maps/base.html" %}
+{% load static %}
+
+{% block title %}Users{% endblock %}
+
+{% block content %}
+    <div class="crm-container">
+        <div class="crm-header">
+            <h2>User Management</h2>
+            <button class="add-btn" onclick="showAddRow()">+ Add User</button>
+        </div>
+
+        <table class="crm-table">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Role</th>
+                    <th>Linked Rep</th>
+                    <th>Active</th>
+                    <th>Reset Password</th>
+                    <th class="action-col"></th>
+                </tr>
+            </thead>
+            <tbody id="users-body">
+            </tbody>
+        </table>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        var allReps = {{ reps_json|safe }};
+        var currentUserId = {{ request.user.id }};
+
+        function loadUsers() {
+            fetch('/api/users/').then(function(r) { return r.json(); }).then(function(users) {
+                var html = '';
+                users.forEach(function(u) {
+                    html += '<tr data-id="' + u.id + '">';
+                    html += '<td><span class="user-field">' + escHtml(u.username) + '</span></td>';
+                    html += '<td><select class="crm-select" data-field="role" onchange="updateUser(' + u.id + ', {role: this.value})">';
+                    html += '<option value="manager"' + (u.role === 'manager' ? ' selected' : '') + '>Manager</option>';
+                    html += '<option value="rep"' + (u.role === 'rep' ? ' selected' : '') + '>Rep</option>';
+                    html += '</select></td>';
+                    html += '<td><select class="crm-select" data-field="rep_id" onchange="updateUser(' + u.id + ', {rep_id: this.value || null})">';
+                    html += '<option value="">— None —</option>';
+                    allReps.forEach(function(r) {
+                        html += '<option value="' + r.id + '"' + (u.rep_id == r.id ? ' selected' : '') + '>' + escHtml(r.name) + '</option>';
+                    });
+                    html += '</select></td>';
+                    html += '<td><select class="crm-select" data-field="is_active" onchange="updateUser(' + u.id + ', {is_active: this.value === \'true\'})">';
+                    html += '<option value="true"' + (u.is_active ? ' selected' : '') + '>Active</option>';
+                    html += '<option value="false"' + (!u.is_active ? ' selected' : '') + '>Inactive</option>';
+                    html += '</select></td>';
+                    html += '<td><div style="display:flex;gap:4px;"><input type="password" class="crm-input" placeholder="New password" style="width:140px;" id="pw-' + u.id + '"><button class="add-btn" style="padding:4px 10px;font-size:12px;" onclick="resetPassword(' + u.id + ')">Set</button></div></td>';
+                    html += '<td class="action-col">';
+                    if (u.id !== currentUserId) {
+                        html += '<button class="delete-row-btn" onclick="deleteUser(' + u.id + ', \'' + escHtml(u.username) + '\')" title="Delete user"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+                    }
+                    html += '</td>';
+                    html += '</tr>';
+                });
+                document.getElementById('users-body').innerHTML = html;
+            });
+        }
+
+        function escHtml(s) {
+            var d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function showAddRow() {
+            var tbody = document.getElementById('users-body');
+            if (document.getElementById('add-user-row')) return;
+            var html = '<tr id="add-user-row">';
+            html += '<td><input type="text" class="crm-input" id="new-username" placeholder="Username"></td>';
+            html += '<td><select class="crm-select" id="new-role"><option value="manager">Manager</option><option value="rep" selected>Rep</option></select></td>';
+            html += '<td><select class="crm-select" id="new-rep"><option value="">— None —</option>';
+            allReps.forEach(function(r) {
+                html += '<option value="' + r.id + '">' + escHtml(r.name) + '</option>';
+            });
+            html += '</select></td>';
+            html += '<td colspan="2"><input type="password" class="crm-input" id="new-password" placeholder="Password"></td>';
+            html += '<td class="action-col"><button class="add-btn" style="padding:4px 10px;font-size:12px;" onclick="createUser()">Save</button></td>';
+            html += '</tr>';
+            tbody.insertAdjacentHTML('afterbegin', html);
+            document.getElementById('new-username').focus();
+        }
+
+        function createUser() {
+            var username = document.getElementById('new-username').value.trim();
+            var password = document.getElementById('new-password').value;
+            var role = document.getElementById('new-role').value;
+            var repId = document.getElementById('new-rep').value;
+            if (!username || !password) { alert('Username and password required'); return; }
+            fetch('/api/users/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username, password: password, role: role, rep_id: repId || null })
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.error) { alert(data.error); return; }
+                loadUsers();
+            });
+        }
+
+        function updateUser(id, fields) {
+            fetch('/api/users/' + id + '/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(fields)
+            });
+        }
+
+        function resetPassword(id) {
+            var pw = document.getElementById('pw-' + id).value;
+            if (!pw) { alert('Enter a new password'); return; }
+            fetch('/api/users/' + id + '/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pw })
+            }).then(function() {
+                document.getElementById('pw-' + id).value = '';
+                alert('Password updated');
+            });
+        }
+
+        function deleteUser(id, name) {
+            if (!confirm('Delete user "' + name + '"?')) return;
+            fetch('/api/users/' + id + '/', { method: 'DELETE' }).then(function() { loadUsers(); });
+        }
+
+        loadUsers();
+    </script>
+{% endblock %}

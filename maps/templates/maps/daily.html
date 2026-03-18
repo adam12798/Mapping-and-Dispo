@@ -19,6 +19,8 @@
         .crm-table th .col-resize.active {
             background: #ee6c4d;
         }
+        .chatter-btn { background:none;border:1px solid #98c1d9;border-radius:4px;padding:4px 6px;cursor:pointer;color:#3d5a80; }
+        .chatter-btn:hover { background:#e0fbfc; }
     </style>
 {% endblock %}
 
@@ -113,6 +115,7 @@
                     <th class="sortable" onclick="sortTable(12)">Follow Up Date <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(13)">Call Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(14)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th style="width:40px;text-align:center;">Updates</th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -179,13 +182,30 @@
                     <td><input type="date" class="crm-input" data-field="follow_up_date" value="{{ lead.follow_up_date|date:'Y-m-d'|default:'' }}"></td>
                     <td><input type="text" class="crm-input" data-field="call_notes" value="{{ lead.call_notes }}" placeholder="—"></td>
                     <td><textarea class="crm-input" data-field="call_transcript" rows="1" style="resize:vertical;min-height:28px;max-width:300px;">{{ lead.call_transcript }}</textarea></td>
+                    <td style="text-align:center;"><button class="chatter-btn" onclick="openChatter({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button></td>
                     <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="16" class="empty-row">No appointments for this date</td></tr>
+                <tr><td colspan="17" class="empty-row">No appointments for this date</td></tr>
                 {% endfor %}
             </tbody>
         </table>
+        </div>
+    </div>
+
+    <!-- Chatter Modal -->
+    <div id="chatter-modal" style="display:none;position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;">
+        <div onclick="closeChatter()" style="position:absolute;inset:0;background:rgba(41,50,65,0.7);"></div>
+        <div style="position:relative;background:#fff;border-radius:12px;width:440px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.3);">
+            <div style="padding:16px 20px;border-bottom:1px solid #e0fbfc;display:flex;justify-content:space-between;align-items:center;">
+                <h3 id="chatter-title" style="margin:0;font-size:16px;color:#293241;">Updates</h3>
+                <button onclick="closeChatter()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#3d5a80;">&times;</button>
+            </div>
+            <div id="chatter-messages" style="flex:1;overflow-y:auto;padding:16px 20px;min-height:200px;"></div>
+            <div style="padding:12px 20px;border-top:1px solid #e0fbfc;display:flex;gap:8px;">
+                <input type="text" id="chatter-text" placeholder="Type an update..." style="flex:1;padding:8px 12px;border:1px solid #98c1d9;border-radius:6px;font-family:inherit;" onkeydown="if(event.key==='Enter')postUpdate()">
+                <button onclick="postUpdate()" style="padding:8px 16px;background:#ee6c4d;color:#fff;border:none;border-radius:6px;font-family:inherit;font-weight:600;cursor:pointer;">Send</button>
+            </div>
         </div>
     </div>
 {% endblock %}
@@ -552,5 +572,60 @@
                 }
             });
         })();
+
+        // Chatter modal
+        var currentChatterLeadId = null;
+        function openChatter(leadId, name) {
+            currentChatterLeadId = leadId;
+            document.getElementById('chatter-title').textContent = (name || 'Lead') + ' — Updates';
+            var modal = document.getElementById('chatter-modal');
+            modal.style.display = 'flex';
+            modal.style.alignItems = 'center';
+            modal.style.justifyContent = 'center';
+            document.getElementById('chatter-messages').innerHTML = '<div style="text-align:center;color:#98c1d9;">Loading...</div>';
+            fetch('/api/leads/' + leadId + '/updates/')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var html = '';
+                    data.forEach(function(u) {
+                        html += '<div style="margin-bottom:12px;"><strong style="color:#3d5a80;font-size:13px;">' + u.username + '</strong> <span style="color:#98c1d9;font-size:11px;margin-left:8px;">' + u.created_at + '</span><div style="margin-top:2px;font-size:14px;color:#293241;">' + u.text.replace(/</g, '&lt;') + '</div></div>';
+                    });
+                    if (!data.length) html = '<div style="text-align:center;color:#98c1d9;padding:20px;">No updates yet</div>';
+                    var msgDiv = document.getElementById('chatter-messages');
+                    msgDiv.innerHTML = html;
+                    msgDiv.scrollTop = msgDiv.scrollHeight;
+                });
+            setTimeout(function() { document.getElementById('chatter-text').focus(); }, 100);
+        }
+        function closeChatter() {
+            document.getElementById('chatter-modal').style.display = 'none';
+            currentChatterLeadId = null;
+        }
+        function postUpdate() {
+            var text = document.getElementById('chatter-text').value.trim();
+            if (!text || !currentChatterLeadId) return;
+            fetch('/api/leads/' + currentChatterLeadId + '/updates/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.error) return;
+                document.getElementById('chatter-text').value = '';
+                openChatter(currentChatterLeadId, document.getElementById('chatter-title').textContent.replace(' — Updates', ''));
+            });
+        }
+
+        // Rep read-only mode: disable all inputs and hide admin-only UI
+        {% if not is_manager %}
+        document.querySelectorAll('.crm-input, .crm-select').forEach(function(el) {
+            el.disabled = true;
+            el.style.opacity = '0.7';
+            el.style.cursor = 'default';
+        });
+        document.querySelectorAll('.row-select, #select-all').forEach(function(el) { el.style.display = 'none'; });
+        var bulkBtn = document.getElementById('bulk-delete-btn');
+        if (bulkBtn) bulkBtn.style.display = 'none';
+        document.querySelectorAll('.delete-row-btn').forEach(function(el) { el.style.display = 'none'; });
+        {% endif %}
     </script>
 {% endblock %}
