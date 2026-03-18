@@ -27,7 +27,7 @@
         <a href="{% url 'dashboard' %}" class="nav-tab {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
         <a href="{% url 'users' %}" class="nav-tab {% if active_tab == 'users' %}active{% endif %}">Users</a>
         {% endif %}
-        <div style="margin-left:auto;display:flex;align-items:center;gap:12px;">
+        <div style="margin-left:auto;display:flex;align-items:center;gap:12px;font-family:'Montserrat',sans-serif;">
             <span style="color:#98c1d9;font-size:13px;">{{ request.user.username }}</span>
             <a href="{% url 'logout' %}" class="nav-tab" style="font-size:13px;color:#ee6c4d;">Logout</a>
         </div>
