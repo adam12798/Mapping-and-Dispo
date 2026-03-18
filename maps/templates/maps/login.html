@@ -6,26 +6,98 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sutton | Login</title>
     <link rel="icon" type="image/svg+xml" href="{% static 'maps/favicon.svg' %}">
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Montserrat', sans-serif; background: #293241; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-        .login-card { background: #fff; border-radius: 12px; padding: 40px; width: 360px; box-shadow: 0 8px 32px rgba(0,0,0,.3); }
-        .login-card h1 { color: #293241; text-align: center; margin: 0 0 4px; font-size: 28px; font-weight: 700; }
-        .login-card .sub { text-align: center; color: #3d5a80; margin-bottom: 28px; font-size: 13px; letter-spacing: 1px; }
-        .login-card .sub .by { color: #d4a017; }
-        .login-card label { display: block; font-size: 12px; font-weight: 600; color: #3d5a80; margin-bottom: 4px; }
-        .login-card input { width: 100%; padding: 10px 12px; margin-bottom: 16px; border: 1px solid #98c1d9; border-radius: 6px; font-family: inherit; font-size: 14px; outline: none; transition: border-color 0.2s; }
-        .login-card input:focus { border-color: #3d5a80; }
-        .login-card button { width: 100%; padding: 12px; background: #ee6c4d; color: #fff; border: none; border-radius: 6px; font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-        .login-card button:hover { background: #d9573a; }
-        .error { color: #e74c3c; text-align: center; margin-bottom: 12px; font-size: 13px; font-weight: 500; }
+        body { font-family: 'Montserrat', sans-serif; background: #293241; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+
+        /* Animated background */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse at 20% 50%, rgba(61,90,128,0.25) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(152,193,217,0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 60% 80%, rgba(238,108,77,0.1) 0%, transparent 50%);
+            animation: bgShift 8s ease-in-out infinite alternate;
+            z-index: 0;
+        }
+        @keyframes bgShift {
+            0% { transform: scale(1) translate(0, 0); }
+            100% { transform: scale(1.1) translate(-2%, 3%); }
+        }
+
+        .login-card {
+            position: relative; z-index: 1;
+            background: rgba(255,255,255,0.97);
+            border-radius: 16px;
+            padding: 48px 40px 40px;
+            width: 380px;
+            box-shadow: 0 16px 48px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        /* Brand */
+        .brand { text-align: center; margin-bottom: 32px; }
+        .brand-name {
+            font-size: 42px;
+            font-weight: 900;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            background: linear-gradient(135deg, #293241 0%, #3d5a80 50%, #ee6c4d 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1;
+        }
+        .brand-line {
+            width: 40px;
+            height: 3px;
+            background: linear-gradient(90deg, #ee6c4d, #d4a017);
+            margin: 10px auto;
+            border-radius: 2px;
+        }
+        .brand-sub {
+            font-size: 11px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: #3d5a80;
+        }
+        .brand-sub .by { color: #d4a017; font-weight: 700; }
+
+        /* Form */
+        .login-card label { display: block; font-size: 11px; font-weight: 700; color: #3d5a80; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .login-card input {
+            width: 100%; padding: 11px 14px; margin-bottom: 18px;
+            border: 1.5px solid #e0fbfc; border-radius: 8px;
+            font-family: inherit; font-size: 14px; outline: none;
+            background: #f8fcfd;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .login-card input:focus { border-color: #3d5a80; box-shadow: 0 0 0 3px rgba(61,90,128,0.1); background: #fff; }
+        .login-card button {
+            width: 100%; padding: 13px;
+            background: linear-gradient(135deg, #ee6c4d, #e05a3a);
+            color: #fff; border: none; border-radius: 8px;
+            font-family: inherit; font-size: 15px; font-weight: 700;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+            box-shadow: 0 4px 12px rgba(238,108,77,0.3);
+        }
+        .login-card button:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(238,108,77,0.4); }
+        .login-card button:active { transform: translateY(0); }
+        .error { color: #e74c3c; text-align: center; margin-bottom: 14px; font-size: 13px; font-weight: 600; }
     </style>
 </head>
 <body>
     <div class="login-card">
-        <h1>Sutton</h1>
-        <div class="sub"><span class="by">by</span> ICEBERG</div>
+        <div class="brand">
+            <div class="brand-name">Sutton</div>
+            <div class="brand-line"></div>
+            <div class="brand-sub"><span class="by">by</span> ICEBERG</div>
+        </div>
         {% if error %}<div class="error">{{ error }}</div>{% endif %}
         <form method="POST">
             {% csrf_token %}
