@@ -78,7 +78,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Knows rep's appointments for next 3 days with drive times between stops (OSRM)
   - Can update lead dispositions via function calling (`update_disposition` tool)
   - Follows disposition decision tree: asks "Did you sit?" then "Did you run credit?" to determine correct dispo
-  - Asks for follow-up date on follow_up and cpfu outcomes; auto-sets `future_contact` if date >1 month out
+  - Asks for follow-up date on follow_up and cpfu outcomes; accepts relative dates ("next Tuesday", etc.) and converts to YYYY-MM-DD; auto-sets `future_contact` if date >1 month out
+  - When rep says "follow up" upfront, Alfred only asks about credit + follow-up date (skips redundant "still life?" question)
   - Writes call_notes (<20 word paraphrase) and saves call_transcript to the lead
   - Sends webhook to Go High Level on disposition update (phone, name, disposition, call_transcript)
   - Reminds reps of next appointment + drive time after debrief
@@ -96,7 +97,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - Credit passed + all contracts signed → **Sale**
    - Credit passed + contracts NOT completed → **CPFU** (always, never follow_up)
    - Credit failed → **Credit Fail**
-3. No credit run? Still life → **Follow Up**, dead → **No Sale**
+3. No credit run? If rep already said "follow up" → **Follow Up** (skip "still life?" question). Otherwise, still life → **Follow Up**, dead → **No Sale**
 - Alfred does NOT tell reps the disposition name, just confirms casually
 - No Coverage is never rep-reported
 
