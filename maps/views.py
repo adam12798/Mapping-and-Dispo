@@ -990,6 +990,128 @@ def normalize_format(value):
     return ''
 
 
+DISPO_NAMES = {
+    'sale': 'Sale', 'no_sale': 'No Sale', 'follow_up': 'Follow Up',
+    'credit_fail': 'Credit Fail', 'cancel_door': 'Cancel at Door',
+    'cpfu': 'CPFU', 'rep_no_show': 'Rep No Show',
+    'no_coverage': 'No Coverage', 'needs_reschedule': 'Needs Reschedule',
+    'incomplete_deal': 'Incomplete Deal', 'future_contact': 'Future Contact',
+    'dq': 'DQ', 'no_show': 'No Show',
+}
+
+
+def parse_manager_update_sms(body):
+    """Use GPT-4o-mini to parse a manager's SMS into a CRM update request."""
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    today_str = datetime.now().strftime('%A, %Y-%m-%d')
+
+    try:
+        resp = client.chat.completions.create(
+            model='gpt-4o-mini',
+            messages=[
+                {'role': 'system', 'content': f"""You parse SMS messages from a sales manager about updating appointments. Today is {today_str}.
+
+Extract these fields:
+- "action": "reschedule", "cancel", "disposition", "notes", or "unknown"
+- "lead_name": homeowner name mentioned (empty string if not found)
+- "lead_phone": phone number mentioned (empty string if not found)
+- "new_datetime": new appointment date/time in YYYY-MM-DDTHH:MM format if rescheduling. Convert relative dates like "Friday 2pm", "next Tuesday at 10", "tomorrow 3pm" to actual dates based on today. Empty string if not rescheduling.
+- "new_disposition": if setting a disposition, one of: sale, no_sale, follow_up, credit_fail, cancel_door, cpfu, rep_no_show, no_coverage, needs_reschedule, incomplete_deal, future_contact, dq, no_show. Empty string if not applicable.
+- "notes": any extra context or notes the manager mentioned. Empty string if none.
+
+Return ONLY valid JSON, no other text or markdown."""},
+                {'role': 'user', 'content': body},
+            ],
+            max_tokens=200,
+        )
+        raw = resp.choices[0].message.content.strip()
+        if raw.startswith('```'):
+            raw = re.sub(r'^```\w*\n?', '', raw)
+            raw = re.sub(r'\n?```$', '', raw)
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def find_leads_for_update(parsed):
+    """Find leads matching the identifier from a parsed manager SMS."""
+    name = (parsed.get('lead_name') or '').strip()
+    phone = (parsed.get('lead_phone') or '').strip()
+
+    leads_qs = Lead.objects.select_related('rep').order_by('-appointment_datetime')
+
+    if name:
+        exact = list(leads_qs.filter(homeowner_name__iexact=name)[:5])
+        if exact:
+            return exact
+        partial = list(leads_qs.filter(homeowner_name__icontains=name)[:5])
+        if partial:
+            return partial
+
+    if phone:
+        clean = phone.replace('-', '').replace(' ', '').replace('(', '').replace(')', '').replace('+1', '')
+        if len(clean) >= 7:
+            return list(leads_qs.filter(phone_number__icontains=clean[-7:])[:5])
+
+    return []
+
+
+def apply_manager_sms_update(lead, parsed):
+    """Apply a parsed manager SMS update to a lead. Returns list of change descriptions."""
+    action = parsed.get('action', '')
+    changes = []
+
+    if action == 'reschedule' and parsed.get('new_datetime'):
+        try:
+            new_dt = dateparser.parse(parsed['new_datetime'])
+            if new_dt:
+                lead.appointment_datetime = new_dt
+                changes.append(f"Rescheduled to {new_dt.strftime('%m/%d/%Y at %I:%M %p')}")
+        except (ValueError, OverflowError):
+            pass
+
+    if action == 'cancel':
+        lead.disposition = 'needs_reschedule'
+        changes.append('Disposition set to Needs Reschedule')
+
+    if action == 'disposition' and parsed.get('new_disposition'):
+        dispo = parsed['new_disposition']
+        lead.disposition = dispo
+        changes.append(f"Disposition set to {DISPO_NAMES.get(dispo, dispo)}")
+
+    if parsed.get('notes'):
+        lead.call_notes = parsed['notes']
+        changes.append(f"Notes: {parsed['notes']}")
+
+    if changes:
+        lead.save()
+
+        # Fire GHL webhook if disposition changed
+        if action in ('cancel', 'disposition'):
+            import logging
+            ghl_logger = logging.getLogger('ghl_webhook')
+            try:
+                ghl_payload = json.dumps({
+                    'phone': lead.phone_number,
+                    'name': lead.homeowner_name,
+                    'disposition': lead.disposition or '',
+                    'call_transcript': lead.call_transcript or '',
+                }).encode()
+                ghl_req = urllib.request.Request(
+                    'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                    data=ghl_payload,
+                    headers={'Content-Type': 'application/json'},
+                )
+                resp = urllib.request.urlopen(ghl_req, timeout=10)
+                ghl_logger.info(f'GHL webhook sent for lead {lead.id}: status {resp.status}')
+            except Exception as e:
+                ghl_logger.error(f'GHL webhook failed for lead {lead.id}: {e}')
+
+    return changes
+
+
 def parse_time_off_request(body, rep):
     """Parse a time off request from SMS body.
 
@@ -1243,6 +1365,57 @@ def sms_webhook(request):
                     send_sms(from_number, f'{tor.rep.name} time off {tor.date:%m/%d/%Y} has been {new_status}.')
                     if tor.rep.phone_number:
                         send_sms(tor.rep.phone_number, f'Your time off request for {tor.date:%m/%d/%Y} has been {new_status}.')
+
+                return HttpResponse(
+                    '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                    content_type='text/xml',
+                )
+
+    # Check if sender is a manager with an update request (not APPROVE/DENY)
+    if from_number and body:
+        manager = Manager.objects.filter(phone_number__icontains=from_number[-10:]).first()
+        if manager:
+            parsed = parse_manager_update_sms(body)
+            if parsed and parsed.get('action') not in ('unknown', '', None):
+                matches = find_leads_for_update(parsed)
+
+                if len(matches) == 1:
+                    lead = matches[0]
+                    changes = apply_manager_sms_update(lead, parsed)
+                    if changes:
+                        rep_name = lead.rep.name if lead.rep else 'Unassigned'
+                        msg = f"Updated {lead.homeowner_name}:\n"
+                        msg += '\n'.join(f"- {c}" for c in changes)
+                        msg += f"\n\nRep: {rep_name}"
+                        if lead.appointment_datetime:
+                            from django.utils import timezone as tz
+                            try:
+                                import zoneinfo
+                                eastern = zoneinfo.ZoneInfo('America/New_York')
+                            except ImportError:
+                                eastern = tz.get_fixed_timezone(-300)
+                            msg += f"\nAppt: {lead.appointment_datetime.astimezone(eastern).strftime('%m/%d/%Y at %I:%M %p')}"
+                        send_sms(from_number, msg)
+                    else:
+                        send_sms(from_number, "Couldn't determine what to update. Include the homeowner name and the change (e.g. 'Reschedule Smith to Friday 2pm').")
+
+                elif len(matches) > 1:
+                    from django.utils import timezone as tz
+                    try:
+                        import zoneinfo
+                        eastern = zoneinfo.ZoneInfo('America/New_York')
+                    except ImportError:
+                        eastern = tz.get_fixed_timezone(-300)
+                    msg = f"Found {len(matches)} matches:\n"
+                    for lead in matches:
+                        dt = lead.appointment_datetime.astimezone(eastern).strftime('%m/%d at %I:%M %p') if lead.appointment_datetime else 'No date'
+                        rep_name = lead.rep.name if lead.rep else 'Unassigned'
+                        msg += f"\n- {lead.homeowner_name} — {dt} ({rep_name})"
+                    msg += "\n\nPlease text again with the full name."
+                    send_sms(from_number, msg)
+
+                else:
+                    send_sms(from_number, "Couldn't find that appointment. Please include the homeowner's full name and try again.")
 
                 return HttpResponse(
                     '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',

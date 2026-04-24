@@ -103,6 +103,36 @@ Be conversational, warm, and efficient. Keep responses brief since this is a pho
 If you hear something unclear, garbled, or that doesn't make sense, don't guess — just ask them to repeat it.
 If the input seems like background noise or doesn't contain a clear question or statement, ignore it and wait for the rep to speak clearly."""
 
+MANAGER_SYSTEM_PROMPT = """You are Alfred, a 60-year-old British scheduling assistant for a solar and HVAC sales company in Massachusetts. You're warm, personable, and have a dry wit. British charm comes naturally to you.
+
+RESPONSE RULES:
+- ONE thought per response. Say one thing, then stop and wait.
+- Keep responses to 1 short sentence, 2 max.
+- NEVER repeat yourself or rephrase what you just said.
+- After you speak, STOP. Wait for the manager to respond.
+- Do NOT stack questions. Ask one, wait, then ask the next.
+
+The caller is a MANAGER. They have full authority to update any appointment. They can:
+- Reschedule appointments to a new date/time
+- Update dispositions on any lead
+- Add notes to leads
+- Cancel appointments (sets disposition to Needs Reschedule)
+
+When a manager asks to update an appointment:
+1. Identify which appointment from the list below
+2. Confirm: "Just to make sure, you'd like to [change] for [homeowner], right?"
+3. Wait for confirmation, then call the update_lead tool
+4. Briefly confirm what was changed
+
+If you can't tell which appointment they mean (similar names, vague reference), ask for clarification. List the possible matches.
+
+If the manager mentions a name not in the appointment list, tell them you don't see that appointment and ask them to clarify.
+
+Convert relative dates ("Friday", "next Tuesday 2pm", "tomorrow at 10") to actual YYYY-MM-DDTHH:MM format based on today's date when calling the tool.
+
+Be conversational, warm, and efficient. Keep responses brief since this is a phone call.
+If you hear something unclear, ask them to repeat it."""
+
 DISPOSITION_TOOL = {
     'type': 'function',
     'name': 'update_disposition',
@@ -137,6 +167,40 @@ DISPOSITION_TOOL = {
 }
 
 
+MANAGER_UPDATE_TOOL = {
+    'type': 'function',
+    'name': 'update_lead',
+    'description': 'Update a lead/appointment in the CRM. Can reschedule, change disposition, add notes, or cancel. Confirm the change with the manager before calling.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'homeowner_name': {
+                'type': 'string',
+                'description': 'The homeowner name from the appointment list. Use the exact name.',
+            },
+            'appointment_datetime': {
+                'type': 'string',
+                'description': 'New appointment date/time in YYYY-MM-DDTHH:MM format. Only include if rescheduling.',
+            },
+            'disposition': {
+                'type': 'string',
+                'enum': ['sale', 'no_sale', 'follow_up', 'credit_fail', 'cancel_door', 'cpfu', 'rep_no_show', 'no_coverage', 'needs_reschedule', 'incomplete_deal', 'future_contact', 'dq', 'no_show'],
+                'description': 'New disposition. Only include if changing disposition.',
+            },
+            'call_notes': {
+                'type': 'string',
+                'description': 'Notes to add to the lead. Brief, under 20 words.',
+            },
+            'follow_up_date': {
+                'type': 'string',
+                'description': 'Follow-up date in YYYY-MM-DD format.',
+            },
+        },
+        'required': ['homeowner_name'],
+    },
+}
+
+
 def clean_phone(number):
     """Normalize a phone number for comparison."""
     return number.replace('+1', '').replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '')
@@ -160,19 +224,21 @@ async def get_drive_time(lat1, lng1, lat2, lng2):
 
 
 async def get_rep_context(caller_number):
-    """Look up rep and their upcoming appointments by phone number."""
+    """Look up caller as rep or manager and return appropriate context."""
     import django
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
     django.setup()
 
     from asgiref.sync import sync_to_async
-    from maps.models import Rep, Lead, TimeOffRequest
+    from maps.models import Rep, Lead, TimeOffRequest, Manager
     from datetime import date, datetime, timedelta
 
     if not caller_number:
-        return {'rep': None, 'prompt_context': ''}
+        return {'rep': None, 'manager': None, 'prompt_context': ''}
 
     clean = clean_phone(caller_number)
+
+    # Check if caller is a rep
     reps = await sync_to_async(list)(Rep.objects.filter(is_active=True))
     rep = None
     for r in reps:
@@ -181,13 +247,60 @@ async def get_rep_context(caller_number):
             rep = r
             break
 
-    if not rep:
-        return {'rep': None, 'prompt_context': ''}
+    # Check if caller is a manager
+    managers = await sync_to_async(list)(Manager.objects.all())
+    manager = None
+    for m in managers:
+        m_clean = clean_phone(m.phone_number)
+        if m_clean and m_clean == clean:
+            manager = m
+            break
 
     now_eastern = datetime.now(ZoneInfo('America/New_York'))
     today = now_eastern.date()
-    # Get all of today's appointments (including past ones for debriefs) + next 3 days
     today_start = now_eastern.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Manager mode (caller is a manager but NOT a rep)
+    if manager and not rep:
+        leads = await sync_to_async(list)(
+            Lead.objects.filter(
+                appointment_datetime__gte=today_start,
+                appointment_datetime__lte=now_eastern + timedelta(days=3),
+            ).select_related('rep').order_by('appointment_datetime')
+        )
+
+        active_reps = await sync_to_async(list)(Rep.objects.filter(is_active=True).order_by('name'))
+
+        lines = [f'You are speaking with {manager.name} (a manager).']
+        lines.append(f"Today is {now_eastern.strftime('%A, %B %d, %Y')}.")
+        lines.append(f'\nActive reps: {", ".join(r.name for r in active_reps)}')
+
+        if leads:
+            lines.append(f'\nAll upcoming appointments:')
+            for lead in leads:
+                dt = lead.appointment_datetime.astimezone(ZoneInfo('America/New_York'))
+                appt_type = lead.appointment_type or 'unknown'
+                rep_name = lead.rep.name if lead.rep else 'Unassigned'
+                dispo = lead.disposition or 'none'
+                line = (
+                    f"- {dt:%a %m/%d at %I:%M %p}: {lead.homeowner_name or 'Unknown'} "
+                    f"at {lead.address}, {lead.city} ({appt_type}) [rep: {rep_name}, dispo: {dispo}]"
+                )
+                lines.append(line)
+        else:
+            lines.append('\nNo upcoming appointments in the next 3 days.')
+
+        return {
+            'rep': None,
+            'manager': manager,
+            'prompt_context': '\n'.join(lines),
+        }
+
+    # Not a rep and not a manager
+    if not rep:
+        return {'rep': None, 'manager': None, 'prompt_context': ''}
+
+    # Rep mode (existing logic)
     leads = await sync_to_async(list)(
         Lead.objects.filter(
             rep=rep,
@@ -196,7 +309,6 @@ async def get_rep_context(caller_number):
         ).order_by('appointment_datetime')
     )
 
-    # Get approved time off
     time_off = await sync_to_async(list)(
         TimeOffRequest.objects.filter(
             rep=rep,
@@ -245,11 +357,12 @@ async def get_rep_context(caller_number):
 
     return {
         'rep': rep,
+        'manager': manager,
         'prompt_context': '\n'.join(lines),
     }
 
 
-async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
+async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_parts=None):
     """Execute a function call from the AI and return the result."""
     import django
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
@@ -358,6 +471,104 @@ async def execute_tool(fn_name, fn_args, rep, transcript_parts=None):
             logger.warning(f'Failed to update lead {lead_id} — not found or not assigned to {rep.name}')
             return {'success': False, 'error': 'Lead not found or not assigned to you'}
 
+    if fn_name == 'update_lead':
+        homeowner_name = fn_args.get('homeowner_name', '')
+
+        if not manager:
+            return {'success': False, 'error': 'Only managers can use this tool'}
+
+        from datetime import datetime, timedelta
+        now_eastern = datetime.now(ZoneInfo('America/New_York'))
+        today_start = now_eastern.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        all_leads = await sync_to_async(list)(
+            Lead.objects.filter(
+                appointment_datetime__gte=today_start,
+                appointment_datetime__lte=now_eastern + timedelta(days=3),
+            ).select_related('rep')
+        )
+
+        lead = None
+        search_name = homeowner_name.strip().lower()
+        for l in all_leads:
+            if l.homeowner_name and l.homeowner_name.strip().lower() == search_name:
+                lead = l
+                break
+        if not lead:
+            for l in all_leads:
+                if l.homeowner_name and search_name in l.homeowner_name.strip().lower():
+                    lead = l
+                    break
+        if not lead:
+            for l in all_leads:
+                if l.homeowner_name and l.homeowner_name.strip().lower() in search_name:
+                    lead = l
+                    break
+
+        if not lead:
+            logger.warning(f'Manager update: no lead matching "{homeowner_name}"')
+            return {'success': False, 'error': f'No appointment found for "{homeowner_name}". Ask the manager to clarify.'}
+
+        lead_id = lead.id
+        changes = []
+
+        if fn_args.get('appointment_datetime'):
+            try:
+                new_dt = datetime.fromisoformat(fn_args['appointment_datetime'])
+                lead.appointment_datetime = new_dt
+                changes.append(f"Rescheduled to {new_dt.strftime('%m/%d/%Y at %I:%M %p')}")
+            except ValueError:
+                logger.warning(f'Could not parse datetime: {fn_args["appointment_datetime"]}')
+
+        if fn_args.get('disposition'):
+            disposition = fn_args['disposition']
+            follow_up_date_str = fn_args.get('follow_up_date', '')
+            if follow_up_date_str:
+                try:
+                    follow_up_date = datetime.strptime(follow_up_date_str, '%Y-%m-%d').date()
+                    lead.follow_up_date = follow_up_date
+                    if disposition in ('follow_up', 'cpfu') and follow_up_date > (datetime.now().date() + timedelta(days=30)):
+                        disposition = 'future_contact'
+                except ValueError:
+                    pass
+            lead.disposition = disposition
+            changes.append(f"Disposition set to {disposition}")
+
+        if fn_args.get('call_notes'):
+            lead.call_notes = fn_args['call_notes']
+            changes.append('Notes updated')
+
+        if transcript_parts:
+            lead.call_transcript = '\n'.join(transcript_parts)
+
+        if not changes:
+            return {'success': False, 'error': 'No changes specified. What would you like to update?'}
+
+        await sync_to_async(lead.save)()
+        logger.info(f'Manager updated lead {lead_id} ({lead.homeowner_name}): {", ".join(changes)}')
+
+        # Fire GHL webhook if disposition changed
+        if fn_args.get('disposition'):
+            try:
+                import aiohttp
+                ghl_payload = {
+                    'phone': lead.phone_number,
+                    'name': lead.homeowner_name,
+                    'disposition': lead.disposition or '',
+                    'call_transcript': lead.call_transcript or '',
+                }
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                        json=ghl_payload,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        logger.info(f'GHL webhook sent for lead {lead_id}: {resp.status}')
+            except Exception as e:
+                logger.error(f'GHL webhook failed for lead {lead_id}: {e}')
+
+        return {'success': True, 'message': f"Updated {lead.homeowner_name}: {', '.join(changes)}"}
+
     return {'success': False, 'error': f'Unknown function: {fn_name}'}
 
 
@@ -404,9 +615,9 @@ async def media_stream(ws: WebSocket):
                         caller_number = custom.get('callerNumber', '')
                         logger.info(f'Stream started: sid={stream_sid}, call={call_sid}, caller={caller_number}')
 
-                        # Look up rep and their appointments
+                        # Look up caller (rep or manager) and their appointments
                         rep_context = await get_rep_context(caller_number)
-                        logger.info(f'Rep context: {rep_context.get("rep")}')
+                        logger.info(f'Caller context: rep={rep_context.get("rep")}, manager={rep_context.get("manager")}')
                         caller_identified.set()
 
                     elif msg['event'] == 'media':
@@ -472,17 +683,24 @@ async def media_stream(ws: WebSocket):
                             except asyncio.TimeoutError:
                                 logger.warning('Caller identification timed out, using generic prompt')
 
-                            # Build enriched prompt with real appointment data
-                            if rep_context.get('prompt_context'):
-                                enriched_prompt = SYSTEM_PROMPT + '\n\n' + rep_context['prompt_context']
+                            # Build enriched prompt based on caller type
+                            is_manager_call = rep_context.get('manager') and not rep_context.get('rep')
+                            if is_manager_call:
+                                base_prompt = MANAGER_SYSTEM_PROMPT
                             else:
-                                enriched_prompt = SYSTEM_PROMPT
+                                base_prompt = SYSTEM_PROMPT
 
-                            # Include disposition tool if we have a matched rep
+                            if rep_context.get('prompt_context'):
+                                enriched_prompt = base_prompt + '\n\n' + rep_context['prompt_context']
+                            else:
+                                enriched_prompt = base_prompt
+
                             enriched_session = {
                                 'instructions': enriched_prompt,
                             }
-                            if rep_context.get('rep'):
+                            if is_manager_call:
+                                enriched_session['tools'] = [MANAGER_UPDATE_TOOL]
+                            elif rep_context.get('rep'):
                                 enriched_session['tools'] = [DISPOSITION_TOOL]
 
                             logger.info('Sending enriched session config...')
@@ -492,14 +710,18 @@ async def media_stream(ws: WebSocket):
                             }))
 
                         elif session_update_count == 2:
-                            # Enriched config confirmed. Now greet the rep.
+                            # Enriched config confirmed. Now greet the caller.
                             logger.info('Enriched config set, sending greeting...')
                             session_ready.set()
 
                             rep = rep_context.get('rep')
+                            mgr = rep_context.get('manager')
                             if rep:
                                 first_name = rep.name.split()[0]
                                 greeting_text = f'The call just connected with {first_name}. Say "Hey {first_name}!" and wait for them to speak. Keep it very short.'
+                            elif mgr:
+                                first_name = mgr.name.split()[0]
+                                greeting_text = f'The call just connected with {first_name}, a manager. Say "Hey {first_name}!" and wait for them to speak. Keep it very short.'
                             else:
                                 greeting_text = 'The call just connected. Say only "Hi!" and nothing else, then wait for me to speak.'
 
@@ -526,7 +748,7 @@ async def media_stream(ws: WebSocket):
 
                         logger.info(f'Function call: {fn_name}({fn_args})')
 
-                        result = await execute_tool(fn_name, fn_args, rep_context.get('rep'), transcript_parts)
+                        result = await execute_tool(fn_name, fn_args, rep=rep_context.get('rep'), manager=rep_context.get('manager'), transcript_parts=transcript_parts)
 
                         # Send result back to OpenAI
                         await openai_ws.send(json.dumps({
@@ -561,11 +783,11 @@ async def media_stream(ws: WebSocket):
                             logger.info(f'Assistant said: {text[:100]}')
 
                     elif msg_type == 'conversation.item.input_audio_transcription.completed':
-                        # Collect user (rep) transcript
                         text = msg.get('transcript', '')
                         if text:
-                            transcript_parts.append(f'Rep: {text}')
-                            logger.info(f'Rep said: {text[:100]}')
+                            caller_label = 'Manager' if (rep_context.get('manager') and not rep_context.get('rep')) else 'Rep'
+                            transcript_parts.append(f'{caller_label}: {text}')
+                            logger.info(f'{caller_label} said: {text[:100]}')
 
                     elif msg_type == 'error':
                         logger.error(f'OpenAI error: {msg}')
