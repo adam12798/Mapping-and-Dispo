@@ -37,4 +37,5 @@ urlpatterns = [
     path('api/users/', views.users_api, name='users_api'),
     path('api/users/<int:pk>/', views.user_update_api, name='user_update_api'),
     path('api/leads/<int:lead_id>/updates/', views.lead_updates_api, name='lead_updates_api'),
+    path('api/leads/<int:lead_id>/messages/', views.lead_messages_api, name='lead_messages_api'),
 ]

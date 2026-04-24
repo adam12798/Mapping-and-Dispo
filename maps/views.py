@@ -20,7 +20,7 @@ from django.views.decorators.http import require_POST
 from django.conf import settings
 
 from .assignment import auto_assign_leads
-from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate
+from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage
 
 
 def manager_required(view_func):
@@ -1368,6 +1368,41 @@ def lead_updates_api(request, lead_id):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
+@login_required
+def lead_messages_api(request, lead_id):
+    """Return all SMS messages for a lead, grouped by phone number."""
+    lead = get_object_or_404(Lead, pk=lead_id)
+    user_rep = get_user_rep(request.user)
+    if user_rep and lead.rep != user_rep:
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+
+    from collections import OrderedDict
+    messages = lead.messages.order_by('created_at')
+
+    threads = OrderedDict()
+    for msg in messages:
+        if msg.phone_number not in threads:
+            threads[msg.phone_number] = []
+        threads[msg.phone_number].append({
+            'direction': msg.direction,
+            'body': msg.body,
+            'created_at': msg.created_at.strftime('%m/%d/%Y %I:%M %p'),
+        })
+
+    # Fallback: show original raw_message if no stored messages yet
+    if not threads and lead.raw_message and lead.from_number:
+        threads[lead.from_number] = [{
+            'direction': 'inbound',
+            'body': lead.raw_message,
+            'created_at': lead.created_at.strftime('%m/%d/%Y %I:%M %p'),
+        }]
+
+    return JsonResponse({
+        'threads': threads,
+        'lead_name': lead.homeowner_name,
+    })
+
+
 @csrf_exempt
 @require_POST
 def sms_webhook(request):
@@ -1432,6 +1467,7 @@ def sms_webhook(request):
 
                 if len(matches) == 1:
                     lead = matches[0]
+                    LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
                     changes = apply_manager_sms_update(lead, parsed)
                     if changes:
                         rep_name = lead.rep.name if lead.rep else 'Unassigned'
@@ -1447,6 +1483,7 @@ def sms_webhook(request):
                                 eastern = tz.get_fixed_timezone(-300)
                             msg += f"\nAppt: {lead.appointment_datetime.astimezone(eastern).strftime('%m/%d/%Y at %I:%M %p')}"
                         send_sms(from_number, msg)
+                        LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='outbound', body=msg)
                     else:
                         send_sms(from_number, "Couldn't determine what to update. Include the homeowner name and the change (e.g. 'Reschedule Smith to Friday 2pm').")
 
@@ -1517,7 +1554,7 @@ def sms_webhook(request):
                 except (ValueError, OverflowError):
                     pass
 
-            Lead.objects.create(
+            lead = Lead.objects.create(
                 address=address,
                 city=city,
                 state=fields.get('state', ''),
@@ -1531,13 +1568,15 @@ def sms_webhook(request):
                 appointment_datetime=appt_datetime,
                 raw_message=body,
             )
+            LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
     except Exception:
         # Always save the lead even if parsing fails
-        Lead.objects.create(
+        lead = Lead.objects.create(
             address=body,
             from_number=from_number,
             raw_message=body,
         )
+        LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
 
     # Return empty TwiML response
     return HttpResponse(

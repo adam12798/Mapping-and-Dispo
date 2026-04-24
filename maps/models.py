@@ -135,6 +135,24 @@ class UserProfile(models.Model):
         return self.role == 'manager'
 
 
+class LeadMessage(models.Model):
+    DIRECTION_CHOICES = [
+        ('inbound', 'Inbound'),
+        ('outbound', 'Outbound'),
+    ]
+    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='messages')
+    phone_number = models.CharField(max_length=20)
+    direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES)
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.direction} {self.phone_number}: {self.body[:50]}"
+
+
 class LeadUpdate(models.Model):
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='updates')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='lead_updates')
