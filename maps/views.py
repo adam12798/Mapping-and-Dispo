@@ -1017,14 +1017,21 @@ Extract these fields:
 - "action": "reschedule", "cancel", "disposition", "notes", or "unknown"
 - "lead_name": homeowner name mentioned (empty string if not found)
 - "lead_phone": phone number mentioned (empty string if not found)
+- "lead_city": city or town mentioned for identifying the appointment (empty string if not found)
+- "current_datetime": the existing appointment's date/time if mentioned for identification, in YYYY-MM-DDTHH:MM format. Convert relative dates. Empty string if not mentioned.
 - "new_datetime": new appointment date/time in YYYY-MM-DDTHH:MM format if rescheduling. Convert relative dates like "Friday 2pm", "next Tuesday at 10", "tomorrow 3pm" to actual dates based on today. Empty string if not rescheduling.
 - "new_disposition": if setting a disposition, one of: sale, no_sale, follow_up, credit_fail, cancel_door, cpfu, rep_no_show, no_coverage, needs_reschedule, incomplete_deal, future_contact, dq, no_show. Empty string if not applicable.
 - "notes": any extra context or notes the manager mentioned. Empty string if none.
 
+Examples:
+- "Reschedule the 2pm in Springfield to Friday 3pm" → lead_city: "Springfield", current_datetime: today's date + 14:00, new_datetime: Friday + 15:00
+- "Move Smith to tomorrow at 10" → lead_name: "Smith", new_datetime: tomorrow + 10:00
+- "Cancel the Johnson appt in Medford" → lead_name: "Johnson", lead_city: "Medford", action: "cancel"
+
 Return ONLY valid JSON, no other text or markdown."""},
                 {'role': 'user', 'content': body},
             ],
-            max_tokens=200,
+            max_tokens=250,
         )
         raw = resp.choices[0].message.content.strip()
         if raw.startswith('```'):
@@ -1037,10 +1044,26 @@ Return ONLY valid JSON, no other text or markdown."""},
 
 def find_leads_for_update(parsed):
     """Find leads matching the identifier from a parsed manager SMS."""
+    from datetime import timedelta
+    from django.utils import timezone as tz
+
     name = (parsed.get('lead_name') or '').strip()
     phone = (parsed.get('lead_phone') or '').strip()
+    city = (parsed.get('lead_city') or '').strip()
+    current_dt = (parsed.get('current_datetime') or '').strip()
 
-    leads_qs = Lead.objects.select_related('rep').order_by('-appointment_datetime')
+    now = tz.now()
+    # Search upcoming appointments (today through next 7 days)
+    leads_qs = Lead.objects.select_related('rep').filter(
+        appointment_datetime__gte=now.replace(hour=0, minute=0, second=0),
+        appointment_datetime__lte=now + timedelta(days=7),
+    ).order_by('appointment_datetime')
+
+    # Build filters progressively — name + city is the strongest signal
+    if name and city:
+        matches = list(leads_qs.filter(homeowner_name__icontains=name, city__icontains=city)[:5])
+        if matches:
+            return matches
 
     if name:
         exact = list(leads_qs.filter(homeowner_name__iexact=name)[:5])
@@ -1049,6 +1072,27 @@ def find_leads_for_update(parsed):
         partial = list(leads_qs.filter(homeowner_name__icontains=name)[:5])
         if partial:
             return partial
+
+    # City + time combo (e.g. "the 2pm in Springfield")
+    if city and current_dt:
+        try:
+            target_dt = dateparser.parse(current_dt)
+            if target_dt:
+                matches = list(leads_qs.filter(
+                    city__icontains=city,
+                    appointment_datetime__date=target_dt.date(),
+                    appointment_datetime__hour=target_dt.hour,
+                )[:5])
+                if matches:
+                    return matches
+        except (ValueError, OverflowError):
+            pass
+
+    # City only — return all upcoming in that city
+    if city:
+        matches = list(leads_qs.filter(city__icontains=city)[:5])
+        if matches:
+            return matches
 
     if phone:
         clean = phone.replace('-', '').replace(' ', '').replace('(', '').replace(')', '').replace('+1', '')
