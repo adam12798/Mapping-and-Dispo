@@ -224,7 +224,7 @@ def crm_view(request):
     user_rep = get_user_rep(request.user)
     if user_rep:
         leads = leads.filter(rep=user_rep)
-    reps = Rep.objects.order_by('name')
+    reps = Rep.objects.filter(is_active=True).order_by('name')
     return render(request, 'maps/crm.html', {'leads': leads, 'reps': reps, 'active_tab': 'crm'})
 
 
@@ -506,6 +506,7 @@ def rep_create(request):
     if city:
         geocode_address = f"{home_address}, {city}, MA"
     lat, lng = geocode(geocode_address) if home_address else (None, None)
+    geocode_failed = bool(home_address and lat is None)
     rep = Rep.objects.create(
         name=data.get('name', ''),
         phone_number=data.get('phone_number', ''),
@@ -516,7 +517,10 @@ def rep_create(request):
         specialty=data.get('specialty', ''),
         color=data.get('color', '#2980b9'),
     )
-    return JsonResponse({'status': 'ok', 'id': rep.id})
+    response = {'status': 'ok', 'id': rep.id}
+    if geocode_failed:
+        response['geocode_failed'] = True
+    return JsonResponse(response)
 
 
 @csrf_exempt
@@ -536,13 +540,19 @@ def rep_update(request, pk):
         if field in data:
             setattr(rep, field, data[field])
     # Re-geocode if address or city changed
+    geocode_failed = False
     if 'home_address' in data or 'city' in data:
         geocode_address = rep.home_address
         if rep.city:
             geocode_address = f"{rep.home_address}, {rep.city}, MA"
         rep.latitude, rep.longitude = geocode(geocode_address) if rep.home_address else (None, None)
+        if rep.home_address and rep.latitude is None:
+            geocode_failed = True
     rep.save()
-    return JsonResponse({'status': 'ok'})
+    response = {'status': 'ok'}
+    if geocode_failed:
+        response['geocode_failed'] = True
+    return JsonResponse(response)
 
 
 @csrf_exempt

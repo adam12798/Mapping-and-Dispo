@@ -34,7 +34,7 @@
                     <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
                     <td><input type="text" class="crm-input" data-field="name" value="{{ rep.name }}"></td>
                     <td><input type="text" class="crm-input" data-field="phone_number" value="{{ rep.phone_number }}"></td>
-                    <td><input type="text" class="crm-input" data-field="home_address" value="{{ rep.home_address }}"></td>
+                    <td><input type="text" class="crm-input" data-field="home_address" value="{{ rep.home_address }}"{% if not rep.latitude and rep.home_address %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this rep won't receive auto-assigned appointments"{% endif %}></td>
                     <td><input type="text" class="crm-input" data-field="city" value="{{ rep.city }}"></td>
                     <td>
                         <select class="crm-select" data-field="specialty">
@@ -66,7 +66,7 @@
                     <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
                     <td><input type="text" class="crm-input" data-field="name" value="{{ rep.name }}"></td>
                     <td><input type="text" class="crm-input" data-field="phone_number" value="{{ rep.phone_number }}"></td>
-                    <td><input type="text" class="crm-input" data-field="home_address" value="{{ rep.home_address }}"></td>
+                    <td><input type="text" class="crm-input" data-field="home_address" value="{{ rep.home_address }}"{% if not rep.latitude and rep.home_address %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this rep won't receive auto-assigned appointments"{% endif %}></td>
                     <td><input type="text" class="crm-input" data-field="city" value="{{ rep.city }}"></td>
                     <td>
                         <select class="crm-select" data-field="specialty">
@@ -151,14 +151,19 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             }).then(function(r) { return r.json(); })
-              .then(function() { location.reload(); });
+              .then(function(resp) {
+                  if (resp.geocode_failed) {
+                      alert("Warning: Could not geocode this address. This rep won't receive auto-assigned appointments until the address is corrected.");
+                  }
+                  location.reload();
+              });
         }
 
         function toggleActive(select) {
             var row = select.closest('tr');
             var repId = row.dataset.id;
             var makeActive = select.value === 'true';
-            saveField(repId, 'is_active', makeActive);
+            saveField(repId, 'is_active', makeActive, select);
             if (makeActive) {
                 row.classList.remove('inactive-row');
             } else {
@@ -179,7 +184,7 @@
                     s.classList.remove('filled');
                 }
             });
-            saveField(repId, 'rating', value);
+            saveField(repId, 'rating', value, btn);
         }
 
         function setNewRating(btn) {
@@ -195,13 +200,30 @@
             });
         }
 
-        function saveField(repId, field, value) {
+        function saveField(repId, field, value, inputEl) {
             var body = {};
             body[field] = value;
             fetch('/api/reps/' + repId + '/', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.geocode_failed) {
+                    var row = inputEl ? inputEl.closest('tr') : document.querySelector('tr[data-id="' + repId + '"]');
+                    var addrInput = row ? row.querySelector('[data-field="home_address"]') : null;
+                    if (addrInput) {
+                        addrInput.style.border = '2px solid #e74c3c';
+                        addrInput.title = "Address could not be geocoded — this rep won't receive auto-assigned appointments";
+                    }
+                    alert("Warning: Could not geocode this address. This rep won't receive auto-assigned appointments until the address is corrected.");
+                } else if ((field === 'home_address' || field === 'city') && inputEl) {
+                    var row = inputEl.closest('tr');
+                    var addrInput = row ? row.querySelector('[data-field="home_address"]') : null;
+                    if (addrInput) {
+                        addrInput.style.border = '';
+                        addrInput.title = '';
+                    }
+                }
             });
         }
 
@@ -257,7 +279,7 @@
                 var repId = row.dataset.id;
                 if (!repId) return;
                 var field = this.dataset.field;
-                saveField(repId, field, this.value);
+                saveField(repId, field, this.value, this);
             });
         });
     </script>
