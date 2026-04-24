@@ -1107,18 +1107,25 @@ def apply_manager_sms_update(lead, parsed):
     action = parsed.get('action', '')
     changes = []
 
-    if action == 'reschedule' and parsed.get('new_datetime'):
-        try:
-            new_dt = dateparser.parse(parsed['new_datetime'])
-            if new_dt:
-                lead.appointment_datetime = new_dt
-                changes.append(f"Rescheduled to {new_dt.strftime('%m/%d/%Y at %I:%M %p')}")
-        except (ValueError, OverflowError):
-            pass
-
-    if action == 'cancel':
+    if action == 'reschedule':
+        if parsed.get('new_datetime'):
+            try:
+                new_dt = dateparser.parse(parsed['new_datetime'])
+                if new_dt:
+                    lead.appointment_datetime = new_dt
+                    changes.append(f"Rescheduled to {new_dt.strftime('%m/%d/%Y at %I:%M %p')}")
+            except (ValueError, OverflowError):
+                pass
+        else:
+            lead.appointment_datetime = None
+            changes.append('Appointment date cleared (pending new time)')
         lead.disposition = 'needs_reschedule'
         changes.append('Disposition set to Needs Reschedule')
+
+    if action == 'cancel':
+        lead.appointment_datetime = None
+        lead.disposition = 'needs_reschedule'
+        changes.append('Cancelled — disposition set to Needs Reschedule')
 
     if action == 'disposition' and parsed.get('new_disposition'):
         dispo = parsed['new_disposition']

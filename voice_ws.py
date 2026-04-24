@@ -114,15 +114,20 @@ RESPONSE RULES:
 
 The caller is a MANAGER. They have full authority to update any appointment. They can:
 - Reschedule appointments to a new date/time
+- Reschedule without a new time yet (clears the date — that's fine, it'll sit with no date until they set one)
 - Update dispositions on any lead
 - Add notes to leads
-- Cancel appointments (sets disposition to Needs Reschedule)
+- Cancel appointments (clears date, sets disposition to Needs Reschedule)
 
 When a manager asks to update an appointment:
 1. Identify which appointment from the list below
 2. Confirm: "Just to make sure, you'd like to [change] for [homeowner], right?"
 3. Wait for confirmation, then call the update_lead tool
 4. Briefly confirm what was changed
+
+For reschedules: ask if they have a new time. If they do, include appointment_datetime. If not, set clear_datetime to true — the appointment will sit with no date and that's perfectly fine.
+
+For cancellations: always set disposition to "needs_reschedule" and clear_datetime to true.
 
 If you can't tell which appointment they mean (similar names, vague reference), ask for clarification. List the possible matches.
 
@@ -194,6 +199,10 @@ MANAGER_UPDATE_TOOL = {
             'follow_up_date': {
                 'type': 'string',
                 'description': 'Follow-up date in YYYY-MM-DD format.',
+            },
+            'clear_datetime': {
+                'type': 'boolean',
+                'description': 'Set to true to clear the appointment date (for reschedules without a new time, or cancellations).',
             },
         },
         'required': ['homeowner_name'],
@@ -519,6 +528,9 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
                 changes.append(f"Rescheduled to {new_dt.strftime('%m/%d/%Y at %I:%M %p')}")
             except ValueError:
                 logger.warning(f'Could not parse datetime: {fn_args["appointment_datetime"]}')
+        elif fn_args.get('clear_datetime'):
+            lead.appointment_datetime = None
+            changes.append('Appointment date cleared')
 
         if fn_args.get('disposition'):
             disposition = fn_args['disposition']
