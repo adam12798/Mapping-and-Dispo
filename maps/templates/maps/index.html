@@ -48,10 +48,10 @@
             zoomControl: false,
             minZoom: 8,
             maxZoom: 16,
-            zoomDelta: 0.5,
-            zoomSnap: 0.5,
-            wheelDebounceTime: 100,
-            wheelPxPerZoomLevel: 120
+            zoomDelta: 0.1,
+            zoomSnap: 0.1,
+            wheelDebounceTime: 60,
+            wheelPxPerZoomLevel: 200
         });
 
         L.control.zoom({ position: 'bottomright' }).addTo(map);
