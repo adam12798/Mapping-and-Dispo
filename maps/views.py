@@ -267,17 +267,46 @@ def lead_update(request, pk):
         'appointment_type', 'appointment_format', 'appointment_datetime',
         'disposition', 'sat', 'follow_up_date', 'call_notes', 'call_transcript',
     ]
+    FIELD_LABELS = {
+        'homeowner_name': 'Name', 'phone_number': 'Phone', 'address': 'Address',
+        'city': 'City', 'state': 'State', 'appointment_type': 'Appt Type',
+        'appointment_format': 'Appt Format', 'appointment_datetime': 'Appt Time',
+        'disposition': 'Disposition', 'sat': 'Sit', 'follow_up_date': 'Follow Up Date',
+        'call_notes': 'Call Notes', 'call_transcript': 'Transcript', 'rep_id': 'Rep',
+    }
+    VALUE_LABELS = {
+        'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
+        'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
+        'sat': {'true': 'Sit', 'false': 'No Sit'},
+    }
+    VALUE_LABELS['disposition'] = dict(Lead.DISPOSITION_CHOICES)
+    changes = []
     if 'rep_id' in data:
         rep_val = data['rep_id']
+        old_rep = lead.rep
         lead.rep_id = int(rep_val) if rep_val else None
+        new_rep_name = Rep.objects.filter(id=lead.rep_id).values_list('name', flat=True).first() if lead.rep_id else None
+        old_name = old_rep.name if old_rep else 'Unassigned'
+        new_name = new_rep_name or 'Unassigned'
+        if old_name != new_name:
+            changes.append(f"Rep: {old_name} → {new_name}")
     for field in allowed_fields:
         if field in data:
+            old_value = getattr(lead, field)
             value = data[field]
             if field in ('appointment_datetime', 'follow_up_date') and value == '':
                 value = None
             if field == 'sat':
                 value = {'true': True, 'false': False, 'yes': True, 'no': False}.get(str(value).lower().strip()) if value != '' else None
             setattr(lead, field, value)
+            old_display = str(old_value) if old_value not in (None, '') else '—'
+            new_display = str(value) if value not in (None, '') else '—'
+            if field in VALUE_LABELS:
+                old_display = VALUE_LABELS[field].get(str(old_value).lower() if old_value is not None else '', old_display)
+                new_display = VALUE_LABELS[field].get(str(value).lower() if value is not None else '', new_display)
+            if old_display != new_display:
+                label = FIELD_LABELS.get(field, field)
+                changes.append(f"{label}: {old_display} → {new_display}")
     # Re-geocode if address or city changed
     geocode_failed = False
     if 'address' in data or 'city' in data:
@@ -288,6 +317,8 @@ def lead_update(request, pk):
         if lead.address and lead.latitude is None:
             geocode_failed = True
     lead.save()
+    if changes:
+        LeadUpdate.objects.create(lead=lead, user=request.user, text='\n'.join(changes))
 
     # Send webhook to Go High Level if disposition was updated
     if 'disposition' in data:
@@ -356,6 +387,31 @@ def leads_bulk_update(request):
 
     if not update_kwargs:
         return JsonResponse({'error': 'No valid fields to update'}, status=400)
+
+    BULK_LABELS = {
+        'rep_id': 'Rep', 'disposition': 'Disposition', 'sat': 'Sit',
+        'appointment_type': 'Appt Type', 'appointment_format': 'Appt Format',
+        'follow_up_date': 'Follow Up Date',
+    }
+    BULK_VALUE_LABELS = {
+        'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
+        'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
+        'sat': {True: 'Sit', False: 'No Sit'},
+        'disposition': dict(Lead.DISPOSITION_CHOICES),
+    }
+    change_parts = []
+    for key, val in update_kwargs.items():
+        label = BULK_LABELS.get(key, key)
+        if key == 'rep_id':
+            display = Rep.objects.filter(id=val).values_list('name', flat=True).first() if val else 'Unassigned'
+        elif key in BULK_VALUE_LABELS:
+            display = BULK_VALUE_LABELS[key].get(val, str(val) if val not in (None, '') else '—')
+        else:
+            display = str(val) if val not in (None, '') else '—'
+        change_parts.append(f"{label} → {display}")
+    change_text = 'Bulk update: ' + ', '.join(change_parts)
+    bulk_updates = [LeadUpdate(lead_id=lid, user=request.user, text=change_text) for lid in ids]
+    LeadUpdate.objects.bulk_create(bulk_updates)
 
     Lead.objects.filter(id__in=ids).update(**update_kwargs)
 
