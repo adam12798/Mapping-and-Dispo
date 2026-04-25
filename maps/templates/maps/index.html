@@ -378,6 +378,7 @@
         // Lead pin colors by appointment type
         var leadTypeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
         var leadsLayer = L.layerGroup().addTo(map);
+        var leadMarkers = {};
         var allLeads = [];
         var allReps = [];
 
@@ -399,11 +400,10 @@
 
         function filterLeadsByDate() {
             leadsLayer.clearLayers();
+            leadMarkers = {};
             var dateVal = document.getElementById('route-date').value;
             allLeads.forEach(function(lead) {
-                // Only show leads with appointments on the selected date
                 if (!lead.appointment_datetime) return;
-                // appointment_datetime format: "MM/DD/YYYY HH:MM AM/PM"
                 var parts = lead.appointment_datetime.split(' ');
                 var dateParts = parts[0].split('/');
                 var leadDate = dateParts[2] + '-' + dateParts[0].padStart(2, '0') + '-' + dateParts[1].padStart(2, '0');
@@ -412,18 +412,20 @@
                 var color = (!lead.appointment_type || !lead.appointment_format) ? '#ff69b4' : (leadTypeColors[lead.appointment_type] || '#ff69b4');
                 var pinIcon = L.divIcon({
                     className: 'lead-pin',
-                    html: '<div style="width:16px;height:16px;background:' + color + ';border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>',
+                    html: '<div style="width:16px;height:16px;background:' + color + ';border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.5);transition:all 0.2s;"></div>',
                     iconSize: [16, 16],
                     iconAnchor: [8, 8]
                 });
 
-                L.marker([lead.lat, lead.lng], { icon: pinIcon })
+                var marker = L.marker([lead.lat, lead.lng], { icon: pinIcon })
                     .bindPopup(
                         '<strong>' + lead.address + '</strong><br>' +
                         (lead.homeowner_name ? lead.homeowner_name + '<br>' : '') +
                         '<em>' + lead.appointment_datetime + '</em>'
                     )
                     .addTo(leadsLayer);
+                marker._leadColor = color;
+                leadMarkers[lead.id] = marker;
             });
             // Always keep sidebar in sync with current date
             if (!pendingAssignments) {
@@ -642,7 +644,7 @@
                     sortedStops.forEach(function(stop) {
                         var badgeColor = typeColorMap[stop.type] || '#999';
                         var displayName = (stop.name || 'Unknown') + (stop.city ? ', ' + stop.city : '');
-                        html += '<div class="sidebar-row" style="border-left-color:' + (rep.color || '#2980b9') + '" onclick="panTo(' + stop.lat + ',' + stop.lng + ')">';
+                        html += '<div class="sidebar-row" data-lead-id="' + stop.lead_id + '" style="border-left-color:' + (rep.color || '#2980b9') + '" onclick="panTo(' + stop.lat + ',' + stop.lng + ')">';
                         html += '<div class="appt-name">' + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (stop.phone) html += '<span>' + stop.phone + '</span>';
@@ -667,7 +669,7 @@
                     assignData.unassigned.forEach(function(lead) {
                         var badgeColor = typeColorMap[lead.type] || '#999';
                         var displayName = (lead.name || 'Unknown') + (lead.city ? ', ' + lead.city : '');
-                        html += '<div class="sidebar-row" style="border-left-color:#ccc">';
+                        html += '<div class="sidebar-row" data-lead-id="' + lead.lead_id + '" style="border-left-color:#ccc">';
                         html += '<div class="appt-name">' + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (lead.phone) html += '<span>' + lead.phone + '</span>';
@@ -719,7 +721,7 @@
                             var parts = lead.appointment_datetime.split(' ');
                             if (parts.length >= 3) timeStr = parts[1] + ' ' + parts[2];
                         }
-                        html += '<div class="sidebar-row" onclick="panTo(' + lead.lat + ',' + lead.lng + ')">';
+                        html += '<div class="sidebar-row" data-lead-id="' + lead.id + '" onclick="panTo(' + lead.lat + ',' + lead.lng + ')">';
                         html += '<div class="appt-name">' + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (lead.phone_number) html += '<span>' + lead.phone_number + '</span>';
@@ -765,6 +767,50 @@
                     });
             }
         }
+
+        function highlightPin(leadId) {
+            var marker = leadMarkers[leadId];
+            if (!marker) return;
+            var el = marker.getElement();
+            if (!el) return;
+            var pin = el.querySelector('div');
+            if (pin) {
+                pin.style.background = '#00e5ff';
+                pin.style.width = '24px';
+                pin.style.height = '24px';
+                pin.style.border = '3px solid #fff';
+                pin.style.boxShadow = '0 0 12px rgba(0,229,255,0.7)';
+                el.style.zIndex = '10000';
+                el.style.marginLeft = '-12px';
+                el.style.marginTop = '-12px';
+            }
+        }
+        function unhighlightPin(leadId) {
+            var marker = leadMarkers[leadId];
+            if (!marker) return;
+            var el = marker.getElement();
+            if (!el) return;
+            var pin = el.querySelector('div');
+            if (pin) {
+                pin.style.background = marker._leadColor;
+                pin.style.width = '16px';
+                pin.style.height = '16px';
+                pin.style.border = '3px solid #fff';
+                pin.style.boxShadow = '0 0 6px rgba(0,0,0,0.5)';
+                el.style.zIndex = '';
+                el.style.marginLeft = '';
+                el.style.marginTop = '';
+            }
+        }
+
+        document.getElementById('sidebar-content').addEventListener('mouseenter', function(e) {
+            var row = e.target.closest('.sidebar-row[data-lead-id]');
+            if (row) highlightPin(row.dataset.leadId);
+        }, true);
+        document.getElementById('sidebar-content').addEventListener('mouseleave', function(e) {
+            var row = e.target.closest('.sidebar-row[data-lead-id]');
+            if (row) unhighlightPin(row.dataset.leadId);
+        }, true);
 
         function panTo(lat, lng) {
             map.setView([lat, lng], 13);
