@@ -62,7 +62,7 @@
         L.control.zoom({ position: 'bottomright' }).addTo(map);
 
         // Use Canvas renderer for smooth zoom/pan — no SVG redraw flicker
-        var canvasRenderer = L.canvas({ padding: 1.0 });
+        var canvasRenderer = L.canvas({ padding: 3.0 });
 
         // Provider color map
         var providerColors = {
