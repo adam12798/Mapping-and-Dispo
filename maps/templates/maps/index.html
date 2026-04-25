@@ -40,6 +40,7 @@
 
 {% block scripts %}
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.smoothwheelzoom@2.0.0/src/L.Map.SmoothWheelZoom.js"></script>
     <script>
         var IS_MANAGER = {% if is_manager %}true{% else %}false{% endif %};
         var map = L.map('map', {
@@ -48,10 +49,10 @@
             zoomControl: false,
             minZoom: 8,
             maxZoom: 16,
-            zoomDelta: 1,
             zoomSnap: 0,
-            wheelDebounceTime: 60,
-            wheelPxPerZoomLevel: 200
+            scrollWheelZoom: false,
+            smoothWheelZoom: true,
+            smoothSensitivity: 1.5
         });
 
         L.control.zoom({ position: 'bottomright' }).addTo(map);
