@@ -1055,9 +1055,10 @@ tbody tr:hover .sticky-col {
         font-size: 11px;
         color: #3d5a80;
         text-transform: uppercase;
-        display: block;
+        display: none;
         margin-bottom: 2px;
     }
+    .crm-table tr.expanded td::before { display: block; }
     .crm-table td:empty::before,
     .crm-table td[data-label=""]::before { display: none; }
     .crm-table td.checkbox-col { display: none !important; }
@@ -1078,9 +1079,13 @@ tbody tr:hover .sticky-col {
     }
     .crm-input, .crm-select {
         width: 100% !important;
+        max-width: 100% !important;
         font-size: 14px !important;
         padding: 8px !important;
         min-height: 40px;
+        box-sizing: border-box;
+        text-overflow: unset;
+        overflow: visible;
     }
     .crm-table textarea.crm-input { min-height: 60px !important; max-width: 100% !important; }
     .crm-table .sticky-col { position: static !important; left: auto !important; z-index: auto !important; }
