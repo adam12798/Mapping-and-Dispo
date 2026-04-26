@@ -947,6 +947,8 @@ tbody tr:hover .sticky-col {
 
 /* ===== Mobile Responsive ===== */
 @media (max-width: 768px) {
+    html, body { overflow-x: hidden; }
+
     /* Bottom nav bar */
     .bottom-nav {
         position: fixed;
@@ -1012,7 +1014,7 @@ tbody tr:hover .sticky-col {
     .top-nav { justify-content: space-between; }
 
     /* Add bottom padding to all content so bottom nav doesn't cover it */
-    .crm-container { padding-bottom: 64px; }
+    .crm-container { padding-bottom: 64px; overflow-x: hidden; }
     .map-wrapper { height: calc(100vh - 44px - 56px) !important; }
     .dashboard-container { padding-bottom: 64px; }
 
@@ -1029,6 +1031,7 @@ tbody tr:hover .sticky-col {
         background: #fff;
         box-shadow: 0 2px 8px rgba(0,0,0,0.06);
         position: relative;
+        overflow: hidden;
     }
     .crm-table td {
         padding: 3px 0;
