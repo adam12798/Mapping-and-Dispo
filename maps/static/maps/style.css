@@ -943,6 +943,7 @@ tbody tr:hover .sticky-col {
 /* Desktop-only: hide mobile elements */
 .navigate-btn { display: none; }
 .bottom-nav { display: none; }
+.filter-toggle-btn { display: none; }
 
 /* ===== Mobile Responsive ===== */
 @media (max-width: 768px) {
@@ -1068,10 +1069,27 @@ tbody tr:hover .sticky-col {
     .crm-header h2 { font-size: 18px; }
     .crm-filters {
         flex-direction: column;
+        display: none;
     }
+    .crm-filters.open { display: flex; }
     .filter-group { width: 100%; }
-    .filter-group select, .filter-group input { width: 100%; min-height: 40px; font-size: 14px; }
-    .filter-clear { width: 100%; min-height: 40px; }
+    .filter-group select, .filter-group input { width: 100%; min-height: 36px; font-size: 13px; }
+    .filter-group label { font-size: 11px; margin-bottom: 2px; }
+    .filter-clear { width: 100%; min-height: 36px; }
+    .filter-toggle-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        background: #3d5a80;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        font-family: 'Montserrat', sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
 
     /* Navigate button (hidden on desktop, shown on mobile) */
     .navigate-btn {
