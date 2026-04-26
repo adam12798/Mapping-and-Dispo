@@ -1039,7 +1039,16 @@ tbody tr:hover .sticky-col {
         position: static !important;
         left: auto !important;
         background: none !important;
+        display: none;
     }
+    /* Collapsed card: only show key fields */
+    .crm-table td[data-label="Name"],
+    .crm-table td[data-label="City"],
+    .crm-table td[data-label="Appt Time"],
+    .crm-table td[data-label="Dispo"] { display: block; }
+    /* Expanded card: show all fields */
+    .crm-table tr.expanded td { display: block; }
+    .crm-table tr.expanded td.checkbox-col { display: none !important; }
     .crm-table td::before {
         content: attr(data-label);
         font-weight: 600;
@@ -1053,6 +1062,20 @@ tbody tr:hover .sticky-col {
     .crm-table td[data-label=""]::before { display: none; }
     .crm-table td.checkbox-col { display: none !important; }
     .crm-table .col-resize { display: none; }
+    /* Expand indicator */
+    .crm-table tbody tr[data-id]::after {
+        content: 'Tap to expand ▾';
+        display: block;
+        text-align: center;
+        color: #98c1d9;
+        font-size: 11px;
+        font-family: 'Montserrat', sans-serif;
+        padding-top: 6px;
+        cursor: pointer;
+    }
+    .crm-table tbody tr[data-id].expanded::after {
+        content: 'Tap to collapse ▴';
+    }
     .crm-input, .crm-select {
         width: 100% !important;
         font-size: 14px !important;
@@ -1063,7 +1086,7 @@ tbody tr:hover .sticky-col {
     .crm-table .sticky-col { position: static !important; left: auto !important; z-index: auto !important; }
     .crm-table td.action-col { text-align: right; padding-top: 8px; border-top: 1px solid #e0fbfc; margin-top: 8px; }
     .crm-table .chatter-btn, .crm-table .sms-btn { padding: 8px 12px; }
-    .crm-table .empty-row td { text-align: center; padding: 40px 20px; }
+    .crm-table .empty-row td { display: block; text-align: center; padding: 40px 20px; }
 
     /* Search and filters responsive */
     .crm-search input { width: 100% !important; }

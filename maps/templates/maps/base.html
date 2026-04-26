@@ -82,6 +82,13 @@
             menu.classList.remove('open');
         }
     });
+    if (window.innerWidth <= 768) {
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('input, select, textarea, button, a')) return;
+            var row = e.target.closest('.crm-table tbody tr[data-id]');
+            if (row) row.classList.toggle('expanded');
+        });
+    }
     </script>
     {% block scripts %}{% endblock %}
 </body>
