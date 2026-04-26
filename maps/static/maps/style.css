@@ -1096,11 +1096,12 @@ tbody tr:hover .sticky-col {
 
     /* Navigate button (hidden on desktop, shown on mobile) */
     .navigate-btn {
-        display: inline-flex;
+        display: flex;
         align-items: center;
         gap: 4px;
         margin-top: 6px;
         padding: 8px 14px;
+        width: fit-content;
         background: #3d5a80;
         color: #fff;
         border-radius: 6px;
