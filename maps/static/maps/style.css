@@ -1046,8 +1046,10 @@ tbody tr:hover .sticky-col {
     .crm-table td[data-label="Appt Time"],
     .crm-table td[data-label="Dispo"] { display: block; }
     .crm-table td[data-label="City"],
-    .crm-table td[data-label="Rep"] { display: inline-block; vertical-align: top; width: 48%; }
-    .crm-table td[data-label="City"] .crm-input { min-width: 120px; }
+    .crm-table td[data-label="Rep"] { display: inline-block !important; vertical-align: top; width: 47%; box-sizing: border-box; }
+    .crm-table td[data-label="City"] .crm-input,
+    .crm-table td[data-label="Rep"] .crm-input,
+    .crm-table td[data-label="Rep"] .crm-select { min-width: 0 !important; }
     /* Expanded card: show all fields */
     .crm-table tr.expanded td { display: block !important; }
     .crm-table tr.expanded td.checkbox-col { display: none !important; }
