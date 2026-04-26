@@ -1014,12 +1014,12 @@ tbody tr:hover .sticky-col {
     .top-nav { justify-content: space-between; }
 
     /* Add bottom padding to all content so bottom nav doesn't cover it */
-    .crm-container { padding-bottom: 72px; overflow-x: hidden; height: auto !important; overflow-y: visible !important; }
-    .crm-table-wrapper { overflow: visible !important; padding-bottom: 0; }
+    .crm-container { padding-bottom: 64px; overflow-x: hidden; }
     .map-wrapper { height: calc(100vh - 44px - 56px) !important; }
     .dashboard-container { padding-bottom: 64px; }
 
     /* Table-to-card transformation (used by CRM, Daily, Reps, Users) */
+    .crm-table-wrapper { overflow-x: visible; }
     .crm-table, .crm-table thead, .crm-table tbody,
     .crm-table tr, .crm-table td, .crm-table th { display: block; width: auto !important; min-width: 0 !important; }
     .crm-table thead { display: none; }
