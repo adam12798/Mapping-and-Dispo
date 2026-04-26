@@ -138,14 +138,15 @@
                 {% for lead in leads %}
                 <tr data-id="{{ lead.id }}">
                     <td class="checkbox-col sticky-col sticky-check"><input type="checkbox" class="row-select"></td>
-                    <td class="sticky-col sticky-name"><input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}"></td>
-                    <td><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number }}"></td>
-                    <td>
+                    <td data-label="Name" class="sticky-col sticky-name"><input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}"></td>
+                    <td data-label="Phone"><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number }}"></td>
+                    <td data-label="Address">
                         <input type="text" class="crm-input" data-field="address" value="{{ lead.address }}"{% if not lead.latitude %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this lead won't appear on the map or daily view"{% endif %}>
+                        <a class="navigate-btn" href="https://www.google.com/maps/dir/?api=1&destination={{ lead.address|urlencode }},+{{ lead.city|urlencode }},+MA" target="_blank"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4.5 20.3l.7.7L12 18l6.8 3 .7-.7z"/></svg> Navigate</a>
                     </td>
-                    <td><input type="text" class="crm-input" data-field="city" value="{{ lead.city }}"></td>
-                    <td><input type="text" class="crm-input" data-field="state" value="{{ lead.state }}"></td>
-                    <td>
+                    <td data-label="City"><input type="text" class="crm-input" data-field="city" value="{{ lead.city }}"></td>
+                    <td data-label="State"><input type="text" class="crm-input" data-field="state" value="{{ lead.state }}"></td>
+                    <td data-label="Appt Type">
                         <select class="crm-select" data-field="appointment_type">
                             <option value="">—</option>
                             <option value="solar" {% if lead.appointment_type == "solar" %}selected{% endif %}>Solar</option>
@@ -153,15 +154,15 @@
                             <option value="both" {% if lead.appointment_type == "both" %}selected{% endif %}>Both</option>
                         </select>
                     </td>
-                    <td>
+                    <td data-label="Format">
                         <select class="crm-select" data-field="appointment_format">
                             <option value="">—</option>
                             <option value="in_person" {% if lead.appointment_format == "in_person" %}selected{% endif %}>In Person</option>
                             <option value="virtual" {% if lead.appointment_format == "virtual" %}selected{% endif %}>Virtual</option>
                         </select>
                     </td>
-                    <td><input type="datetime-local" class="crm-input" data-field="appointment_datetime" value="{{ lead.appointment_datetime|date:'Y-m-d\TH:i'|default:'' }}"></td>
-                    <td>
+                    <td data-label="Appt Time"><input type="datetime-local" class="crm-input" data-field="appointment_datetime" value="{{ lead.appointment_datetime|date:'Y-m-d\TH:i'|default:'' }}"></td>
+                    <td data-label="Rep">
                         <select class="crm-select" data-field="rep_id">
                             <option value="" {% if not lead.rep %}selected{% endif %}>Unassigned</option>
                             {% for rep in reps %}
@@ -169,14 +170,14 @@
                             {% endfor %}
                         </select>
                     </td>
-                    <td>
+                    <td data-label="Sit">
                         <select class="crm-select sat-select" data-field="sat" onchange="updateSatColor(this)">
                             <option value="">—</option>
                             <option value="true" {% if lead.sat == True %}selected{% endif %}>Sit</option>
                             <option value="false" {% if lead.sat == False %}selected{% endif %}>No Sit</option>
                         </select>
                     </td>
-                    <td>
+                    <td data-label="Dispo">
                         <select class="crm-select dispo-select" data-field="disposition" onchange="updateDispoColor(this)">
                             <option value="">—</option>
                             <option value="sale" {% if lead.disposition == "sale" %}selected{% endif %}>Sale</option>
@@ -194,12 +195,12 @@
                             <option value="no_show" {% if lead.disposition == "no_show" %}selected{% endif %}>No Show</option>
                         </select>
                     </td>
-                    <td><input type="date" class="crm-input" data-field="follow_up_date" value="{{ lead.follow_up_date|date:'Y-m-d'|default:'' }}"></td>
-                    <td><input type="text" class="crm-input" data-field="call_notes" value="{{ lead.call_notes }}" placeholder="—"></td>
-                    <td><textarea class="crm-input" data-field="call_transcript" rows="1" style="resize:vertical;min-height:28px;max-width:300px;">{{ lead.call_transcript }}</textarea></td>
-                    <td style="text-align:center;"><button class="sms-btn" onclick="openSmsThread({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8l10 6 10-6"/></svg></button></td>
-                    <td style="text-align:center;"><button class="chatter-btn" onclick="openChatter({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button></td>
-                    <td class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button></td>
+                    <td data-label="Follow Up"><input type="date" class="crm-input" data-field="follow_up_date" value="{{ lead.follow_up_date|date:'Y-m-d'|default:'' }}"></td>
+                    <td data-label="Notes"><input type="text" class="crm-input" data-field="call_notes" value="{{ lead.call_notes }}" placeholder="—"></td>
+                    <td data-label="Transcript"><textarea class="crm-input" data-field="call_transcript" rows="1" style="resize:vertical;min-height:28px;max-width:300px;">{{ lead.call_transcript }}</textarea></td>
+                    <td data-label="" style="text-align:center;"><button class="sms-btn" onclick="openSmsThread({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8l10 6 10-6"/></svg></button></td>
+                    <td data-label="" style="text-align:center;"><button class="chatter-btn" onclick="openChatter({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button></td>
+                    <td data-label="" class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button></td>
                 </tr>
                 {% empty %}
                 <tr><td colspan="18" class="empty-row">No leads yet</td></tr>
