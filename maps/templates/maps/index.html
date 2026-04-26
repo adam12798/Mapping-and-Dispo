@@ -803,14 +803,18 @@
             }
         }
 
-        document.getElementById('sidebar-content').addEventListener('mouseenter', function(e) {
+        var currentHighlight = null;
+        document.getElementById('sidebar-content').addEventListener('mouseover', function(e) {
             var row = e.target.closest('.sidebar-row[data-lead-id]');
-            if (row) highlightPin(row.dataset.leadId);
-        }, true);
-        document.getElementById('sidebar-content').addEventListener('mouseleave', function(e) {
-            var row = e.target.closest('.sidebar-row[data-lead-id]');
-            if (row) unhighlightPin(row.dataset.leadId);
-        }, true);
+            var leadId = row ? row.dataset.leadId : null;
+            if (leadId === currentHighlight) return;
+            if (currentHighlight) unhighlightPin(currentHighlight);
+            currentHighlight = leadId;
+            if (leadId) highlightPin(leadId);
+        });
+        document.getElementById('sidebar-content').addEventListener('mouseleave', function() {
+            if (currentHighlight) { unhighlightPin(currentHighlight); currentHighlight = null; }
+        });
 
         function panTo(lat, lng) {
             map.setView([lat, lng], 13);
