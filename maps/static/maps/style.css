@@ -1019,7 +1019,7 @@ tbody tr:hover .sticky-col {
     .dashboard-container { padding-bottom: 64px; }
 
     /* Table-to-card transformation (used by CRM, Daily, Reps, Users) */
-    .crm-table-wrapper { overflow-x: visible; }
+    .crm-table-wrapper { overflow-x: visible; padding-bottom: 72px !important; }
     .crm-table, .crm-table thead, .crm-table tbody,
     .crm-table tr, .crm-table td, .crm-table th { display: block; width: auto !important; min-width: 0 !important; }
     .crm-table thead { display: none; }
@@ -1044,6 +1044,7 @@ tbody tr:hover .sticky-col {
     /* Collapsed card: only show key fields */
     .crm-table td[data-label="Name"],
     .crm-table td[data-label="Appt Time"],
+    .crm-table td[data-label="Appt Type"],
     .crm-table td[data-label="Dispo"] { display: block; }
     .crm-table td[data-label="City"],
     .crm-table td[data-label="Rep"] { display: inline-block !important; vertical-align: top; width: 47%; box-sizing: border-box; }
