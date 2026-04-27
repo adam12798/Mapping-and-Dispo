@@ -1640,6 +1640,15 @@ def sms_webhook(request):
                 except (ValueError, OverflowError):
                     pass
 
+            appt_type = normalize_type(fields.get('type', ''))
+            tags = ''
+            if appt_type == 'solar':
+                tags = 'Solar'
+            elif appt_type == 'hvac':
+                tags = 'Hvac'
+            elif appt_type == 'both':
+                tags = 'Solar,Hvac'
+
             lead = Lead.objects.create(
                 address=address,
                 city=city,
@@ -1650,7 +1659,8 @@ def sms_webhook(request):
                 homeowner_name=fields.get('name', ''),
                 phone_number=fields.get('phone', ''),
                 source=fields.get('source', ''),
-                appointment_type=normalize_type(fields.get('type', '')),
+                tags=tags,
+                appointment_type=appt_type,
                 appointment_format=normalize_format(fields.get('format', '')),
                 appointment_datetime=appt_datetime,
                 raw_message=body,
