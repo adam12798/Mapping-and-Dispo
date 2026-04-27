@@ -776,13 +776,8 @@
             var pin = el.querySelector('div');
             if (pin) {
                 pin.style.background = '#00e5ff';
-                pin.style.width = '24px';
-                pin.style.height = '24px';
-                pin.style.border = '3px solid #fff';
-                pin.style.boxShadow = '0 0 12px rgba(0,229,255,0.7)';
+                pin.style.boxShadow = '0 0 10px rgba(0,229,255,0.6)';
                 el.style.zIndex = '10000';
-                el.style.marginLeft = '-12px';
-                el.style.marginTop = '-12px';
             }
         }
         function unhighlightPin(leadId) {
@@ -793,13 +788,8 @@
             var pin = el.querySelector('div');
             if (pin) {
                 pin.style.background = marker._leadColor;
-                pin.style.width = '16px';
-                pin.style.height = '16px';
-                pin.style.border = '3px solid #fff';
                 pin.style.boxShadow = '0 0 6px rgba(0,0,0,0.5)';
                 el.style.zIndex = '';
-                el.style.marginLeft = '';
-                el.style.marginTop = '';
             }
         }
 
