@@ -1048,6 +1048,10 @@ tbody tr:hover .sticky-col {
     .crm-table td[data-label="Dispo"] { display: block; }
     .crm-table td[data-label="City"],
     .crm-table td[data-label="Rep"] { display: inline-block !important; vertical-align: top; width: 47%; box-sizing: border-box; }
+    /* Reps page collapsed: show name, specialty, status */
+    .crm-table td[data-label="Specialty"],
+    .crm-table td[data-label="Status"],
+    .crm-table td[data-label="Rating"] { display: block; }
     .crm-table td[data-label="City"] .crm-input,
     .crm-table td[data-label="Rep"] .crm-input,
     .crm-table td[data-label="Rep"] .crm-select { min-width: 0 !important; }
