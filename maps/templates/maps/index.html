@@ -402,19 +402,26 @@
             leadsLayer.clearLayers();
             leadMarkers = {};
             var dateVal = document.getElementById('route-date').value;
-            allLeads.forEach(function(lead) {
-                if (!lead.appointment_datetime) return;
+            var dayLeads = allLeads.filter(function(lead) {
+                if (!lead.appointment_datetime) return false;
                 var parts = lead.appointment_datetime.split(' ');
                 var dateParts = parts[0].split('/');
                 var leadDate = dateParts[2] + '-' + dateParts[0].padStart(2, '0') + '-' + dateParts[1].padStart(2, '0');
-                if (leadDate !== dateVal) return;
-
+                return leadDate === dateVal;
+            });
+            dayLeads.sort(function(a, b) {
+                var dA = a.appointment_datetime ? new Date(a.appointment_datetime) : new Date(0);
+                var dB = b.appointment_datetime ? new Date(b.appointment_datetime) : new Date(0);
+                return dA - dB;
+            });
+            dayLeads.forEach(function(lead, idx) {
                 var color = (!lead.appointment_type || !lead.appointment_format) ? '#ff69b4' : (leadTypeColors[lead.appointment_type] || '#ff69b4');
+                var num = idx + 1;
                 var pinIcon = L.divIcon({
                     className: 'lead-pin',
-                    html: '<div style="width:16px;height:16px;background:' + color + ';border:3px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.5);transition:all 0.2s;"></div>',
-                    iconSize: [16, 16],
-                    iconAnchor: [8, 8]
+                    html: '<div style="width:26px;height:26px;background:' + color + ';border:2px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;font-family:Montserrat,sans-serif;line-height:1;">' + num + '</div>',
+                    iconSize: [26, 26],
+                    iconAnchor: [13, 13]
                 });
 
                 var marker = L.marker([lead.lat, lead.lng], { icon: pinIcon })
@@ -425,6 +432,7 @@
                     )
                     .addTo(leadsLayer);
                 marker._leadColor = color;
+                marker._apptNum = num;
                 leadMarkers[lead.id] = marker;
             });
             // Always keep sidebar in sync with current date
@@ -644,8 +652,9 @@
                     sortedStops.forEach(function(stop) {
                         var badgeColor = typeColorMap[stop.type] || '#999';
                         var displayName = (stop.name || 'Unknown') + (stop.city ? ', ' + stop.city : '');
+                        var pinNum = leadMarkers[stop.lead_id] ? leadMarkers[stop.lead_id]._apptNum : '';
                         html += '<div class="sidebar-row" data-lead-id="' + stop.lead_id + '" style="border-left-color:' + (rep.color || '#2980b9') + '" onclick="panTo(' + stop.lat + ',' + stop.lng + ')">';
-                        html += '<div class="appt-name">' + displayName + '</div>';
+                        html += '<div class="appt-name">' + (pinNum ? '<span class="sidebar-pin-num" style="background:' + badgeColor + '">' + pinNum + '</span>' : '') + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (stop.phone) html += '<span>' + stop.phone + '</span>';
                         if (stop.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + stop.type + '</span>';
@@ -669,8 +678,9 @@
                     assignData.unassigned.forEach(function(lead) {
                         var badgeColor = typeColorMap[lead.type] || '#999';
                         var displayName = (lead.name || 'Unknown') + (lead.city ? ', ' + lead.city : '');
+                        var pinNum = leadMarkers[lead.lead_id] ? leadMarkers[lead.lead_id]._apptNum : '';
                         html += '<div class="sidebar-row" data-lead-id="' + lead.lead_id + '" style="border-left-color:#ccc">';
-                        html += '<div class="appt-name">' + displayName + '</div>';
+                        html += '<div class="appt-name">' + (pinNum ? '<span class="sidebar-pin-num" style="background:' + badgeColor + '">' + pinNum + '</span>' : '') + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (lead.phone) html += '<span>' + lead.phone + '</span>';
                         if (lead.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.type + '</span>';
@@ -712,17 +722,17 @@
                 } else {
                     html += '<div class="sidebar-group">';
                     html += '<div class="sidebar-group-title">All Appointments (' + dayLeads.length + ')</div>';
-                    dayLeads.forEach(function(lead) {
+                    dayLeads.forEach(function(lead, idx) {
                         var badgeColor = (!lead.appointment_type || !lead.appointment_format) ? '#ff69b4' : (typeColorMap[lead.appointment_type] || '#ff69b4');
                         var displayName = (lead.homeowner_name || lead.address) + (lead.city ? ', ' + lead.city : '');
-                        // Extract time from appointment_datetime "MM/DD/YYYY HH:MM AM/PM"
                         var timeStr = '';
                         if (lead.appointment_datetime) {
                             var parts = lead.appointment_datetime.split(' ');
                             if (parts.length >= 3) timeStr = parts[1] + ' ' + parts[2];
                         }
+                        var pinNum = leadMarkers[lead.id] ? leadMarkers[lead.id]._apptNum : (idx + 1);
                         html += '<div class="sidebar-row" data-lead-id="' + lead.id + '" onclick="panTo(' + lead.lat + ',' + lead.lng + ')">';
-                        html += '<div class="appt-name">' + displayName + '</div>';
+                        html += '<div class="appt-name"><span class="sidebar-pin-num" style="background:' + badgeColor + '">' + pinNum + '</span>' + displayName + '</div>';
                         html += '<div class="appt-details">';
                         if (lead.phone_number) html += '<span>' + lead.phone_number + '</span>';
                         var badgeLabel = lead.appointment_type || 'unknown';
@@ -777,6 +787,7 @@
             if (pin) {
                 pin.style.background = '#00e5ff';
                 pin.style.boxShadow = '0 0 10px rgba(0,229,255,0.6)';
+                pin.style.color = '#fff';
                 el.style.zIndex = '10000';
             }
         }
@@ -789,6 +800,7 @@
             if (pin) {
                 pin.style.background = marker._leadColor;
                 pin.style.boxShadow = '0 0 6px rgba(0,0,0,0.5)';
+                pin.style.color = '#fff';
                 el.style.zIndex = '';
             }
         }
