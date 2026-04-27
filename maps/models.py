@@ -40,6 +40,8 @@ class Lead(models.Model):
     # CRM fields
     homeowner_name = models.CharField(max_length=200, blank=True)
     phone_number = models.CharField(max_length=20, blank=True)
+    source = models.CharField(max_length=200, blank=True)
+    tags = models.CharField(max_length=200, blank=True)
     appointment_type = models.CharField(max_length=10, choices=APPOINTMENT_TYPE_CHOICES, blank=True)
     appointment_format = models.CharField(max_length=10, choices=APPOINTMENT_FORMAT_CHOICES, blank=True)
     appointment_datetime = models.DateTimeField(null=True, blank=True)

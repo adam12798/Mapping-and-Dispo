@@ -125,15 +125,17 @@
                     <th class="sortable" onclick="sortTable(3)">Street Address <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(4)">City <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(5)">State <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(6)">Appt Type <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(7)">Appt Format <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(8)">Appt Time <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(9)">Status <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(10)">Sit <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(11)">Dispo <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(12)">Follow Up Date <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(13)">Call Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(14)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(6)">Source <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(7)">Tags <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(8)">Appt Type <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(9)">Appt Format <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(10)">Appt Time <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(11)">Status <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(12)">Sit <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(13)">Dispo <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(14)">Follow Up Date <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(15)">Call Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(16)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th style="width:40px;text-align:center;">Updates</th>
                     <th style="width:40px;text-align:center;">SMS</th>
                     <th class="action-col"></th>
@@ -151,6 +153,16 @@
                     </td>
                     <td data-label="City"><input type="text" class="crm-input" data-field="city" value="{{ lead.city }}"></td>
                     <td data-label="State"><input type="text" class="crm-input" data-field="state" value="{{ lead.state }}"></td>
+                    <td data-label="Source"><input type="text" class="crm-input" data-field="source" value="{{ lead.source }}"></td>
+                    <td data-label="Tags">
+                        <div class="tag-pills" data-field="tags" data-value="{{ lead.tags }}">
+                            <button type="button" class="tag-pill{% if 'Solar' in lead.tags %} active{% endif %}" data-tag="Solar">Solar</button>
+                            <button type="button" class="tag-pill{% if 'Roof' in lead.tags %} active{% endif %}" data-tag="Roof">Roof</button>
+                            <button type="button" class="tag-pill{% if 'Hvac' in lead.tags %} active{% endif %}" data-tag="Hvac">Hvac</button>
+                            <button type="button" class="tag-pill{% if 'Battery' in lead.tags %} active{% endif %}" data-tag="Battery">Battery</button>
+                            <button type="button" class="tag-pill{% if 'MassSave' in lead.tags %} active{% endif %}" data-tag="MassSave">MassSave</button>
+                        </div>
+                    </td>
                     <td data-label="Appt Type">
                         <select class="crm-select" data-field="appointment_type">
                             <option value="">—</option>
@@ -208,7 +220,7 @@
                     <td data-label="" class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="18" class="empty-row">No appointments for this date</td></tr>
+                <tr><td colspan="20" class="empty-row">No appointments for this date</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -329,7 +341,7 @@
                 currentSortAsc = true;
             }
 
-            var isDateCol = (colIndex === 8);
+            var isDateCol = (colIndex === 10);
 
             rows.sort(function(a, b) {
                 var valA = getCellValue(a, colIndex);
@@ -374,6 +386,13 @@
                     if (addrInput) {
                         addrInput.style.border = '';
                         addrInput.title = '';
+                    }
+                }
+                if (data.appointment_type !== undefined) {
+                    var row = inputEl ? inputEl.closest('tr') : null;
+                    if (row) {
+                        var typeSelect = row.querySelector('[data-field="appointment_type"]');
+                        if (typeSelect) typeSelect.value = data.appointment_type;
                     }
                 }
             });
@@ -720,12 +739,34 @@
             currentSmsData = null;
         }
 
+        // Tag pill click handler
+        document.addEventListener('click', function(e) {
+            if (!e.target.classList.contains('tag-pill')) return;
+            e.target.classList.toggle('active');
+            var container = e.target.closest('.tag-pills');
+            var tags = [];
+            container.querySelectorAll('.tag-pill.active').forEach(function(btn) {
+                tags.push(btn.dataset.tag);
+            });
+            var tagsStr = tags.join(',');
+            container.dataset.value = tagsStr;
+            var row = container.closest('tr');
+            var leadId = row.dataset.id;
+            if (leadId) saveField(leadId, 'tags', tagsStr, e.target);
+        });
+
         // Rep read-only mode: disable all inputs and hide admin-only UI
         {% if not is_manager %}
         document.querySelectorAll('.crm-input, .crm-select').forEach(function(el) {
             el.disabled = true;
             el.style.opacity = '0.7';
             el.style.cursor = 'default';
+        });
+        document.querySelectorAll('.tag-pill').forEach(function(el) {
+            el.disabled = true;
+            el.style.opacity = '0.7';
+            el.style.cursor = 'default';
+            el.style.pointerEvents = 'none';
         });
         document.querySelectorAll('.row-select, #select-all').forEach(function(el) { el.style.display = 'none'; });
         var bulkBtn = document.getElementById('bulk-delete-btn');

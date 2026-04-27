@@ -264,12 +264,13 @@ def lead_update(request, pk):
     data = json.loads(request.body)
     allowed_fields = [
         'homeowner_name', 'phone_number', 'address', 'city', 'state',
-        'appointment_type', 'appointment_format', 'appointment_datetime',
+        'source', 'tags', 'appointment_type', 'appointment_format', 'appointment_datetime',
         'disposition', 'sat', 'follow_up_date', 'call_notes', 'call_transcript',
     ]
     FIELD_LABELS = {
         'homeowner_name': 'Name', 'phone_number': 'Phone', 'address': 'Address',
-        'city': 'City', 'state': 'State', 'appointment_type': 'Appt Type',
+        'city': 'City', 'state': 'State', 'source': 'Source', 'tags': 'Tags',
+        'appointment_type': 'Appt Type',
         'appointment_format': 'Appt Format', 'appointment_datetime': 'Appt Time',
         'disposition': 'Disposition', 'sat': 'Sit', 'follow_up_date': 'Follow Up Date',
         'call_notes': 'Call Notes', 'call_transcript': 'Transcript', 'rep_id': 'Rep',
@@ -307,6 +308,16 @@ def lead_update(request, pk):
             if old_display != new_display:
                 label = FIELD_LABELS.get(field, field)
                 changes.append(f"{label}: {old_display} → {new_display}")
+    # Auto-compute appointment_type from tags when tags change
+    if 'tags' in data and 'appointment_type' not in data:
+        new_type = compute_appointment_type(lead.tags)
+        old_type = lead.appointment_type or ''
+        if new_type != old_type:
+            old_display = VALUE_LABELS['appointment_type'].get(old_type, old_type or '—')
+            new_display = VALUE_LABELS['appointment_type'].get(new_type, new_type or '—')
+            lead.appointment_type = new_type
+            changes.append(f"Appt Type: {old_display} → {new_display} (auto)")
+
     # Re-geocode if address or city changed
     geocode_failed = False
     if 'address' in data or 'city' in data:
@@ -344,6 +355,8 @@ def lead_update(request, pk):
     response = {'status': 'ok'}
     if geocode_failed:
         response['geocode_failed'] = True
+    if 'tags' in data and 'appointment_type' not in data:
+        response['appointment_type'] = lead.appointment_type or ''
     return JsonResponse(response)
 
 
@@ -1010,6 +1023,7 @@ def parse_sms_fields(body):
         'date and time': 'appointment_datetime',
         'date': 'appointment_datetime',
         'time': 'appointment_datetime',
+        'source': 'source',
     }
 
     fields = {}
@@ -1043,6 +1057,22 @@ def normalize_format(value):
         return 'in_person'
     if 'virtual' in v:
         return 'virtual'
+    return ''
+
+
+def compute_appointment_type(tags_str):
+    if not tags_str:
+        return ''
+    tags = [t.strip() for t in tags_str.split(',')]
+    has_solar = any(t in ('Solar', 'Roof', 'Battery') for t in tags)
+    has_hvac = any(t == 'Hvac' for t in tags)
+    has_masssave = any(t == 'MassSave' for t in tags)
+    if has_masssave or (has_solar and has_hvac):
+        return 'both'
+    if has_solar:
+        return 'solar'
+    if has_hvac:
+        return 'hvac'
     return ''
 
 
@@ -1619,6 +1649,7 @@ def sms_webhook(request):
                 from_number=from_number,
                 homeowner_name=fields.get('name', ''),
                 phone_number=fields.get('phone', ''),
+                source=fields.get('source', ''),
                 appointment_type=normalize_type(fields.get('type', '')),
                 appointment_format=normalize_format(fields.get('format', '')),
                 appointment_datetime=appt_datetime,
