@@ -1649,23 +1649,85 @@ def sms_webhook(request):
             elif appt_type == 'both':
                 tags = 'Solar,Hvac'
 
-            lead = Lead.objects.create(
-                address=address,
-                city=city,
-                state=fields.get('state', ''),
-                latitude=lat,
-                longitude=lng,
-                from_number=from_number,
-                homeowner_name=fields.get('name', ''),
-                phone_number=fields.get('phone', ''),
-                source=fields.get('source', ''),
-                tags=tags,
-                appointment_type=appt_type,
-                appointment_format=normalize_format(fields.get('format', '')),
-                appointment_datetime=appt_datetime,
-                raw_message=body,
-            )
-            LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+            # Try to match existing lead by name+phone or name+address
+            name = fields.get('name', '')
+            phone = fields.get('phone', '')
+            existing = None
+            if name and phone:
+                existing = Lead.objects.filter(
+                    homeowner_name__iexact=name,
+                    phone_number__icontains=phone[-10:]
+                ).order_by('-created_at').first()
+            if not existing and name and address:
+                existing = Lead.objects.filter(
+                    homeowner_name__iexact=name,
+                    address__iexact=address
+                ).order_by('-created_at').first()
+
+            if existing:
+                lead = existing
+                changes = []
+                update_map = {
+                    'address': address,
+                    'city': city,
+                    'state': fields.get('state', ''),
+                    'phone_number': phone,
+                    'source': fields.get('source', ''),
+                    'appointment_type': appt_type,
+                    'appointment_format': normalize_format(fields.get('format', '')),
+                    'appointment_datetime': appt_datetime,
+                }
+                if tags:
+                    update_map['tags'] = tags
+                FIELD_DISPLAY = {
+                    'address': 'Address', 'city': 'City', 'state': 'State',
+                    'phone_number': 'Phone', 'source': 'Source', 'tags': 'Tags',
+                    'appointment_type': 'Appt Type', 'appointment_format': 'Appt Format',
+                    'appointment_datetime': 'Appt Time',
+                }
+                for field, new_val in update_map.items():
+                    if not new_val:
+                        continue
+                    old_val = getattr(lead, field)
+                    old_str = str(old_val) if old_val not in (None, '') else ''
+                    new_str = str(new_val) if new_val not in (None, '') else ''
+                    if old_str != new_str:
+                        label = FIELD_DISPLAY.get(field, field)
+                        changes.append(f"{label}: {old_str or '—'} → {new_str}")
+                        setattr(lead, field, new_val)
+                if 'address' in update_map and update_map['address'] and (update_map['address'] != (existing.address or '')):
+                    lead.latitude, lead.longitude = lat, lng
+                elif 'city' in update_map and update_map['city'] and (update_map['city'] != (existing.city or '')):
+                    lead.latitude, lead.longitude = lat, lng
+                if tags and 'tags' in update_map:
+                    computed = compute_appointment_type(lead.tags)
+                    if computed and computed != lead.appointment_type:
+                        lead.appointment_type = computed
+                lead.raw_message = body
+                lead.save()
+                if changes:
+                    system_user = User.objects.filter(is_superuser=True).first()
+                    if system_user:
+                        LeadUpdate.objects.create(lead=lead, user=system_user, text='SMS update:\n' + '\n'.join(changes))
+                LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+            else:
+                lead = Lead.objects.create(
+                    address=address,
+                    city=city,
+                    state=fields.get('state', ''),
+                    latitude=lat,
+                    longitude=lng,
+                    from_number=from_number,
+                    homeowner_name=name,
+                    phone_number=phone,
+                    source=fields.get('source', ''),
+                    tags=tags,
+                    appointment_type=appt_type,
+                    appointment_format=normalize_format(fields.get('format', '')),
+                    appointment_datetime=appt_datetime,
+                    raw_message=body,
+                )
+                LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
     except Exception:
         # Always save the lead even if parsing fails
         lead = Lead.objects.create(
