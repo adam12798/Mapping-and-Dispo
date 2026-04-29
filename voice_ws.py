@@ -791,7 +791,7 @@ async def media_stream(ws: WebSocket):
                         # Collect assistant transcript
                         text = msg.get('transcript', '')
                         if text:
-                            transcript_parts.append(f'Assistant: {text}')
+                            transcript_parts.append(f'Alfred: {text}')
                             logger.info(f'Assistant said: {text[:100]}')
 
                     elif msg_type == 'conversation.item.input_audio_transcription.completed':
