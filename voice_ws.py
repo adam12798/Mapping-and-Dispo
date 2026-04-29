@@ -678,7 +678,7 @@ async def media_stream(ws: WebSocket):
                                 'modalities': ['text', 'audio'],
                                 'temperature': 0.6,
                                 'input_audio_transcription': {
-                                    'model': 'whisper-1',
+                                    'model': 'gpt-4o-mini-transcribe',
                                 },
                             },
                         }
