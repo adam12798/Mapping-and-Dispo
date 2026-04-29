@@ -1097,22 +1097,35 @@ def parse_manager_update_sms(body):
         resp = client.chat.completions.create(
             model='gpt-4o-mini',
             messages=[
-                {'role': 'system', 'content': f"""You parse SMS messages from a sales manager about updating appointments. Today is {today_str}.
+                {'role': 'system', 'content': f"""You parse SMS messages from a sales manager about updating solar/HVAC appointments. Today is {today_str}.
+
+Managers text casually — expect typos, abbreviations, incomplete sentences, slang, and varied formats. Be flexible and use best judgment.
 
 Extract these fields:
-- "action": "reschedule", "cancel", "disposition", "notes", or "unknown"
-- "lead_name": homeowner name mentioned (empty string if not found)
-- "lead_phone": phone number mentioned (empty string if not found)
-- "lead_city": city or town mentioned for identifying the appointment (empty string if not found)
-- "current_datetime": the existing appointment's date/time if mentioned for identification, in YYYY-MM-DDTHH:MM format. Convert relative dates. Empty string if not mentioned.
-- "new_datetime": new appointment date/time in YYYY-MM-DDTHH:MM format if rescheduling. Convert relative dates like "Friday 2pm", "next Tuesday at 10", "tomorrow 3pm" to actual dates based on today. Empty string if not rescheduling.
-- "new_disposition": if setting a disposition, one of: sale, no_sale, follow_up, credit_fail, cancel_door, cpfu, rep_no_show, no_coverage, needs_reschedule, incomplete_deal, future_contact, dq, no_show. Empty string if not applicable.
-- "notes": any extra context or notes the manager mentioned. Empty string if none.
+- "action": "reschedule", "cancel", "disposition", "assign", "notes", or "unknown"
+- "lead_name": homeowner's last name or full name mentioned (empty string if not found)
+- "lead_phone": phone number if mentioned (empty string if not found)
+- "lead_city": city/town mentioned for identifying the appt (empty string if not found)
+- "current_datetime": existing appt date/time if referenced for identification, YYYY-MM-DDTHH:MM format. Convert relative dates. Empty string if not mentioned.
+- "new_datetime": new date/time if rescheduling, YYYY-MM-DDTHH:MM format. Convert "Friday 2pm", "tmrw at 10", "next tues 3", "this sat 1pm", "wed", etc. to actual dates. If only a day is given with no time, use 10:00 as default. Empty string if not rescheduling.
+- "new_disposition": one of: sale, no_sale, follow_up, credit_fail, cancel_door, cpfu, rep_no_show, no_coverage, needs_reschedule, incomplete_deal, future_contact, dq, no_show. Empty string if not applicable.
+- "rep_name": rep name if assigning/reassigning (empty string if not applicable)
+- "notes": any extra context or notes. Empty string if none.
 
-Examples:
-- "Reschedule the 2pm in Springfield to Friday 3pm" → lead_city: "Springfield", current_datetime: today's date + 14:00, new_datetime: Friday + 15:00
-- "Move Smith to tomorrow at 10" → lead_name: "Smith", new_datetime: tomorrow + 10:00
-- "Cancel the Johnson appt in Medford" → lead_name: "Johnson", lead_city: "Medford", action: "cancel"
+Common manager text patterns:
+- "push smith to fri" → reschedule, lead_name: "Smith", new_datetime: Friday 10:00
+- "move the medford appt to 3pm tmrw" → reschedule, lead_city: "Medford", new_datetime: tomorrow 15:00
+- "bump jones 2 thursday 11a" → reschedule, lead_name: "Jones", new_datetime: Thursday 11:00
+- "cancel garcia" → cancel, lead_name: "Garcia"
+- "scratch the 4pm springfield" → cancel, lead_city: "Springfield", current_datetime: today 16:00
+- "johnson was a sale" → disposition, lead_name: "Johnson", new_disposition: "sale"
+- "no show williams" → disposition, lead_name: "Williams", new_disposition: "no_show"
+- "smith didnt sit" → disposition, lead_name: "Smith", new_disposition: "cancel_door"
+- "fu on martinez" → disposition, lead_name: "Martinez", new_disposition: "follow_up"
+- "need to follow up w chen" → disposition, lead_name: "Chen", new_disposition: "follow_up"
+- "give the davis lead to mike" → assign, lead_name: "Davis", rep_name: "Mike"
+
+Try hard to identify an action. Only return "unknown" if the text truly has nothing to do with appointments.
 
 Return ONLY valid JSON, no other text or markdown."""},
                 {'role': 'user', 'content': body},
@@ -1217,6 +1230,15 @@ def apply_manager_sms_update(lead, parsed):
         dispo = parsed['new_disposition']
         lead.disposition = dispo
         changes.append(f"Disposition set to {DISPO_NAMES.get(dispo, dispo)}")
+
+    if action == 'assign' and parsed.get('rep_name'):
+        rep_name = parsed['rep_name']
+        rep = Rep.objects.filter(name__icontains=rep_name, active=True).first()
+        if rep:
+            lead.rep = rep
+            changes.append(f"Assigned to {rep.name}")
+        else:
+            changes.append(f"Could not find active rep '{rep_name}'")
 
     if parsed.get('notes'):
         lead.call_notes = parsed['notes']
@@ -1596,6 +1618,12 @@ def sms_webhook(request):
                     content_type='text/xml',
                 )
 
+            send_sms(from_number, "I didn't understand that update. Try something like:\n- 'Reschedule Smith to Friday 2pm'\n- 'Cancel Garcia'\n- 'Johnson was a sale'\n- 'Give Davis to Mike'")
+            return HttpResponse(
+                '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                content_type='text/xml',
+            )
+
     # Check if sender is a rep — if so, treat as time off request
     rep = Rep.objects.filter(phone_number__icontains=from_number[-10:]).first() if from_number else None
     if rep and body:
@@ -1710,6 +1738,11 @@ def sms_webhook(request):
                     if system_user:
                         LeadUpdate.objects.create(lead=lead, user=system_user, text='SMS update:\n' + '\n'.join(changes))
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+                if changes:
+                    confirm = f"Updated {lead.homeowner_name}:\n" + '\n'.join(f"- {c}" for c in changes)
+                else:
+                    confirm = f"Got it -- {lead.homeowner_name} already up to date, no changes needed."
+                send_sms(from_number, confirm)
             else:
                 lead = Lead.objects.create(
                     address=address,
@@ -1728,6 +1761,12 @@ def sms_webhook(request):
                     raw_message=body,
                 )
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+                confirm = f"Appt booked: {name or 'Unknown'}"
+                if city:
+                    confirm += f" in {city}"
+                if appt_datetime:
+                    confirm += f" on {appt_datetime.strftime('%m/%d/%Y at %I:%M %p')}"
+                send_sms(from_number, confirm)
     except Exception:
         # Always save the lead even if parsing fails
         lead = Lead.objects.create(
