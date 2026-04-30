@@ -544,6 +544,11 @@ tbody tr:hover .sticky-col {
     font-size: 13px;
 }
 
+td.bulk-highlight {
+    background: rgba(61, 90, 128, 0.1);
+    transition: background 0.15s;
+}
+
 #legend {
     position: absolute;
     bottom: 30px;

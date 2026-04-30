@@ -685,6 +685,33 @@
             }, 800);
         }
 
+        // Bulk hover highlight
+        function getCheckedRows() {
+            return Array.from(document.querySelectorAll('.row-select:checked')).map(function(cb) { return cb.closest('tr'); });
+        }
+
+        function clearBulkHighlight() {
+            document.querySelectorAll('.bulk-highlight').forEach(function(el) { el.classList.remove('bulk-highlight'); });
+        }
+
+        document.querySelectorAll('.crm-input, .crm-select').forEach(function(el) {
+            el.addEventListener('mouseenter', function() {
+                var row = this.closest('tr');
+                var cb = row.querySelector('.row-select');
+                if (!cb || !cb.checked) return;
+                var checked = getCheckedRows();
+                if (checked.length < 2) return;
+                var field = this.dataset.field;
+                checked.forEach(function(r) {
+                    var cell = r.querySelector('[data-field="' + field + '"]');
+                    if (cell) cell.closest('td').classList.add('bulk-highlight');
+                });
+            });
+            el.addEventListener('mouseleave', function() {
+                clearBulkHighlight();
+            });
+        });
+
         // Field editing (with bulk support)
         document.querySelectorAll('.crm-input, .crm-select').forEach(function(el) {
             el.addEventListener('change', function() {
@@ -694,18 +721,11 @@
                 var value = this.value;
                 var inputEl = this;
 
-                // Check for bulk edit
                 var rowCheckbox = row.querySelector('.row-select');
-                if (rowCheckbox && rowCheckbox.checked && BULK_FIELDS.indexOf(field) !== -1) {
-                    var checkedRows = Array.from(document.querySelectorAll('.row-select:checked')).map(function(cb) { return cb.closest('tr'); });
+                if (rowCheckbox && rowCheckbox.checked) {
+                    var checkedRows = getCheckedRows();
                     if (checkedRows.length > 1) {
-                        if (!confirm('Apply this change to all ' + checkedRows.length + ' selected leads?')) {
-                            saveField(leadId, field, value, inputEl);
-                            filterTable();
-                            return;
-                        }
                         var ids = checkedRows.map(function(r) { return parseInt(r.dataset.id); });
-                        // Update DOM for all selected rows
                         var dispoColors = { sale:'#27ae60', no_sale:'#8e44ad', follow_up:'#e67e22', credit_fail:'#ff69b4', cancel_door:'#95a5a6', cpfu:'#98c1d9', rep_no_show:'#111', no_coverage:'#c0392b', needs_reschedule:'#3498db', incomplete_deal:'#d4a017', future_contact:'#1abc9c', dq:'#8B4513', no_show:'#800000' };
                         checkedRows.forEach(function(r) {
                             var el = r.querySelector('[data-field="' + field + '"]');
@@ -718,6 +738,7 @@
                                 if (satEl) satEl.style.backgroundColor = value === 'true' ? '#e8f5e9' : value === 'false' ? '#fce4ec' : '';
                             }
                         });
+                        clearBulkHighlight();
                         var body = {};
                         body[field] = value;
                         fetch('/api/leads/bulk-update/', {
