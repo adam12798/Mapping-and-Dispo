@@ -47,68 +47,14 @@
             </div>
             <div class="crm-search">
                 <input type="text" id="search-input" placeholder="Search leads..." oninput="filterTable()">
-                <button class="filter-toggle-btn" onclick="document.querySelector('.crm-filters').classList.toggle('open')">Filters</button>
+                <button class="filter-toggle-btn" id="filter-toggle" onclick="toggleFilterPanel()">Filters</button>
             </div>
-            <div class="crm-filters">
-            <div class="filter-group">
-                <label>Date</label>
-                <input type="date" id="filter-date" onchange="filterTable()">
-            </div>
-            <div class="filter-group">
-                <label>Product Type</label>
-                <select id="filter-type" onchange="filterTable()">
-                    <option value="">All</option>
-                    <option value="solar">Solar</option>
-                    <option value="hvac">HVAC</option>
-                    <option value="both">Both</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>Meeting Type</label>
-                <select id="filter-format" onchange="filterTable()">
-                    <option value="">All</option>
-                    <option value="in_person">In Person</option>
-                    <option value="virtual">Virtual</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>Rep</label>
-                <select id="filter-rep" onchange="filterTable()">
-                    <option value="">All</option>
-                    {% for rep in reps %}
-                    <option value="{{ rep.id }}">{{ rep.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>Status</label>
-                <select id="filter-status" onchange="filterTable()">
-                    <option value="">All</option>
-                    <option value="assigned">Assigned</option>
-                    <option value="unassigned">Unassigned</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>Disposition</label>
-                <select id="filter-dispo" onchange="filterTable()">
-                    <option value="">All</option>
-                    <option value="sale">Sale</option>
-                    <option value="no_sale">No Sale</option>
-                    <option value="follow_up">Follow Up</option>
-                    <option value="credit_fail">Credit Fail</option>
-                    <option value="cancel_door">Cancel at Door</option>
-                    <option value="cpfu">CPFU</option>
-                    <option value="rep_no_show">Rep No Show</option>
-                    <option value="no_coverage">No Coverage</option>
-                    <option value="needs_reschedule">Needs Reschedule</option>
-                    <option value="incomplete_deal">Incomplete Deal</option>
-                    <option value="future_contact">Future Contact</option>
-                    <option value="dq">DQ</option>
-                    <option value="no_show">No Show</option>
-                    <option value="none">No Disposition</option>
-                </select>
-            </div>
-            <button class="filter-clear" onclick="clearFilters()">Clear</button>
+            <div class="crm-filters" id="filter-panel" style="display:none;">
+                <div id="filter-rows"></div>
+                <div class="filter-actions">
+                    <button class="filter-add-btn" onclick="addFilterRow()">+ Add Filter</button>
+                    <button class="filter-clear" onclick="clearFilters()">Clear All</button>
+                </div>
             </div>
         </div>
         <div class="crm-table-wrapper">
@@ -451,22 +397,213 @@
         });
 
         // Filtering
+        var FILTER_COLUMNS = [
+            {key: 'homeowner_name', label: 'Name', type: 'text'},
+            {key: 'phone_number', label: 'Phone', type: 'text'},
+            {key: 'address', label: 'Address', type: 'text'},
+            {key: 'city', label: 'City', type: 'text'},
+            {key: 'state', label: 'State', type: 'text'},
+            {key: 'source', label: 'Source', type: 'text'},
+            {key: 'tags', label: 'Tags', type: 'text'},
+            {key: 'appointment_type', label: 'Appt Type', type: 'select', options: [
+                {value: 'solar', label: 'Solar'}, {value: 'hvac', label: 'HVAC'}, {value: 'both', label: 'Both'}
+            ]},
+            {key: 'appointment_format', label: 'Appt Format', type: 'select', options: [
+                {value: 'in_person', label: 'In Person'}, {value: 'virtual', label: 'Virtual'}
+            ]},
+            {key: 'appointment_datetime', label: 'Appt Date', type: 'date'},
+            {key: 'rep_id', label: 'Rep', type: 'select', options: [
+                {% for rep in reps %}{value: '{{ rep.id }}', label: '{{ rep.name|escapejs }}'},{% endfor %}
+            ]},
+            {key: 'sat', label: 'Sit', type: 'select', options: [
+                {value: 'true', label: 'Sit'}, {value: 'false', label: 'No Sit'}
+            ]},
+            {key: 'disposition', label: 'Disposition', type: 'select', options: [
+                {value: 'sale', label: 'Sale'}, {value: 'no_sale', label: 'No Sale'},
+                {value: 'follow_up', label: 'Follow Up'}, {value: 'credit_fail', label: 'Credit Fail'},
+                {value: 'cancel_door', label: 'Cancel at Door'}, {value: 'cpfu', label: 'CPFU'},
+                {value: 'rep_no_show', label: 'Rep No Show'}, {value: 'no_coverage', label: 'No Coverage'},
+                {value: 'needs_reschedule', label: 'Needs Reschedule'}, {value: 'incomplete_deal', label: 'Incomplete Deal'},
+                {value: 'future_contact', label: 'Future Contact'}, {value: 'dq', label: 'DQ'}, {value: 'no_show', label: 'No Show'}
+            ]},
+            {key: 'follow_up_date', label: 'Follow Up Date', type: 'date'},
+            {key: 'call_notes', label: 'Call Notes', type: 'text'},
+            {key: 'call_transcript', label: 'Transcript', type: 'text'},
+        ];
+
+        var FILTER_CONDITIONS = {
+            text: [
+                {value: 'contains', label: 'contains'}, {value: 'not_contains', label: 'does not contain'},
+                {value: 'is', label: 'is'}, {value: 'is_not', label: 'is not'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ],
+            select: [
+                {value: 'is', label: 'is'}, {value: 'is_not', label: 'is not'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ],
+            date: [
+                {value: 'is', label: 'is'}, {value: 'before', label: 'is before'},
+                {value: 'after', label: 'is after'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ]
+        };
+
+        function toggleFilterPanel() {
+            var panel = document.getElementById('filter-panel');
+            var btn = document.getElementById('filter-toggle');
+            if (panel.style.display === 'none') {
+                panel.style.display = '';
+                btn.classList.add('active');
+                if (!document.getElementById('filter-rows').children.length) addFilterRow();
+            } else {
+                panel.style.display = 'none';
+                btn.classList.remove('active');
+            }
+        }
+
+        function addFilterRow() {
+            var container = document.getElementById('filter-rows');
+            var row = document.createElement('div');
+            row.className = 'filter-row';
+
+            var colSel = document.createElement('select');
+            colSel.className = 'filter-col';
+            colSel.innerHTML = '<option value="">Column...</option>';
+            FILTER_COLUMNS.forEach(function(c) {
+                colSel.innerHTML += '<option value="' + c.key + '">' + c.label + '</option>';
+            });
+            colSel.onchange = function() { onFilterColChange(this); };
+
+            var condSel = document.createElement('select');
+            condSel.className = 'filter-cond';
+            condSel.style.display = 'none';
+
+            var valWrap = document.createElement('div');
+            valWrap.className = 'filter-val-wrap';
+
+            var removeBtn = document.createElement('button');
+            removeBtn.className = 'filter-row-remove';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = function() { row.remove(); filterTable(); updateFilterCount(); };
+
+            row.appendChild(colSel);
+            row.appendChild(condSel);
+            row.appendChild(valWrap);
+            row.appendChild(removeBtn);
+            container.appendChild(row);
+            updateFilterCount();
+        }
+
+        function onFilterColChange(colSel) {
+            var row = colSel.closest('.filter-row');
+            var condSel = row.querySelector('.filter-cond');
+            var valWrap = row.querySelector('.filter-val-wrap');
+            condSel.innerHTML = '';
+            valWrap.innerHTML = '';
+
+            if (!colSel.value) { condSel.style.display = 'none'; filterTable(); return; }
+
+            var col = FILTER_COLUMNS.find(function(c) { return c.key === colSel.value; });
+            var conds = FILTER_CONDITIONS[col.type] || FILTER_CONDITIONS.text;
+            conds.forEach(function(c) {
+                condSel.innerHTML += '<option value="' + c.value + '">' + c.label + '</option>';
+            });
+            condSel.style.display = '';
+            condSel.onchange = function() { buildValueInput(row, col); filterTable(); };
+            buildValueInput(row, col);
+            filterTable();
+        }
+
+        function buildValueInput(row, col) {
+            var valWrap = row.querySelector('.filter-val-wrap');
+            var cond = row.querySelector('.filter-cond').value;
+            valWrap.innerHTML = '';
+            if (cond === 'is_empty' || cond === 'is_not_empty') return;
+
+            if (col.type === 'select' && col.options) {
+                var sel = document.createElement('select');
+                sel.innerHTML = '<option value="">Select...</option>';
+                col.options.forEach(function(o) {
+                    sel.innerHTML += '<option value="' + o.value + '">' + o.label + '</option>';
+                });
+                sel.onchange = function() { filterTable(); };
+                valWrap.appendChild(sel);
+            } else if (col.type === 'date') {
+                var inp = document.createElement('input');
+                inp.type = 'date';
+                inp.onchange = function() { filterTable(); };
+                valWrap.appendChild(inp);
+            } else {
+                var inp = document.createElement('input');
+                inp.type = 'text';
+                inp.placeholder = 'Value...';
+                inp.oninput = function() { filterTable(); };
+                valWrap.appendChild(inp);
+            }
+        }
+
+        function updateFilterCount() {
+            var btn = document.getElementById('filter-toggle');
+            var rows = document.getElementById('filter-rows').children;
+            var n = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var cs = rows[i].querySelector('.filter-col');
+                if (cs && cs.value) n++;
+            }
+            btn.textContent = n > 0 ? 'Filters (' + n + ')' : 'Filters';
+        }
+
+        function getRowFieldValue(row, key) {
+            if (key === 'tags') {
+                var pills = row.querySelector('.tag-pills');
+                return pills ? (pills.dataset.value || '') : '';
+            }
+            var el = row.querySelector('[data-field="' + key + '"]');
+            if (!el) return '';
+            if (el.tagName === 'SELECT') return el.value;
+            return el.value || '';
+        }
+
+        function checkCondition(cv, cond, fv, fieldType) {
+            if (fieldType === 'date') cv = (cv || '').substring(0, 10);
+            var cl = (cv || '').toLowerCase();
+            var fl = (fv || '').toLowerCase();
+            switch (cond) {
+                case 'contains': return cl.indexOf(fl) !== -1;
+                case 'not_contains': return cl.indexOf(fl) === -1;
+                case 'is': return cl === fl;
+                case 'is_not': return cl !== fl;
+                case 'is_empty': return cl === '';
+                case 'is_not_empty': return cl !== '';
+                case 'before': return cv && fv && cv < fv;
+                case 'after': return cv && fv && cv > fv;
+                default: return true;
+            }
+        }
+
         function filterTable() {
-            var fDate = document.getElementById('filter-date').value;
-            var fType = document.getElementById('filter-type').value;
-            var fFormat = document.getElementById('filter-format').value;
-            var fRep = document.getElementById('filter-rep').value;
-            var fStatus = document.getElementById('filter-status').value;
             var search = document.getElementById('search-input').value.toLowerCase().trim();
+            var filterRows = document.getElementById('filter-rows').children;
+
+            var filters = [];
+            for (var i = 0; i < filterRows.length; i++) {
+                var fr = filterRows[i];
+                var colKey = fr.querySelector('.filter-col').value;
+                if (!colKey) continue;
+                var cond = fr.querySelector('.filter-cond').value;
+                var valEl = fr.querySelector('.filter-val-wrap select, .filter-val-wrap input');
+                var val = valEl ? valEl.value : '';
+                var col = FILTER_COLUMNS.find(function(c) { return c.key === colKey; });
+                filters.push({key: colKey, cond: cond, val: val, type: col ? col.type : 'text'});
+            }
 
             document.querySelectorAll('tbody tr').forEach(function(row) {
-                if (!row.dataset.id) return; // skip empty row
+                if (!row.dataset.id) return;
                 var show = true;
 
-                // Search — check all text content in the row
                 if (search) {
                     var rowText = '';
-                    row.querySelectorAll('input[type="text"]').forEach(function(inp) { rowText += ' ' + inp.value; });
+                    row.querySelectorAll('input[type="text"], textarea').forEach(function(inp) { rowText += ' ' + inp.value; });
                     row.querySelectorAll('select').forEach(function(sel) {
                         var opt = sel.options[sel.selectedIndex];
                         if (opt) rowText += ' ' + opt.textContent;
@@ -474,64 +611,23 @@
                     if (rowText.toLowerCase().indexOf(search) === -1) show = false;
                 }
 
-                // Date filter — compare YYYY-MM-DD portion of datetime-local input
-                if (fDate) {
-                    var dtInput = row.querySelector('[data-field="appointment_datetime"]');
-                    var dtVal = dtInput ? dtInput.value : '';
-                    if (!dtVal || dtVal.substring(0, 10) !== fDate) show = false;
-                }
-
-                // Product type
-                if (fType) {
-                    var typeSelect = row.querySelector('[data-field="appointment_type"]');
-                    if (!typeSelect || typeSelect.value !== fType) show = false;
-                }
-
-                // Meeting type
-                if (fFormat) {
-                    var fmtSelect = row.querySelector('[data-field="appointment_format"]');
-                    if (!fmtSelect || fmtSelect.value !== fFormat) show = false;
-                }
-
-                // Rep
-                if (fRep) {
-                    var repSelect = row.querySelector('[data-field="rep_id"]');
-                    if (!repSelect || repSelect.value !== fRep) show = false;
-                }
-
-                // Status
-                if (fStatus) {
-                    var repSelect2 = row.querySelector('[data-field="rep_id"]');
-                    var repVal = repSelect2 ? repSelect2.value : '';
-                    if (fStatus === 'assigned' && !repVal) show = false;
-                    if (fStatus === 'unassigned' && repVal) show = false;
-                }
-
-                // Disposition
-                var fDispo = document.getElementById('filter-dispo').value;
-                if (fDispo) {
-                    var dispoSelect = row.querySelector('[data-field="disposition"]');
-                    var dispoVal = dispoSelect ? dispoSelect.value : '';
-                    if (fDispo === 'none') {
-                        if (dispoVal) show = false;
-                    } else {
-                        if (dispoVal !== fDispo) show = false;
-                    }
+                for (var i = 0; i < filters.length && show; i++) {
+                    var f = filters[i];
+                    var cv = getRowFieldValue(row, f.key);
+                    if (!checkCondition(cv, f.cond, f.val, f.type)) show = false;
                 }
 
                 row.style.display = show ? '' : 'none';
             });
+
+            updateFilterCount();
         }
 
         function clearFilters() {
             document.getElementById('search-input').value = '';
-            document.getElementById('filter-date').value = '';
-            document.getElementById('filter-type').value = '';
-            document.getElementById('filter-format').value = '';
-            document.getElementById('filter-rep').value = '';
-            document.getElementById('filter-status').value = '';
-            document.getElementById('filter-dispo').value = '';
+            document.getElementById('filter-rows').innerHTML = '';
             filterTable();
+            updateFilterCount();
         }
 
         // Bulk-editable fields

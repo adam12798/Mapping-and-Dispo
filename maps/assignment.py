@@ -81,8 +81,6 @@ def is_compatible(rep, lead):
         return False  # No type set — can't assign any rep
     if not rep.specialty or rep.specialty == 'both':
         return True
-    if lead.appointment_type == 'both':
-        return True
     return rep.specialty == lead.appointment_type
 
 
