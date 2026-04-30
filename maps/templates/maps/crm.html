@@ -583,9 +583,16 @@
             return el.value || '';
         }
 
+        function padDT(v, end) {
+            if (!v) return v;
+            if (v.length === 10) return v + (end ? 'T23:59' : 'T00:00');
+            return v;
+        }
+
         function checkCondition(cv, cond, fv, fieldType, fv2) {
             if (fieldType === 'date') cv = (cv || '').substring(0, 10);
-            if (fieldType === 'datetime' && cond === 'is') cv = (cv || '').substring(0, 10);
+            if (fieldType === 'datetime' && cond === 'is') { cv = (cv || '').substring(0, 10); fv = (fv || '').substring(0, 10); }
+            if (fieldType === 'datetime' && cond !== 'is') { fv = padDT(fv, false); fv2 = padDT(fv2, true); }
             var cl = (cv || '').toLowerCase();
             var fl = (fv || '').toLowerCase();
             switch (cond) {
