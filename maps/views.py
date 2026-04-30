@@ -576,6 +576,18 @@ def rep_create(request):
         geocode_address = f"{home_address}, {city}, MA"
     lat, lng = geocode(geocode_address) if home_address else (None, None)
     geocode_failed = bool(home_address and lat is None)
+    REP_PALETTE = [
+        '#2980b9', '#e74c3c', '#27ae60', '#8e44ad', '#f39c12',
+        '#1abc9c', '#e67e22', '#3498db', '#9b59b6', '#d35400',
+        '#16a085', '#c0392b', '#2ecc71', '#2c3e50', '#f1c40f',
+        '#7f8c8d', '#00bcd4', '#e91e63', '#4caf50', '#ff5722',
+    ]
+    if not data.get('color'):
+        used = set(Rep.objects.values_list('color', flat=True))
+        color = next((c for c in REP_PALETTE if c not in used), '#%06x' % (hash(data.get('name', '')) % 0xFFFFFF))
+    else:
+        color = data['color']
+
     rep = Rep.objects.create(
         name=data.get('name', ''),
         phone_number=data.get('phone_number', ''),
@@ -584,7 +596,7 @@ def rep_create(request):
         latitude=lat,
         longitude=lng,
         specialty=data.get('specialty', ''),
-        color=data.get('color', '#2980b9'),
+        color=color,
     )
     response = {'status': 'ok', 'id': rep.id}
     if geocode_failed:
