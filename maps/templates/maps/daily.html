@@ -715,6 +715,7 @@
                     if (checkedRows.length > 1) {
                         if (!confirm('Apply this change to all ' + checkedRows.length + ' selected leads?')) {
                             saveField(leadId, field, value, inputEl);
+                            filterTable();
                             return;
                         }
                         var ids = checkedRows.map(function(r) { return parseInt(r.dataset.id); });
@@ -740,11 +741,13 @@
                         }).then(function() {
                             showToast(ids.length + ' leads updated');
                             flashRows(checkedRows);
+                            filterTable();
                         });
                         return;
                     }
                 }
                 saveField(leadId, field, value, inputEl);
+                filterTable();
             });
         });
 

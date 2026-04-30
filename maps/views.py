@@ -1017,15 +1017,21 @@ def apply_chart_filter(qs, f):
     val2 = f.get('val2', '')
     if not key or not cond:
         return qs
-    if key == 'rep_id' and val and cond in ('is', 'is_not'):
-        try:
-            v = int(val)
-        except ValueError:
-            return qs
-        return qs.filter(rep_id=v) if cond == 'is' else qs.exclude(rep_id=v)
-    if key == 'sat' and val and cond in ('is', 'is_not'):
-        b = val == 'true'
-        return qs.filter(sat=b) if cond == 'is' else qs.exclude(sat=b)
+    if key in ('rep_id', 'sat'):
+        if cond == 'is_empty':
+            return qs.filter(**{f'{key}__isnull': True})
+        if cond == 'is_not_empty':
+            return qs.exclude(**{f'{key}__isnull': True})
+        if key == 'rep_id' and val and cond in ('is', 'is_not'):
+            try:
+                v = int(val)
+            except ValueError:
+                return qs
+            return qs.filter(rep_id=v) if cond == 'is' else qs.exclude(rep_id=v)
+        if key == 'sat' and val and cond in ('is', 'is_not'):
+            b = val == 'true'
+            return qs.filter(sat=b) if cond == 'is' else qs.exclude(sat=b)
+        return qs
     if key in ('appointment_datetime', 'follow_up_date'):
         if cond == 'is':
             return qs.filter(**{f'{key}__date': val})
