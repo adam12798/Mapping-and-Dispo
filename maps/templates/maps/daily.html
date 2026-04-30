@@ -412,36 +412,37 @@
         });
 
         var FILTER_COLUMNS = [
-            {key: 'homeowner_name', label: 'Name', type: 'text'},
-            {key: 'phone_number', label: 'Phone', type: 'text'},
             {key: 'address', label: 'Address', type: 'text'},
+            {key: 'call_notes', label: 'Call Notes', type: 'text'},
             {key: 'city', label: 'City', type: 'text'},
-            {key: 'state', label: 'State', type: 'text'},
-            {key: 'source', label: 'Source', type: 'text'},
-            {key: 'tags', label: 'Tags', type: 'text'},
-            {key: 'appointment_type', label: 'Appt Type', type: 'select', options: [
-                {value: 'solar', label: 'Solar'}, {value: 'hvac', label: 'HVAC'}, {value: 'both', label: 'Both'}
+            {key: 'appointment_datetime', label: 'Date & Time', type: 'text'},
+            {key: 'disposition', label: 'Disposition', type: 'select', options: [
+                {value: 'cancel_door', label: 'Cancel at Door'}, {value: 'cpfu', label: 'CPFU'},
+                {value: 'credit_fail', label: 'Credit Fail'}, {value: 'dq', label: 'DQ'},
+                {value: 'follow_up', label: 'Follow Up'}, {value: 'future_contact', label: 'Future Contact'},
+                {value: 'incomplete_deal', label: 'Incomplete Deal'}, {value: 'needs_reschedule', label: 'Needs Reschedule'},
+                {value: 'no_coverage', label: 'No Coverage'}, {value: 'no_sale', label: 'No Sale'},
+                {value: 'no_show', label: 'No Show'}, {value: 'rep_no_show', label: 'Rep No Show'},
+                {value: 'sale', label: 'Sale'}
             ]},
-            {key: 'appointment_format', label: 'Appt Format', type: 'select', options: [
+            {key: 'follow_up_date', label: 'Follow Up Date', type: 'date'},
+            {key: 'appointment_format', label: 'Format', type: 'select', options: [
                 {value: 'in_person', label: 'In Person'}, {value: 'virtual', label: 'Virtual'}
             ]},
-            {key: 'appointment_datetime', label: 'Appt Time', type: 'text'},
+            {key: 'homeowner_name', label: 'Name', type: 'text'},
+            {key: 'phone_number', label: 'Phone', type: 'text'},
+            {key: 'appointment_type', label: 'Product Type', type: 'select', options: [
+                {value: 'both', label: 'Both'}, {value: 'hvac', label: 'HVAC'}, {value: 'solar', label: 'Solar'}
+            ]},
             {key: 'rep_id', label: 'Rep', type: 'select', options: [
                 {% for rep in reps %}{value: '{{ rep.id }}', label: '{{ rep.name|escapejs }}'},{% endfor %}
             ]},
             {key: 'sat', label: 'Sit', type: 'select', options: [
-                {value: 'true', label: 'Sit'}, {value: 'false', label: 'No Sit'}
+                {value: 'false', label: 'No Sit'}, {value: 'true', label: 'Sit'}
             ]},
-            {key: 'disposition', label: 'Disposition', type: 'select', options: [
-                {value: 'sale', label: 'Sale'}, {value: 'no_sale', label: 'No Sale'},
-                {value: 'follow_up', label: 'Follow Up'}, {value: 'credit_fail', label: 'Credit Fail'},
-                {value: 'cancel_door', label: 'Cancel at Door'}, {value: 'cpfu', label: 'CPFU'},
-                {value: 'rep_no_show', label: 'Rep No Show'}, {value: 'no_coverage', label: 'No Coverage'},
-                {value: 'needs_reschedule', label: 'Needs Reschedule'}, {value: 'incomplete_deal', label: 'Incomplete Deal'},
-                {value: 'future_contact', label: 'Future Contact'}, {value: 'dq', label: 'DQ'}, {value: 'no_show', label: 'No Show'}
-            ]},
-            {key: 'follow_up_date', label: 'Follow Up Date', type: 'date'},
-            {key: 'call_notes', label: 'Call Notes', type: 'text'},
+            {key: 'source', label: 'Source', type: 'text'},
+            {key: 'state', label: 'State', type: 'text'},
+            {key: 'tags', label: 'Tags', type: 'text'},
             {key: 'call_transcript', label: 'Transcript', type: 'text'},
         ];
 
