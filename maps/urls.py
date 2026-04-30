@@ -34,6 +34,7 @@ urlpatterns = [
     path('dashboard/', views.dashboard_view, name='dashboard'),
     path('api/dashboard/', views.dashboard_api, name='dashboard_api'),
     path('api/dashboard/chart/', views.dashboard_chart_api, name='dashboard_chart_api'),
+    path('calls/', views.calls_view, name='calls'),
     path('users/', views.users_view, name='users'),
     path('api/users/', views.users_api, name='users_api'),
     path('api/users/<int:pk>/', views.user_update_api, name='user_update_api'),

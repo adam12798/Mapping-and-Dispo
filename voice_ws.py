@@ -34,7 +34,24 @@ RESPONSE RULES:
 - Do NOT stack questions. Ask one question, wait for the answer, then ask the next.
 - Do NOT combine a confirmation with a follow-up question in the same response. Confirm first, wait, then ask.
 
-Reps call you to talk about their schedule, appointments, availability, or anything work-related. Help them with whatever they need.
+IMPORTANT: You have NO access to cameras, GPS, location data, contacts, or any device features on the caller's phone. You are a voice-only assistant that receives audio from a phone call. NEVER claim or imply you can see, watch, or access anything on the caller's device.
+
+After greeting the rep, your FIRST question must be: "Are you calling about an appointment, or would you like to request some time off?"
+
+## Time Off Flow
+If the rep says they want to request time off, follow this flow. NEVER ask about leads, dispositions, or appointment outcomes during this flow.
+- Ask what date(s) they need off. They might say a single day, a date range ("next Monday through Friday"), or indefinite ("I need time off starting next week, not sure when I'll be back").
+- For single day: confirm the date.
+- For a range: confirm start and end dates.
+- For indefinite: confirm the start date and note it as ongoing.
+- Ask if it's a full day or specific hours. If specific hours, get start and end times.
+- Ask for a brief reason (optional — don't push if they don't want to share).
+- Confirm the details back and let them know their manager will be notified.
+- Use the create_time_off_request tool to submit it.
+- After submitting, ask if there's anything else. Do NOT transition into appointment debriefs unless they ask.
+
+## Appointment Flow
+If the rep says they're calling about an appointment, proceed with the debrief flow below.
 
 Reps can view their schedule and ask questions about appointments, but they CANNOT change, cancel, reschedule, or modify appointments. If a rep asks to change an appointment, politely let them know they'll need to talk to their manager for that.
 
@@ -89,13 +106,6 @@ If they DID sit:
 - After updating, if the rep has another appointment the same day, remind them of the time and drive time (if available). Example: "Right then, you've got the Smiths at 3 PM — about 25 minutes from here."
 
 Your appointment list includes past appointments from today so reps can debrief them, but do NOT proactively mention or remind reps about appointments that have already passed. Only mention upcoming appointments when discussing their schedule. If a rep asks "what's on my schedule?", only tell them about future appointments.
-
-Do NOT bring up time off unless the rep mentions it first. If they do request time off:
-- Confirm the date(s) they want off
-- Ask if it's a full day or specific hours
-- If specific hours, get start and end times
-- Ask for a brief reason (optional)
-- Confirm the details back to them
 
 Appointments are typically assigned around 7:30 PM EST the night before. If a rep asks when they'll get their schedule, let them know.
 
@@ -172,6 +182,43 @@ DISPOSITION_TOOL = {
 }
 
 
+TIME_OFF_TOOL = {
+    'type': 'function',
+    'name': 'create_time_off_request',
+    'description': 'Submit a time off request for the rep. Only call this after confirming the details with the rep.',
+    'parameters': {
+        'type': 'object',
+        'properties': {
+            'start_date': {
+                'type': 'string',
+                'description': 'Start date in YYYY-MM-DD format.',
+            },
+            'end_date': {
+                'type': 'string',
+                'description': 'End date in YYYY-MM-DD format. Same as start_date for a single day. Omit or set null for indefinite.',
+            },
+            'all_day': {
+                'type': 'boolean',
+                'description': 'True for a full day off, false for specific hours.',
+            },
+            'start_time': {
+                'type': 'string',
+                'description': 'Start time in HH:MM 24h format. Only required if all_day is false.',
+            },
+            'end_time': {
+                'type': 'string',
+                'description': 'End time in HH:MM 24h format. Only required if all_day is false.',
+            },
+            'reason': {
+                'type': 'string',
+                'description': 'Brief reason for time off. Optional.',
+            },
+        },
+        'required': ['start_date', 'all_day'],
+    },
+}
+
+
 MANAGER_UPDATE_TOOL = {
     'type': 'function',
     'name': 'update_lead',
@@ -239,6 +286,7 @@ async def get_rep_context(caller_number):
     django.setup()
 
     from asgiref.sync import sync_to_async
+    from django.db.models import Q
     from maps.models import Rep, Lead, TimeOffRequest, Manager
     from datetime import date, datetime, timedelta
 
@@ -321,10 +369,11 @@ async def get_rep_context(caller_number):
     time_off = await sync_to_async(list)(
         TimeOffRequest.objects.filter(
             rep=rep,
-            date__gte=today,
-            date__lte=today + timedelta(days=3),
+            start_date__lte=today + timedelta(days=3),
             status='approved',
-        ).order_by('date')
+        ).filter(
+            Q(end_date__gte=today) | Q(end_date__isnull=True)
+        ).order_by('start_date')
     )
 
     lines = [f'You are speaking with {rep.name}.']
@@ -362,7 +411,12 @@ async def get_rep_context(caller_number):
                 time_str = f'{t.start_time:%I:%M %p} - {t.end_time:%I:%M %p}'
             else:
                 time_str = 'All Day'
-            lines.append(f"- {t.date:%a %m/%d}: {time_str}")
+            if t.end_date and t.end_date != t.start_date:
+                lines.append(f"- {t.start_date:%a %m/%d} to {t.end_date:%a %m/%d}: {time_str}")
+            elif not t.end_date:
+                lines.append(f"- {t.start_date:%a %m/%d} onwards: {time_str}")
+            else:
+                lines.append(f"- {t.start_date:%a %m/%d}: {time_str}")
 
     return {
         'rep': rep,
@@ -581,6 +635,65 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
 
         return {'success': True, 'message': f"Updated {lead.homeowner_name}: {', '.join(changes)}"}
 
+    if fn_name == 'create_time_off_request':
+        if not rep:
+            return {'success': False, 'error': 'Could not identify rep'}
+
+        from maps.models import TimeOffRequest
+        from maps.views import notify_managers_time_off
+        from datetime import datetime
+
+        start_date_str = fn_args.get('start_date', '')
+        end_date_str = fn_args.get('end_date', '')
+        all_day = fn_args.get('all_day', True)
+
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return {'success': False, 'error': 'Invalid start date format. Use YYYY-MM-DD.'}
+
+        end_date = start_date
+        if end_date_str:
+            try:
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                end_date = start_date
+        elif not end_date_str and 'end_date' in fn_args and fn_args['end_date'] is None:
+            end_date = None
+
+        start_time = None
+        end_time = None
+        if not all_day:
+            from datetime import time as dt_time
+            try:
+                sh, sm = map(int, fn_args.get('start_time', '').split(':'))
+                eh, em = map(int, fn_args.get('end_time', '').split(':'))
+                start_time = dt_time(sh, sm)
+                end_time = dt_time(eh, em)
+            except (ValueError, AttributeError):
+                return {'success': False, 'error': 'Invalid time format. Use HH:MM.'}
+
+        tor = await sync_to_async(TimeOffRequest.objects.create)(
+            rep=rep,
+            start_date=start_date,
+            end_date=end_date,
+            start_time=start_time,
+            end_time=end_time,
+            reason=fn_args.get('reason', ''),
+            status='pending',
+        )
+
+        await sync_to_async(notify_managers_time_off)(tor)
+
+        if end_date and end_date != start_date:
+            date_desc = f'{start_date:%m/%d/%Y} to {end_date:%m/%d/%Y}'
+        elif not end_date:
+            date_desc = f'{start_date:%m/%d/%Y} onwards'
+        else:
+            date_desc = f'{start_date:%m/%d/%Y}'
+
+        return {'success': True, 'message': f'Time off request submitted for {date_desc}. Manager will be notified.'}
+
     return {'success': False, 'error': f'Unknown function: {fn_name}'}
 
 
@@ -713,7 +826,7 @@ async def media_stream(ws: WebSocket):
                             if is_manager_call:
                                 enriched_session['tools'] = [MANAGER_UPDATE_TOOL]
                             elif rep_context.get('rep'):
-                                enriched_session['tools'] = [DISPOSITION_TOOL]
+                                enriched_session['tools'] = [DISPOSITION_TOOL, TIME_OFF_TOOL]
 
                             logger.info('Sending enriched session config...')
                             await openai_ws.send(json.dumps({
@@ -945,9 +1058,13 @@ Return ONLY the JSON array, no other text."""},
                 start_time = dt_time(sh, sm)
                 end_time = dt_time(eh, em)
 
+            end_date_str = req.get('end_date')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else req_date
+
             await sync_to_async(TimeOffRequest.objects.create)(
                 rep=rep,
-                date=req_date,
+                start_date=req_date,
+                end_date=end_date,
                 start_time=start_time,
                 end_time=end_time,
                 reason=req.get('reason', ''),

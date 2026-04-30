@@ -237,7 +237,13 @@
                         <span class="timeoff-status {{ req.status }}">{{ req.status }}</span>
                     </div>
                     <div class="timeoff-details">
-                        <span>{{ req.date|date:"l, M d Y" }}</span>
+                        {% if req.end_date and req.end_date != req.start_date %}
+                            <span>{{ req.start_date|date:"l, M d Y" }} — {{ req.end_date|date:"l, M d Y" }}</span>
+                        {% elif not req.end_date %}
+                            <span>{{ req.start_date|date:"l, M d Y" }} onwards</span>
+                        {% else %}
+                            <span>{{ req.start_date|date:"l, M d Y" }}</span>
+                        {% endif %}
                         {% if req.start_time %}
                             <span>{{ req.start_time|time:"g:i A" }} — {{ req.end_time|time:"g:i A" }}</span>
                         {% else %}
@@ -294,8 +300,15 @@
                 </select>
             </div>
             <div class="modal-field">
-                <label>Date</label>
+                <label>Start Date</label>
                 <input type="date" id="modal-date" />
+            </div>
+            <div class="modal-field">
+                <label>End Date <span style="font-weight:400;color:#666;font-size:11px;">(leave blank for single day, or "indefinite")</span></label>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <input type="date" id="modal-end-date" />
+                    <label style="margin:0;font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="modal-indefinite" onchange="document.getElementById('modal-end-date').disabled=this.checked;"> Indefinite</label>
+                </div>
             </div>
             <div class="modal-field">
                 <div class="checkbox-row">
@@ -362,12 +375,15 @@
         }
 
         function submitRequest() {
+            var isIndefinite = document.getElementById('modal-indefinite').checked;
+            var endDate = isIndefinite ? 'indefinite' : (document.getElementById('modal-end-date').value || '');
             var data = {
                 rep_id: document.getElementById('modal-rep').value,
                 date: document.getElementById('modal-date').value,
+                end_date: endDate,
                 reason: document.getElementById('modal-reason').value,
             };
-            if (!data.date) { alert('Please select a date'); return; }
+            if (!data.date) { alert('Please select a start date'); return; }
             if (!document.getElementById('modal-allday').checked) {
                 data.start_time = document.getElementById('modal-start').value || null;
                 data.end_time = document.getElementById('modal-end').value || null;

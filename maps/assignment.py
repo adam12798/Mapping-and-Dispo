@@ -49,11 +49,14 @@ def get_rep_time_off(rep_id, target_date):
     Returns list of (start_datetime, end_datetime) tuples.
     Full day off returns a block covering the entire work window.
     """
+    from django.db.models import Q
     blocks = []
     requests = TimeOffRequest.objects.filter(
         rep_id=rep_id,
-        date=target_date,
+        start_date__lte=target_date,
         status='approved',
+    ).filter(
+        Q(end_date__gte=target_date) | Q(end_date__isnull=True)
     )
     for req in requests:
         if req.start_time and req.end_time:

@@ -18,9 +18,10 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from django.conf import settings
+from django.db.models import Q
 
 from .assignment import auto_assign_leads
-from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage
+from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog
 
 
 def manager_required(view_func):
@@ -142,9 +143,15 @@ def notify_managers_time_off(time_off_request):
     tor = time_off_request
     time_str = 'All Day' if not tor.start_time else f'{tor.start_time:%I:%M %p} - {tor.end_time:%I:%M %p}'
     reason_str = f' — {tor.reason}' if tor.reason else ''
+    if tor.end_date and tor.end_date != tor.start_date:
+        date_str = f'{tor.start_date:%m/%d/%Y} to {tor.end_date:%m/%d/%Y}'
+    elif not tor.end_date:
+        date_str = f'{tor.start_date:%m/%d/%Y} onwards (indefinite)'
+    else:
+        date_str = f'{tor.start_date:%m/%d/%Y}'
     body = (
         f'Time Off Request #{tor.id}\n'
-        f'{tor.rep.name} requests {tor.date:%m/%d/%Y} {time_str}{reason_str}\n\n'
+        f'{tor.rep.name} requests {date_str} {time_str}{reason_str}\n\n'
         f'Reply "APPROVE {tor.id}" or "DENY {tor.id}"'
     )
     for manager in Manager.objects.all():
@@ -493,7 +500,12 @@ def time_off_by_date_api(request):
     except ValueError:
         return JsonResponse({'error': 'Invalid date'}, status=400)
 
-    reqs = TimeOffRequest.objects.filter(date=target_date, status='approved').select_related('rep')
+    reqs = TimeOffRequest.objects.filter(
+        start_date__lte=target_date,
+        status='approved',
+    ).filter(
+        Q(end_date__gte=target_date) | Q(end_date__isnull=True)
+    ).select_related('rep')
     data = []
     for r in reqs:
         data.append({
@@ -517,9 +529,11 @@ def time_off_api(request):
     rep = get_object_or_404(Rep, pk=data['rep_id'])
     start_time = data.get('start_time') or None
     end_time = data.get('end_time') or None
+    end_date = data.get('end_date') or data['date']
     TimeOffRequest.objects.create(
         rep=rep,
-        date=data['date'],
+        start_date=data['date'],
+        end_date=end_date if end_date != 'indefinite' else None,
         start_time=start_time,
         end_time=end_time,
         reason=data.get('reason', ''),
@@ -543,7 +557,12 @@ def time_off_update(request, pk):
     if 'reason' in data:
         tor.reason = data['reason']
     if 'date' in data:
-        tor.date = data['date']
+        tor.start_date = data['date']
+    if 'start_date' in data:
+        tor.start_date = data['start_date']
+    if 'end_date' in data:
+        v = data['end_date']
+        tor.end_date = None if v == 'indefinite' or v == '' else v
     if 'start_time' in data:
         tor.start_time = data['start_time'] or None
     if 'end_time' in data:
@@ -1507,6 +1526,30 @@ def parse_time_off_request(body, rep):
 
 
 @manager_required
+def calls_view(request):
+    reps = Rep.objects.filter(is_active=True).order_by('name')
+    logs = VoiceCallLog.objects.select_related('rep').order_by('-created_at')
+
+    rep_filter = request.GET.get('rep')
+    if rep_filter:
+        logs = logs.filter(rep_id=rep_filter)
+    date_filter = request.GET.get('date')
+    if date_filter:
+        logs = logs.filter(created_at__date=date_filter)
+    search = request.GET.get('q', '').strip()
+    if search:
+        logs = logs.filter(
+            Q(transcript__icontains=search) | Q(summary__icontains=search)
+        )
+
+    logs = logs[:200]
+    return render(request, 'maps/calls.html', {
+        'logs': logs, 'reps': reps, 'active_tab': 'calls',
+        'selected_rep': rep_filter or '', 'selected_date': date_filter or '', 'search_q': search,
+    })
+
+
+@manager_required
 def users_view(request):
     reps = list(Rep.objects.order_by('name').values('id', 'name'))
     import json as json_mod
@@ -1685,7 +1728,8 @@ def sms_webhook(request):
                         lines = [f'Multiple pending requests. Reply with the ID:']
                         for p in pending:
                             time_str = 'All Day' if not p.start_time else f'{p.start_time:%I:%M %p}-{p.end_time:%I:%M %p}'
-                            lines.append(f'  #{p.id} — {p.rep.name} {p.date:%m/%d/%Y} {time_str}')
+                            date_str = f'{p.start_date:%m/%d/%Y}' if not p.end_date or p.end_date == p.start_date else f'{p.start_date:%m/%d/%Y}-{p.end_date:%m/%d/%Y}'
+                        lines.append(f'  #{p.id} — {p.rep.name} {date_str} {time_str}')
                         send_sms(from_number, '\n'.join(lines))
                     else:
                         send_sms(from_number, 'No pending time off requests.')
@@ -1694,9 +1738,10 @@ def sms_webhook(request):
                     new_status = 'approved' if is_approve else 'denied'
                     tor.status = new_status
                     tor.save(update_fields=['status'])
-                    send_sms(from_number, f'{tor.rep.name} time off {tor.date:%m/%d/%Y} has been {new_status}.')
+                    date_str = f'{tor.start_date:%m/%d/%Y}' if not tor.end_date or tor.end_date == tor.start_date else f'{tor.start_date:%m/%d/%Y} to {tor.end_date:%m/%d/%Y}'
+                    send_sms(from_number, f'{tor.rep.name} time off {date_str} has been {new_status}.')
                     if tor.rep.phone_number:
-                        send_sms(tor.rep.phone_number, f'Your time off request for {tor.date:%m/%d/%Y} has been {new_status}.')
+                        send_sms(tor.rep.phone_number, f'Your time off request for {date_str} has been {new_status}.')
 
                 return HttpResponse(
                     '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
@@ -1770,7 +1815,8 @@ def sms_webhook(request):
             for req_date, start_t, end_t, reason in time_off:
                 tor = TimeOffRequest.objects.create(
                     rep=rep,
-                    date=req_date,
+                    start_date=req_date,
+                    end_date=req_date,
                     start_time=start_t,
                     end_time=end_t,
                     reason=reason,

@@ -94,7 +94,8 @@ class TimeOffRequest(models.Model):
     ]
 
     rep = models.ForeignKey(Rep, on_delete=models.CASCADE, related_name='time_off_requests')
-    date = models.DateField()
+    start_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
     start_time = models.TimeField(null=True, blank=True)  # null = full day off
     end_time = models.TimeField(null=True, blank=True)
     reason = models.CharField(max_length=500, blank=True)
@@ -104,7 +105,11 @@ class TimeOffRequest(models.Model):
 
     def __str__(self):
         time_str = 'All Day' if not self.start_time else f'{self.start_time:%I:%M %p} - {self.end_time:%I:%M %p}'
-        return f"{self.rep.name} — {self.date:%m/%d/%Y} {time_str} ({self.status})"
+        if self.end_date and self.end_date != self.start_date:
+            return f"{self.rep.name} — {self.start_date:%m/%d/%Y} to {self.end_date:%m/%d/%Y} {time_str} ({self.status})"
+        elif not self.end_date:
+            return f"{self.rep.name} — {self.start_date:%m/%d/%Y} onwards {time_str} ({self.status})"
+        return f"{self.rep.name} — {self.start_date:%m/%d/%Y} {time_str} ({self.status})"
 
 
 class VoiceCallLog(models.Model):

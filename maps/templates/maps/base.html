@@ -25,6 +25,7 @@
         <a href="{% url 'reps' %}" class="nav-tab {% if active_tab == 'reps' %}active{% endif %}">Reps</a>
         <a href="{% url 'time_off' %}" class="nav-tab {% if active_tab == 'time_off' %}active{% endif %}">Time Off</a>
         <a href="{% url 'dashboard' %}" class="nav-tab {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
+        <a href="{% url 'calls' %}" class="nav-tab {% if active_tab == 'calls' %}active{% endif %}">Calls</a>
         <a href="{% url 'users' %}" class="nav-tab {% if active_tab == 'users' %}active{% endif %}">Users</a>
         {% endif %}
         <div style="margin-left:auto;display:flex;align-items:center;gap:12px;font-family:'Montserrat',sans-serif;">
@@ -51,7 +52,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
             Stats
         </a>
-        <a href="#" onclick="toggleMoreMenu(event)" class="{% if active_tab == 'reps' or active_tab == 'time_off' or active_tab == 'users' %}active{% endif %}">
+        <a href="#" onclick="toggleMoreMenu(event)" class="{% if active_tab == 'reps' or active_tab == 'time_off' or active_tab == 'calls' or active_tab == 'users' %}active{% endif %}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
             More
         </a>
@@ -63,6 +64,10 @@
             <a href="/time-off/" class="{% if active_tab == 'time_off' %}active{% endif %}">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 Time Off
+            </a>
+            <a href="/calls/" class="{% if active_tab == 'calls' %}active{% endif %}">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                Calls
             </a>
             <a href="/users/" class="{% if active_tab == 'users' %}active{% endif %}">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
