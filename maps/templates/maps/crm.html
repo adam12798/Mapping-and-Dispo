@@ -401,7 +401,7 @@
             {key: 'address', label: 'Address', type: 'text'},
             {key: 'call_notes', label: 'Call Notes', type: 'text'},
             {key: 'city', label: 'City', type: 'text'},
-            {key: 'appointment_datetime', label: 'Date & Time', type: 'date'},
+            {key: 'appointment_datetime', label: 'Date & Time', type: 'datetime'},
             {key: 'disposition', label: 'Disposition', type: 'select', options: [
                 {value: 'cancel_door', label: 'Cancel at Door'}, {value: 'cpfu', label: 'CPFU'},
                 {value: 'credit_fail', label: 'Credit Fail'}, {value: 'dq', label: 'DQ'},
@@ -443,8 +443,13 @@
                 {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
             ],
             date: [
-                {value: 'is', label: 'is'}, {value: 'before', label: 'is before'},
-                {value: 'after', label: 'is after'},
+                {value: 'is', label: 'is'}, {value: 'between', label: 'is between'},
+                {value: 'before', label: 'is before'}, {value: 'after', label: 'is after'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ],
+            datetime: [
+                {value: 'is', label: 'is (date)'}, {value: 'between', label: 'is between'},
+                {value: 'before', label: 'is before'}, {value: 'after', label: 'is after'},
                 {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
             ]
         };
@@ -529,11 +534,24 @@
                 });
                 sel.onchange = function() { filterTable(); };
                 valWrap.appendChild(sel);
-            } else if (col.type === 'date') {
+            } else if (col.type === 'date' || col.type === 'datetime') {
+                var inputType = col.type === 'datetime' ? 'datetime-local' : 'date';
                 var inp = document.createElement('input');
-                inp.type = 'date';
+                inp.type = inputType;
+                inp.className = 'filter-date-from';
                 inp.onchange = function() { filterTable(); };
                 valWrap.appendChild(inp);
+                if (cond === 'between') {
+                    var span = document.createElement('span');
+                    span.textContent = ' and ';
+                    span.style.cssText = 'font-size:12px;color:#3d5a80;';
+                    valWrap.appendChild(span);
+                    var inp2 = document.createElement('input');
+                    inp2.type = inputType;
+                    inp2.className = 'filter-date-to';
+                    inp2.onchange = function() { filterTable(); };
+                    valWrap.appendChild(inp2);
+                }
             } else {
                 var inp = document.createElement('input');
                 inp.type = 'text';
@@ -565,8 +583,9 @@
             return el.value || '';
         }
 
-        function checkCondition(cv, cond, fv, fieldType) {
+        function checkCondition(cv, cond, fv, fieldType, fv2) {
             if (fieldType === 'date') cv = (cv || '').substring(0, 10);
+            if (fieldType === 'datetime' && cond === 'is') cv = (cv || '').substring(0, 10);
             var cl = (cv || '').toLowerCase();
             var fl = (fv || '').toLowerCase();
             switch (cond) {
@@ -578,6 +597,7 @@
                 case 'is_not_empty': return cl !== '';
                 case 'before': return cv && fv && cv < fv;
                 case 'after': return cv && fv && cv > fv;
+                case 'between': return cv && fv && fv2 && cv >= fv && cv <= fv2;
                 default: return true;
             }
         }
@@ -594,8 +614,13 @@
                 var cond = fr.querySelector('.filter-cond').value;
                 var valEl = fr.querySelector('.filter-val-wrap select, .filter-val-wrap input');
                 var val = valEl ? valEl.value : '';
+                var val2 = '';
+                if (cond === 'between') {
+                    var toEl = fr.querySelector('.filter-date-to');
+                    val2 = toEl ? toEl.value : '';
+                }
                 var col = FILTER_COLUMNS.find(function(c) { return c.key === colKey; });
-                filters.push({key: colKey, cond: cond, val: val, type: col ? col.type : 'text'});
+                filters.push({key: colKey, cond: cond, val: val, val2: val2, type: col ? col.type : 'text'});
             }
 
             document.querySelectorAll('tbody tr').forEach(function(row) {
@@ -615,7 +640,7 @@
                 for (var i = 0; i < filters.length && show; i++) {
                     var f = filters[i];
                     var cv = getRowFieldValue(row, f.key);
-                    if (!checkCondition(cv, f.cond, f.val, f.type)) show = false;
+                    if (!checkCondition(cv, f.cond, f.val, f.type, f.val2)) show = false;
                 }
 
                 row.style.display = show ? '' : 'none';
