@@ -45,13 +45,13 @@
                 <h2>Daily Appointments</h2>
                 <button id="bulk-delete-btn" class="delete-btn bulk-delete" style="display:none;" onclick="bulkDelete()">Delete Selected</button>
             </div>
-            <div class="crm-search" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <div style="display:flex;align-items:center;gap:4px;">
-                    <button onclick="cycleDay(-1)" style="background:#3d5a80;color:#fff;border:none;border-radius:4px;width:32px;height:32px;cursor:pointer;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;">&lsaquo;</button>
-                    <input type="date" id="date-picker" value="{{ selected_date }}" onchange="changeDate(this.value)">
-                    <button onclick="cycleDay(1)" style="background:#3d5a80;color:#fff;border:none;border-radius:4px;width:32px;height:32px;cursor:pointer;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;">&rsaquo;</button>
-                </div>
-                <input type="text" id="search-input" placeholder="Search appointments..." oninput="filterTable()" style="flex:1;min-width:150px;">
+            <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;">
+                <button onclick="cycleDay(-1)" style="background:#3d5a80;color:#fff;border:none;border-radius:4px;width:32px;height:32px;cursor:pointer;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;">&lsaquo;</button>
+                <input type="date" id="date-picker" value="{{ selected_date }}" onchange="changeDate(this.value)">
+                <button onclick="cycleDay(1)" style="background:#3d5a80;color:#fff;border:none;border-radius:4px;width:32px;height:32px;cursor:pointer;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;">&rsaquo;</button>
+            </div>
+            <div class="crm-search">
+                <input type="text" id="search-input" placeholder="Search appointments..." oninput="filterTable()">
                 <button class="filter-toggle-btn" id="filter-toggle" onclick="toggleFilterPanel()">Filters</button>
             </div>
             <div class="crm-filters" id="filter-panel" style="display:none;">
