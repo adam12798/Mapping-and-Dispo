@@ -3,6 +3,33 @@
 
 {% block title %}Dashboard{% endblock %}
 
+{% block head_extra %}
+<style>
+    .widget-header { display:flex;justify-content:space-between;align-items:center;margin-bottom:8px; }
+    .widget-title { font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;color:#293241;border:none;background:transparent;padding:4px 0;width:100%; }
+    .widget-title:hover { background:#e0fbfc;border-radius:4px;padding:4px 6px; }
+    .widget-title:focus { outline:none;background:#e0fbfc;border-radius:4px;padding:4px 6px; }
+    .widget-controls { display:flex;gap:4px;flex-shrink:0; }
+    .widget-config-btn,.widget-delete-btn { background:none;border:1px solid #98c1d9;border-radius:4px;padding:4px 6px;cursor:pointer;color:#3d5a80;display:flex;align-items:center; }
+    .widget-config-btn:hover { background:#e0fbfc; }
+    .widget-delete-btn:hover { background:#ee6c4d;color:#fff;border-color:#ee6c4d; }
+    .widget-config { background:#f8fbfd;border:1px solid #e0fbfc;border-radius:6px;padding:12px;margin-bottom:10px; }
+    .widget-config-grid { display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px; }
+    .widget-config-field { display:flex;flex-direction:column;gap:2px; }
+    .widget-config-field label { font-family:'Montserrat',sans-serif;font-size:10px;font-weight:600;color:#3d5a80;text-transform:uppercase; }
+    .widget-config-field select { font-family:'Montserrat',sans-serif;font-size:12px;padding:5px 8px;border:1px solid #98c1d9;border-radius:4px;background:#fff; }
+    .widget-filters { border-top:1px solid #e0fbfc;padding-top:8px; }
+    .widget-filters .filter-row { margin-bottom:6px; }
+    .widget-chart-wrap { position:relative;height:280px; }
+    .dashboard-date-range { display:flex;align-items:center;gap:8px; }
+    .dashboard-date-range label { font-family:'Montserrat',sans-serif;font-size:11px;font-weight:600;color:#3d5a80; }
+    .dashboard-date-range input { font-family:'Montserrat',sans-serif;font-size:12px;padding:5px 8px;border:1px solid #98c1d9;border-radius:4px; }
+    .dashboard-controls { display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px; }
+    #add-widget-btn { font-size:13px;padding:7px 16px;border:1px dashed #98c1d9;border-radius:6px;background:transparent;color:#3d5a80;cursor:pointer;font-family:'Montserrat',sans-serif;font-weight:600; }
+    #add-widget-btn:hover { background:#e0fbfc;border-style:solid; }
+</style>
+{% endblock %}
+
 {% block content %}
     <div class="dashboard-container">
         <div class="dashboard-toolbar">
@@ -14,177 +41,414 @@
                     <span>Conv. Rate: <strong id="kpi-rate">—</strong></span>
                 </div>
             </div>
-            <div class="crm-filters">
-                <div class="filter-group">
+            <div class="dashboard-controls">
+                <div class="dashboard-date-range">
                     <label>From</label>
-                    <input type="date" id="filter-start" onchange="fetchData()">
-                </div>
-                <div class="filter-group">
+                    <input type="date" id="global-start" onchange="refreshAll()">
                     <label>To</label>
-                    <input type="date" id="filter-end" onchange="fetchData()">
+                    <input type="date" id="global-end" onchange="refreshAll()">
                 </div>
-                <div class="filter-group">
-                    <label>Rep</label>
-                    <select id="filter-rep" onchange="fetchData()">
-                        <option value="">All Reps</option>
-                        {% for rep in reps %}
-                        <option value="{{ rep.id }}">{{ rep.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Group By</label>
-                    <select id="filter-group-by" onchange="fetchData()">
-                        <option value="">None</option>
-                        <option value="rep">Rep</option>
-                        <option value="product">Product Type</option>
-                    </select>
-                </div>
-                <button class="filter-clear" onclick="resetFilters()">Clear</button>
+                <button id="add-widget-btn" onclick="addWidget()">+ Add Chart</button>
             </div>
         </div>
-
-        <div class="dashboard-grid">
-            <div class="chart-card">
-                <h3>Appointments by Disposition</h3>
-                <canvas id="chart-dispo"></canvas>
-            </div>
-            <div class="chart-card">
-                <h3>Appointments by Rep</h3>
-                <canvas id="chart-rep"></canvas>
-            </div>
-            <div class="chart-card">
-                <h3>Conversion Rate by Rep</h3>
-                <canvas id="chart-conversion"></canvas>
-            </div>
-            <div class="chart-card">
-                <h3>Appointments by Product Type</h3>
-                <canvas id="chart-product"></canvas>
-            </div>
-        </div>
+        <div class="dashboard-grid" id="widget-grid"></div>
     </div>
 {% endblock %}
 
 {% block scripts %}
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
-        let chartDispo = null;
-        let chartRep = null;
-        let chartConversion = null;
-        let chartProduct = null;
+        var widgets = [];
+        var widgetCounter = 0;
+        var chartInstances = {};
 
-        function fetchData() {
-            const params = new URLSearchParams();
-            const start = document.getElementById('filter-start').value;
-            const end = document.getElementById('filter-end').value;
-            const rep = document.getElementById('filter-rep').value;
-            const groupBy = document.getElementById('filter-group-by').value;
+        var GROUP_BY_OPTIONS = [
+            {value: 'city', label: 'City'},
+            {value: 'disposition', label: 'Disposition'},
+            {value: 'appointment_format', label: 'Format'},
+            {value: 'appointment_type', label: 'Product Type'},
+            {value: 'rep_id', label: 'Rep'},
+            {value: 'sat', label: 'Sit'},
+            {value: 'source', label: 'Source'},
+            {value: 'state', label: 'State'},
+        ];
 
-            if (start) params.set('start', start);
-            if (end) params.set('end', end);
-            if (rep) params.set('rep_ids', rep);
-            if (groupBy) params.set('group_by', groupBy);
+        var CHART_TYPES = [
+            {value: 'bar', label: 'Bar'},
+            {value: 'bar_h', label: 'Horizontal Bar'},
+            {value: 'doughnut', label: 'Doughnut'},
+            {value: 'pie', label: 'Pie'},
+            {value: 'line', label: 'Line'},
+        ];
+
+        var FILTER_COLUMNS = [
+            {key: 'address', label: 'Address', type: 'text'},
+            {key: 'call_notes', label: 'Call Notes', type: 'text'},
+            {key: 'city', label: 'City', type: 'text'},
+            {key: 'appointment_datetime', label: 'Date & Time', type: 'datetime'},
+            {key: 'disposition', label: 'Disposition', type: 'select', options: [
+                {value: 'cancel_door', label: 'Cancel at Door'}, {value: 'cpfu', label: 'CPFU'},
+                {value: 'credit_fail', label: 'Credit Fail'}, {value: 'dq', label: 'DQ'},
+                {value: 'follow_up', label: 'Follow Up'}, {value: 'future_contact', label: 'Future Contact'},
+                {value: 'incomplete_deal', label: 'Incomplete Deal'}, {value: 'needs_reschedule', label: 'Needs Reschedule'},
+                {value: 'no_coverage', label: 'No Coverage'}, {value: 'no_sale', label: 'No Sale'},
+                {value: 'no_show', label: 'No Show'}, {value: 'rep_no_show', label: 'Rep No Show'},
+                {value: 'sale', label: 'Sale'}
+            ]},
+            {key: 'follow_up_date', label: 'Follow Up Date', type: 'date'},
+            {key: 'appointment_format', label: 'Format', type: 'select', options: [
+                {value: 'in_person', label: 'In Person'}, {value: 'virtual', label: 'Virtual'}
+            ]},
+            {key: 'homeowner_name', label: 'Name', type: 'text'},
+            {key: 'phone_number', label: 'Phone', type: 'text'},
+            {key: 'appointment_type', label: 'Product Type', type: 'select', options: [
+                {value: 'both', label: 'Both'}, {value: 'hvac', label: 'HVAC'}, {value: 'solar', label: 'Solar'}
+            ]},
+            {key: 'rep_id', label: 'Rep', type: 'select', options: [
+                {% for rep in reps %}{value: '{{ rep.id }}', label: '{{ rep.name|escapejs }}'},{% endfor %}
+            ]},
+            {key: 'sat', label: 'Sit', type: 'select', options: [
+                {value: 'false', label: 'No Sit'}, {value: 'true', label: 'Sit'}
+            ]},
+            {key: 'source', label: 'Source', type: 'text'},
+            {key: 'state', label: 'State', type: 'text'},
+            {key: 'tags', label: 'Tags', type: 'text'},
+            {key: 'call_transcript', label: 'Transcript', type: 'text'},
+        ];
+
+        var FILTER_CONDITIONS = {
+            text: [
+                {value: 'contains', label: 'contains'}, {value: 'not_contains', label: 'does not contain'},
+                {value: 'is', label: 'is'}, {value: 'is_not', label: 'is not'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ],
+            select: [
+                {value: 'is', label: 'is'}, {value: 'is_not', label: 'is not'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ],
+            date: [
+                {value: 'is', label: 'is'}, {value: 'between', label: 'is between'},
+                {value: 'before', label: 'is before'}, {value: 'after', label: 'is after'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ],
+            datetime: [
+                {value: 'is', label: 'is (date)'}, {value: 'between', label: 'is between'},
+                {value: 'before', label: 'is before'}, {value: 'after', label: 'is after'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ]
+        };
+
+        var DEFAULT_WIDGETS = [
+            {title: 'Appointments by Disposition', chartType: 'bar_h', groupBy: 'disposition', metric: 'count', filters: []},
+            {title: 'Appointments by Rep', chartType: 'bar', groupBy: 'rep_id', metric: 'count', filters: []},
+            {title: 'Conversion Rate by Rep', chartType: 'bar', groupBy: 'rep_id', metric: 'conversion_rate', filters: []},
+            {title: 'Appointments by Product Type', chartType: 'doughnut', groupBy: 'appointment_type', metric: 'count', filters: []},
+        ];
+
+        function saveWidgets() {
+            var configs = widgets.map(function(w) {
+                return {title: w.title, chartType: w.chartType, groupBy: w.groupBy, metric: w.metric, filters: w.filters};
+            });
+            localStorage.setItem('dashboard_widgets', JSON.stringify(configs));
+        }
+
+        function loadWidgets() {
+            var saved = localStorage.getItem('dashboard_widgets');
+            var configs = saved ? JSON.parse(saved) : DEFAULT_WIDGETS;
+            configs.forEach(function(c) { addWidget(c); });
+        }
+
+        function addWidget(config) {
+            widgetCounter++;
+            var w = {
+                id: widgetCounter,
+                title: (config && config.title) || 'New Chart',
+                chartType: (config && config.chartType) || 'bar',
+                groupBy: (config && config.groupBy) || 'disposition',
+                metric: (config && config.metric) || 'count',
+                filters: (config && config.filters) || [],
+            };
+            widgets.push(w);
+            renderWidget(w);
+            refreshWidget(w.id);
+            saveWidgets();
+        }
+
+        function renderWidget(w) {
+            var grid = document.getElementById('widget-grid');
+            var card = document.createElement('div');
+            card.className = 'chart-card';
+            card.dataset.widgetId = w.id;
+
+            var chartTypeOpts = CHART_TYPES.map(function(t) {
+                return '<option value="' + t.value + '"' + (t.value === w.chartType ? ' selected' : '') + '>' + t.label + '</option>';
+            }).join('');
+            var groupByOpts = GROUP_BY_OPTIONS.map(function(g) {
+                return '<option value="' + g.value + '"' + (g.value === w.groupBy ? ' selected' : '') + '>' + g.label + '</option>';
+            }).join('');
+
+            card.innerHTML =
+                '<div class="widget-header">' +
+                    '<input class="widget-title" value="' + w.title.replace(/"/g, '&quot;') + '" onchange="updateWidgetTitle(' + w.id + ', this.value)">' +
+                    '<div class="widget-controls">' +
+                        '<button class="widget-config-btn" onclick="toggleConfig(' + w.id + ')" title="Configure"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>' +
+                        '<button class="widget-delete-btn" onclick="deleteWidget(' + w.id + ')"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="widget-config" id="config-' + w.id + '" style="display:none;">' +
+                    '<div class="widget-config-grid">' +
+                        '<div class="widget-config-field"><label>Chart Type</label><select onchange="updateWidgetField(' + w.id + ',\'chartType\',this.value)">' + chartTypeOpts + '</select></div>' +
+                        '<div class="widget-config-field"><label>Group By</label><select onchange="updateWidgetField(' + w.id + ',\'groupBy\',this.value)">' + groupByOpts + '</select></div>' +
+                        '<div class="widget-config-field"><label>Metric</label><select onchange="updateWidgetField(' + w.id + ',\'metric\',this.value)"><option value="count"' + (w.metric === 'count' ? ' selected' : '') + '>Count</option><option value="conversion_rate"' + (w.metric === 'conversion_rate' ? ' selected' : '') + '>Conversion Rate</option></select></div>' +
+                    '</div>' +
+                    '<div class="widget-filters">' +
+                        '<div class="widget-filter-rows" id="wf-rows-' + w.id + '"></div>' +
+                        '<button class="filter-add-btn" onclick="addWidgetFilter(' + w.id + ')">+ Add Filter</button>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="widget-chart-wrap"><canvas id="canvas-' + w.id + '"></canvas></div>';
+
+            grid.appendChild(card);
+        }
+
+        function toggleConfig(id) {
+            var el = document.getElementById('config-' + id);
+            el.style.display = el.style.display === 'none' ? '' : 'none';
+        }
+
+        function updateWidgetTitle(id, title) {
+            var w = widgets.find(function(x) { return x.id === id; });
+            if (w) { w.title = title; saveWidgets(); }
+        }
+
+        function updateWidgetField(id, field, value) {
+            var w = widgets.find(function(x) { return x.id === id; });
+            if (w) { w[field] = value; saveWidgets(); refreshWidget(id); }
+        }
+
+        function deleteWidget(id) {
+            widgets = widgets.filter(function(x) { return x.id !== id; });
+            if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+            var card = document.querySelector('[data-widget-id="' + id + '"]');
+            if (card) card.remove();
+            saveWidgets();
+            updateKPIs();
+        }
+
+        function addWidgetFilter(wid) {
+            var container = document.getElementById('wf-rows-' + wid);
+            var row = document.createElement('div');
+            row.className = 'filter-row';
+
+            var colSel = document.createElement('select');
+            colSel.className = 'filter-col';
+            colSel.innerHTML = '<option value="">Column...</option>';
+            FILTER_COLUMNS.forEach(function(c) {
+                colSel.innerHTML += '<option value="' + c.key + '">' + c.label + '</option>';
+            });
+            colSel.onchange = function() { onWFilterColChange(wid, this); };
+
+            var condSel = document.createElement('select');
+            condSel.className = 'filter-cond';
+            condSel.style.display = 'none';
+
+            var valWrap = document.createElement('div');
+            valWrap.className = 'filter-val-wrap';
+
+            var removeBtn = document.createElement('button');
+            removeBtn.className = 'filter-row-remove';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = function() { row.remove(); syncWidgetFilters(wid); refreshWidget(wid); };
+
+            row.appendChild(colSel);
+            row.appendChild(condSel);
+            row.appendChild(valWrap);
+            row.appendChild(removeBtn);
+            container.appendChild(row);
+        }
+
+        function onWFilterColChange(wid, colSel) {
+            var row = colSel.closest('.filter-row');
+            var condSel = row.querySelector('.filter-cond');
+            var valWrap = row.querySelector('.filter-val-wrap');
+            condSel.innerHTML = '';
+            valWrap.innerHTML = '';
+
+            if (!colSel.value) { condSel.style.display = 'none'; syncWidgetFilters(wid); refreshWidget(wid); return; }
+
+            var col = FILTER_COLUMNS.find(function(c) { return c.key === colSel.value; });
+            var conds = FILTER_CONDITIONS[col.type] || FILTER_CONDITIONS.text;
+            conds.forEach(function(c) {
+                condSel.innerHTML += '<option value="' + c.value + '">' + c.label + '</option>';
+            });
+            condSel.style.display = '';
+            condSel.onchange = function() { buildWFilterVal(wid, row, col); syncWidgetFilters(wid); refreshWidget(wid); };
+            buildWFilterVal(wid, row, col);
+            syncWidgetFilters(wid);
+            refreshWidget(wid);
+        }
+
+        function buildWFilterVal(wid, row, col) {
+            var valWrap = row.querySelector('.filter-val-wrap');
+            var cond = row.querySelector('.filter-cond').value;
+            valWrap.innerHTML = '';
+            if (cond === 'is_empty' || cond === 'is_not_empty') return;
+
+            var onChange = function() { syncWidgetFilters(wid); refreshWidget(wid); };
+
+            if (col.type === 'select' && col.options) {
+                var sel = document.createElement('select');
+                sel.innerHTML = '<option value="">Select...</option>';
+                col.options.forEach(function(o) {
+                    sel.innerHTML += '<option value="' + o.value + '">' + o.label + '</option>';
+                });
+                sel.onchange = onChange;
+                valWrap.appendChild(sel);
+            } else if (col.type === 'date' || col.type === 'datetime') {
+                var inputType = col.type === 'datetime' ? 'datetime-local' : 'date';
+                var inp = document.createElement('input');
+                inp.type = inputType;
+                inp.className = 'filter-date-from';
+                inp.onchange = onChange;
+                valWrap.appendChild(inp);
+                if (cond === 'between') {
+                    var span = document.createElement('span');
+                    span.textContent = ' and ';
+                    span.style.cssText = 'font-size:12px;color:#3d5a80;';
+                    valWrap.appendChild(span);
+                    var inp2 = document.createElement('input');
+                    inp2.type = inputType;
+                    inp2.className = 'filter-date-to';
+                    inp2.onchange = onChange;
+                    valWrap.appendChild(inp2);
+                }
+            } else {
+                var inp = document.createElement('input');
+                inp.type = 'text';
+                inp.placeholder = 'Value...';
+                inp.oninput = onChange;
+                valWrap.appendChild(inp);
+            }
+        }
+
+        function syncWidgetFilters(wid) {
+            var w = widgets.find(function(x) { return x.id === wid; });
+            if (!w) return;
+            var rows = document.getElementById('wf-rows-' + wid).children;
+            w.filters = [];
+            for (var i = 0; i < rows.length; i++) {
+                var fr = rows[i];
+                var colKey = fr.querySelector('.filter-col').value;
+                if (!colKey) continue;
+                var cond = fr.querySelector('.filter-cond').value;
+                var valEl = fr.querySelector('.filter-val-wrap select, .filter-val-wrap input');
+                var val = valEl ? valEl.value : '';
+                var val2 = '';
+                if (cond === 'between') {
+                    var toEl = fr.querySelector('.filter-date-to');
+                    val2 = toEl ? toEl.value : '';
+                }
+                w.filters.push({key: colKey, cond: cond, val: val, val2: val2});
+            }
+            saveWidgets();
+        }
+
+        function refreshWidget(id) {
+            var w = widgets.find(function(x) { return x.id === id; });
+            if (!w) return;
+
+            var params = new URLSearchParams();
+            params.set('group_by', w.groupBy);
+            params.set('metric', w.metric);
+            var gs = document.getElementById('global-start').value;
+            var ge = document.getElementById('global-end').value;
+            if (gs) params.set('start', gs);
+            if (ge) params.set('end', ge);
+            if (w.filters.length) params.set('filters', JSON.stringify(w.filters));
+
+            fetch('/api/dashboard/chart/?' + params.toString())
+                .then(function(r) { return r.json(); })
+                .then(function(data) { renderWidgetChart(w, data); })
+                .catch(function(err) { console.error('Widget fetch error:', err); });
+        }
+
+        function renderWidgetChart(w, data) {
+            if (chartInstances[w.id]) { chartInstances[w.id].destroy(); }
+
+            var canvas = document.getElementById('canvas-' + w.id);
+            if (!canvas) return;
+
+            var isHorizontal = w.chartType === 'bar_h';
+            var chartType = isHorizontal ? 'bar' : w.chartType;
+            var fontFamily = "'Montserrat', sans-serif";
+            var gridColor = '#e0fbfc';
+            var textColor = '#293241';
+
+            var isPercent = w.metric === 'conversion_rate';
+            var chartData = {
+                labels: data.labels,
+                datasets: [{
+                    label: isPercent ? 'Sale %' : 'Count',
+                    data: data.values,
+                    backgroundColor: data.colors,
+                    borderColor: (chartType === 'line') ? data.colors[0] : undefined,
+                    borderWidth: (chartType === 'line') ? 2 : undefined,
+                    fill: (chartType === 'line') ? false : undefined,
+                }]
+            };
+
+            var options = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: (chartType === 'doughnut' || chartType === 'pie'),
+                        position: 'bottom',
+                        labels: { font: { family: fontFamily, size: 11 }, color: textColor, padding: 12 }
+                    },
+                },
+            };
+
+            if (chartType === 'bar' || chartType === 'line') {
+                options.indexAxis = isHorizontal ? 'y' : 'x';
+                var xAxis = { grid: { display: isHorizontal, color: gridColor }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } };
+                var yAxis = { grid: { display: !isHorizontal, color: gridColor }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } };
+                if (isPercent) {
+                    var pctAxis = isHorizontal ? xAxis : yAxis;
+                    pctAxis.min = 0;
+                    pctAxis.max = 100;
+                    pctAxis.ticks.callback = function(v) { return v + '%'; };
+                    options.plugins.tooltip = { callbacks: { label: function(ctx) { return (isHorizontal ? ctx.parsed.x : ctx.parsed.y) + '%'; } } };
+                }
+                options.scales = { x: xAxis, y: yAxis };
+            }
+
+            chartInstances[w.id] = new Chart(canvas, { type: chartType, data: chartData, options: options });
+        }
+
+        function refreshAll() {
+            updateKPIs();
+            widgets.forEach(function(w) { refreshWidget(w.id); });
+        }
+
+        function updateKPIs() {
+            var params = new URLSearchParams();
+            var gs = document.getElementById('global-start').value;
+            var ge = document.getElementById('global-end').value;
+            if (gs) params.set('start', gs);
+            if (ge) params.set('end', ge);
 
             fetch('/api/dashboard/?' + params.toString())
-                .then(r => r.json())
-                .then(data => renderCharts(data))
-                .catch(err => console.error('Dashboard fetch error:', err));
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    document.getElementById('kpi-total').textContent = data.summary.total;
+                    document.getElementById('kpi-sales').textContent = data.summary.total_sales;
+                    document.getElementById('kpi-rate').textContent = data.summary.conversion_rate + '%';
+                })
+                .catch(function() {});
         }
 
-        function renderCharts(data) {
-            // Update KPIs
-            document.getElementById('kpi-total').textContent = data.summary.total;
-            document.getElementById('kpi-sales').textContent = data.summary.total_sales;
-            document.getElementById('kpi-rate').textContent = data.summary.conversion_rate + '%';
-
-            // Destroy existing charts
-            if (chartDispo) chartDispo.destroy();
-            if (chartRep) chartRep.destroy();
-            if (chartConversion) chartConversion.destroy();
-            if (chartProduct) chartProduct.destroy();
-
-            const fontFamily = "'Montserrat', sans-serif";
-            const gridColor = '#e0fbfc';
-            const textColor = '#293241';
-
-            // Disposition chart
-            chartDispo = new Chart(document.getElementById('chart-dispo'), {
-                type: 'bar',
-                data: data.by_disposition,
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: data.by_disposition.datasets.length > 1, labels: { font: { family: fontFamily, size: 11 }, color: textColor } },
-                    },
-                    scales: {
-                        x: { grid: { color: gridColor }, ticks: { font: { family: fontFamily }, color: textColor } },
-                        y: { grid: { display: false }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } },
-                    },
-                },
-            });
-
-            // By rep chart
-            chartRep = new Chart(document.getElementById('chart-rep'), {
-                type: 'bar',
-                data: data.by_rep,
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                    },
-                    scales: {
-                        x: { grid: { display: false }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } },
-                        y: { grid: { color: gridColor }, ticks: { font: { family: fontFamily }, color: textColor } },
-                    },
-                },
-            });
-
-            // Conversion chart
-            chartConversion = new Chart(document.getElementById('chart-conversion'), {
-                type: 'bar',
-                data: data.conversion_by_rep,
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: { label: function(ctx) { return ctx.parsed.y + '%'; } },
-                        },
-                    },
-                    scales: {
-                        x: { grid: { display: false }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } },
-                        y: { min: 0, max: 100, grid: { color: gridColor }, ticks: { font: { family: fontFamily }, color: textColor, callback: function(v) { return v + '%'; } } },
-                    },
-                },
-            });
-
-            // Product type chart (doughnut)
-            chartProduct = new Chart(document.getElementById('chart-product'), {
-                type: 'doughnut',
-                data: data.by_product,
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'bottom', labels: { font: { family: fontFamily, size: 12 }, color: textColor, padding: 16 } },
-                    },
-                },
-            });
-        }
-
-        function resetFilters() {
-            document.getElementById('filter-start').value = '';
-            document.getElementById('filter-end').value = '';
-            document.getElementById('filter-rep').value = '';
-            document.getElementById('filter-group-by').value = '';
-            fetchData();
-        }
-
-        // Load on page ready
-        fetchData();
+        loadWidgets();
+        updateKPIs();
     </script>
 {% endblock %}

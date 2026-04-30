@@ -1010,6 +1010,126 @@ def dashboard_api(request):
     })
 
 
+def apply_chart_filter(qs, f):
+    key = f.get('key', '')
+    cond = f.get('cond', '')
+    val = f.get('val', '')
+    val2 = f.get('val2', '')
+    if not key or not cond:
+        return qs
+    if key == 'rep_id' and val and cond in ('is', 'is_not'):
+        try:
+            v = int(val)
+        except ValueError:
+            return qs
+        return qs.filter(rep_id=v) if cond == 'is' else qs.exclude(rep_id=v)
+    if key == 'sat' and val and cond in ('is', 'is_not'):
+        b = val == 'true'
+        return qs.filter(sat=b) if cond == 'is' else qs.exclude(sat=b)
+    if key in ('appointment_datetime', 'follow_up_date'):
+        if cond == 'is':
+            return qs.filter(**{f'{key}__date': val})
+        if cond == 'before':
+            return qs.filter(**{f'{key}__lt': val})
+        if cond == 'after':
+            return qs.filter(**{f'{key}__gt': val})
+        if cond == 'between' and val2:
+            return qs.filter(**{f'{key}__gte': val, f'{key}__lte': val2})
+        if cond == 'is_empty':
+            return qs.filter(**{f'{key}__isnull': True})
+        if cond == 'is_not_empty':
+            return qs.exclude(**{f'{key}__isnull': True})
+        return qs
+    if cond == 'is':
+        return qs.filter(**{f'{key}__iexact': val})
+    if cond == 'is_not':
+        return qs.exclude(**{f'{key}__iexact': val})
+    if cond == 'contains':
+        return qs.filter(**{f'{key}__icontains': val})
+    if cond == 'not_contains':
+        return qs.exclude(**{f'{key}__icontains': val})
+    if cond == 'is_empty':
+        return qs.filter(Q(**{key: ''}) | Q(**{f'{key}__isnull': True}))
+    if cond == 'is_not_empty':
+        return qs.exclude(Q(**{key: ''}) | Q(**{f'{key}__isnull': True}))
+    return qs
+
+
+@manager_required
+def dashboard_chart_api(request):
+    from django.db.models import Count, Q
+
+    group_by = request.GET.get('group_by', 'disposition')
+    start = request.GET.get('start', '')
+    end = request.GET.get('end', '')
+    metric = request.GET.get('metric', 'count')
+    filters_raw = request.GET.get('filters', '[]')
+
+    qs = Lead.objects.select_related('rep')
+    if start:
+        qs = qs.filter(appointment_datetime__date__gte=start)
+    if end:
+        qs = qs.filter(appointment_datetime__date__lte=end)
+    try:
+        for f in json.loads(filters_raw):
+            qs = apply_chart_filter(qs, f)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    LABEL_MAPS = {
+        'disposition': DISPO_NAMES,
+        'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
+        'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
+        'sat': {'True': 'Sit', 'False': 'No Sit'},
+    }
+    COLOR_MAPS = {
+        'disposition': {
+            'sale': '#27ae60', 'no_sale': '#8e44ad', 'follow_up': '#e67e22',
+            'credit_fail': '#e91e63', 'cancel_door': '#95a5a6', 'cpfu': '#00bcd4',
+            'rep_no_show': '#2c3e50', 'no_coverage': '#c0392b', 'needs_reschedule': '#3498db',
+            'incomplete_deal': '#d4a017', 'future_contact': '#1abc9c', 'dq': '#8B4513', 'no_show': '#800000',
+        },
+        'appointment_type': {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'},
+        'sat': {'True': '#2ecc40', 'False': '#cc0000'},
+    }
+    PALETTE = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22',
+               '#34495e', '#d35400', '#16a085', '#c0392b', '#8e44ad', '#27ae60', '#2980b9', '#f1c40f']
+
+    if group_by == 'rep_id':
+        if metric == 'conversion_rate':
+            rows = list(qs.filter(rep__isnull=False).values('rep__name', 'rep__color').annotate(
+                total=Count('id'), sales=Count('id', filter=Q(disposition='sale'))).order_by('rep__name'))
+            labels = [r['rep__name'] for r in rows]
+            values = [round(r['sales'] / r['total'] * 100, 1) if r['total'] else 0 for r in rows]
+            colors = [r['rep__color'] or '#98c1d9' for r in rows]
+        else:
+            rows = list(qs.filter(rep__isnull=False).values('rep__name', 'rep__color').annotate(
+                count=Count('id')).order_by('-count'))
+            labels = [r['rep__name'] for r in rows]
+            values = [r['count'] for r in rows]
+            colors = [r['rep__color'] or '#98c1d9' for r in rows]
+    else:
+        rows = list(qs.values(group_by).annotate(count=Count('id')).order_by('-count'))
+        label_map = LABEL_MAPS.get(group_by, {})
+        color_map = COLOR_MAPS.get(group_by, {})
+        labels, values, raw_keys = [], [], []
+        for r in rows:
+            raw = r[group_by]
+            raw_str = str(raw) if raw not in (None, '') else ''
+            labels.append(label_map.get(raw_str, raw_str) if raw_str else '(empty)')
+            raw_keys.append(raw_str)
+            values.append(r['count'])
+        colors = [color_map.get(k, PALETTE[i % len(PALETTE)]) for i, k in enumerate(raw_keys)] if color_map else [PALETTE[i % len(PALETTE)] for i in range(len(labels))]
+
+    total = sum(values)
+    sales_count = qs.filter(disposition='sale').count()
+    return JsonResponse({
+        'labels': labels, 'values': values, 'colors': colors,
+        'total': total, 'sales': sales_count,
+        'conversion_rate': round(sales_count / total * 100, 1) if total else 0,
+    })
+
+
 def parse_sms_fields(body):
     """Parse structured SMS line by line, matching 'label: value' patterns."""
     # Strip unsubscribe footers
