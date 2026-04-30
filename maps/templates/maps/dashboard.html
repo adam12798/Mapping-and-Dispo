@@ -10,17 +10,26 @@
     .widget-title:hover { background:#e0fbfc;border-radius:4px;padding:4px 6px; }
     .widget-title:focus { outline:none;background:#e0fbfc;border-radius:4px;padding:4px 6px; }
     .widget-controls { display:flex;gap:4px;flex-shrink:0; }
-    .widget-config-btn,.widget-delete-btn { background:none;border:1px solid #98c1d9;border-radius:4px;padding:4px 6px;cursor:pointer;color:#3d5a80;display:flex;align-items:center; }
-    .widget-config-btn:hover { background:#e0fbfc; }
-    .widget-delete-btn:hover { background:#ee6c4d;color:#fff;border-color:#ee6c4d; }
+    .widget-filter-btn { background:none;border:1px solid #98c1d9;border-radius:4px;padding:4px 10px;cursor:pointer;color:#3d5a80;font-family:'Montserrat',sans-serif;font-size:11px;font-weight:600; }
+    .widget-filter-btn:hover { background:#e0fbfc; }
+    .widget-filter-btn.active { background:#3d5a80;color:#fff;border-color:#3d5a80; }
+    .widget-burger-wrap { position:relative; }
+    .widget-burger-btn { background:none;border:1px solid #98c1d9;border-radius:4px;padding:4px 6px;cursor:pointer;color:#3d5a80;display:flex;align-items:center; }
+    .widget-burger-btn:hover { background:#e0fbfc; }
+    .widget-burger-menu { display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid #98c1d9;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:20;min-width:140px;overflow:hidden; }
+    .widget-burger-menu.open { display:block; }
+    .widget-burger-item { display:flex;align-items:center;gap:8px;padding:8px 14px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:500;color:#293241;cursor:pointer;border:none;background:none;width:100%;text-align:left; }
+    .widget-burger-item:hover { background:#e0fbfc; }
+    .widget-burger-item.danger { color:#ee6c4d; }
+    .widget-burger-item.danger:hover { background:#fef0ec; }
     .chart-card { position:relative; }
     .widget-config { background:#f8fbfd;border:1px solid #e0fbfc;border-radius:6px;padding:12px;position:absolute;top:40px;left:0;right:0;z-index:10;box-shadow:0 4px 16px rgba(0,0,0,0.12); }
     .widget-config-grid { display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px; }
     .widget-config-field { display:flex;flex-direction:column;gap:2px; }
     .widget-config-field label { font-family:'Montserrat',sans-serif;font-size:10px;font-weight:600;color:#3d5a80;text-transform:uppercase; }
     .widget-config-field select { font-family:'Montserrat',sans-serif;font-size:12px;padding:5px 8px;border:1px solid #98c1d9;border-radius:4px;background:#fff; }
-    .widget-filters { border-top:1px solid #e0fbfc;padding-top:8px; }
-    .widget-filters .filter-row { margin-bottom:6px; }
+    .widget-filter-panel { background:#f8fbfd;border:1px solid #e0fbfc;border-radius:6px;padding:12px;position:absolute;top:40px;left:0;right:0;z-index:10;box-shadow:0 4px 16px rgba(0,0,0,0.12); }
+    .widget-filter-panel .filter-row { margin-bottom:6px; }
     .widget-chart-wrap { position:relative;height:280px; }
     .dashboard-date-range { display:flex;align-items:center;gap:8px; }
     .dashboard-date-range label { font-family:'Montserrat',sans-serif;font-size:11px;font-weight:600;color:#3d5a80; }
@@ -28,6 +37,10 @@
     .dashboard-controls { display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px; }
     #add-widget-btn { font-size:13px;padding:7px 16px;border:1px dashed #98c1d9;border-radius:6px;background:transparent;color:#3d5a80;cursor:pointer;font-family:'Montserrat',sans-serif;font-weight:600; }
     #add-widget-btn:hover { background:#e0fbfc;border-style:solid; }
+    .undo-banner { position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px;background:#293241;color:#fff;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:500;animation:undoSlide .3s ease; }
+    .undo-banner button { background:#ee6c4d;color:#fff;border:none;border-radius:4px;padding:6px 16px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;cursor:pointer; }
+    .undo-banner button:hover { background:#d85a3d; }
+    @keyframes undoSlide { from { transform:translateY(-100%); } to { transform:translateY(0); } }
 </style>
 {% endblock %}
 
@@ -192,8 +205,14 @@
                 '<div class="widget-header">' +
                     '<input class="widget-title" value="' + w.title.replace(/"/g, '&quot;') + '" onchange="updateWidgetTitle(' + w.id + ', this.value)">' +
                     '<div class="widget-controls">' +
-                        '<button class="widget-config-btn" onclick="toggleConfig(' + w.id + ')" title="Configure"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>' +
-                        '<button class="widget-delete-btn" onclick="deleteWidget(' + w.id + ')"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button>' +
+                        '<button class="widget-filter-btn" onclick="toggleFilterPanel(' + w.id + ', this)">Filter</button>' +
+                        '<div class="widget-burger-wrap">' +
+                            '<button class="widget-burger-btn" onclick="toggleBurger(' + w.id + ', this)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg></button>' +
+                            '<div class="widget-burger-menu" id="burger-' + w.id + '">' +
+                                '<button class="widget-burger-item" onclick="openSettings(' + w.id + ');closeBurger(' + w.id + ')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg> Settings</button>' +
+                                '<button class="widget-burger-item danger" onclick="deleteWidget(' + w.id + ');closeBurger(' + w.id + ')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg> Delete</button>' +
+                            '</div>' +
+                        '</div>' +
                     '</div>' +
                 '</div>' +
                 '<div class="widget-config" id="config-' + w.id + '" style="display:none;">' +
@@ -202,19 +221,38 @@
                         '<div class="widget-config-field"><label>Group By</label><select onchange="updateWidgetField(' + w.id + ',\'groupBy\',this.value)">' + groupByOpts + '</select></div>' +
                         '<div class="widget-config-field"><label>Metric</label><select onchange="updateWidgetField(' + w.id + ',\'metric\',this.value)"><option value="count"' + (w.metric === 'count' ? ' selected' : '') + '>Count</option><option value="conversion_rate"' + (w.metric === 'conversion_rate' ? ' selected' : '') + '>Conversion Rate</option></select></div>' +
                     '</div>' +
-                    '<div class="widget-filters">' +
-                        '<div class="widget-filter-rows" id="wf-rows-' + w.id + '"></div>' +
-                        '<button class="filter-add-btn" onclick="addWidgetFilter(' + w.id + ')">+ Add Filter</button>' +
-                    '</div>' +
+                '</div>' +
+                '<div class="widget-filter-panel" id="fpanel-' + w.id + '" style="display:none;">' +
+                    '<div class="widget-filter-rows" id="wf-rows-' + w.id + '"></div>' +
+                    '<button class="filter-add-btn" onclick="addWidgetFilter(' + w.id + ')">+ Add Filter</button>' +
                 '</div>' +
                 '<div class="widget-chart-wrap"><canvas id="canvas-' + w.id + '"></canvas></div>';
 
             grid.appendChild(card);
         }
 
-        function toggleConfig(id) {
+        function toggleFilterPanel(id, btn) {
+            var el = document.getElementById('fpanel-' + id);
+            var showing = el.style.display === 'none';
+            el.style.display = showing ? '' : 'none';
+            if (btn) btn.classList.toggle('active', showing);
+        }
+
+        function openSettings(id) {
             var el = document.getElementById('config-' + id);
             el.style.display = el.style.display === 'none' ? '' : 'none';
+        }
+
+        function toggleBurger(id, btn) {
+            var menu = document.getElementById('burger-' + id);
+            var isOpen = menu.classList.contains('open');
+            document.querySelectorAll('.widget-burger-menu.open').forEach(function(m) { m.classList.remove('open'); });
+            if (!isOpen) menu.classList.add('open');
+        }
+
+        function closeBurger(id) {
+            var menu = document.getElementById('burger-' + id);
+            if (menu) menu.classList.remove('open');
         }
 
         function updateWidgetTitle(id, title) {
@@ -227,13 +265,48 @@
             if (w) { w[field] = value; saveWidgets(); refreshWidget(id); }
         }
 
+        var undoTimer = null;
+
         function deleteWidget(id) {
+            var w = widgets.find(function(x) { return x.id === id; });
+            if (!w) return;
+            var deletedConfig = {title: w.title, chartType: w.chartType, groupBy: w.groupBy, metric: w.metric, filters: w.filters.slice()};
+
             widgets = widgets.filter(function(x) { return x.id !== id; });
             if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
             var card = document.querySelector('[data-widget-id="' + id + '"]');
             if (card) card.remove();
             saveWidgets();
             updateKPIs();
+
+            showUndoBanner(deletedConfig);
+        }
+
+        function showUndoBanner(config) {
+            var existing = document.querySelector('.undo-banner');
+            if (existing) existing.remove();
+            if (undoTimer) clearTimeout(undoTimer);
+
+            var banner = document.createElement('div');
+            banner.className = 'undo-banner';
+            banner.innerHTML = '<span>Chart deleted</span><button onclick="undoDelete()">Undo</button>';
+            banner._deletedConfig = config;
+            document.body.appendChild(banner);
+
+            undoTimer = setTimeout(function() {
+                var b = document.querySelector('.undo-banner');
+                if (b) b.remove();
+                undoTimer = null;
+            }, 5000);
+        }
+
+        function undoDelete() {
+            var banner = document.querySelector('.undo-banner');
+            if (!banner || !banner._deletedConfig) return;
+            var config = banner._deletedConfig;
+            banner.remove();
+            if (undoTimer) { clearTimeout(undoTimer); undoTimer = null; }
+            addWidget(config);
         }
 
         function addWidgetFilter(wid) {
@@ -448,6 +521,12 @@
                 })
                 .catch(function() {});
         }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.widget-burger-wrap')) {
+                document.querySelectorAll('.widget-burger-menu.open').forEach(function(m) { m.classList.remove('open'); });
+            }
+        });
 
         loadWidgets();
         updateKPIs();
