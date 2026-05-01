@@ -71,7 +71,10 @@
 
 {% block scripts %}
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
     <script>
+        Chart.register(ChartDataLabels);
+
         var widgets = [];
         var widgetCounter = 0;
         var chartInstances = {};
@@ -471,14 +474,26 @@
                 }]
             };
 
+            var isDoughnutOrPie = (chartType === 'doughnut' || chartType === 'pie');
             var options = {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
                     legend: {
-                        display: (chartType === 'doughnut' || chartType === 'pie'),
+                        display: isDoughnutOrPie,
                         position: 'bottom',
                         labels: { font: { family: fontFamily, size: 11 }, color: textColor, padding: 12 }
+                    },
+                    datalabels: {
+                        color: isDoughnutOrPie ? '#fff' : textColor,
+                        font: { family: fontFamily, size: 11, weight: '600' },
+                        anchor: isDoughnutOrPie ? 'center' : (isHorizontal ? 'end' : 'end'),
+                        align: isDoughnutOrPie ? 'center' : (isHorizontal ? 'right' : 'top'),
+                        offset: isDoughnutOrPie ? 0 : 4,
+                        formatter: function(value) {
+                            if (value === 0) return '';
+                            return isPercent ? value + '%' : value;
+                        },
                     },
                 },
             };
