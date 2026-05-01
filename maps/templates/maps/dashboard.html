@@ -526,6 +526,21 @@
             if (!e.target.closest('.widget-burger-wrap')) {
                 document.querySelectorAll('.widget-burger-menu.open').forEach(function(m) { m.classList.remove('open'); });
             }
+            if (!e.target.closest('.widget-filter-panel') && !e.target.closest('.widget-filter-btn')) {
+                document.querySelectorAll('.widget-filter-panel').forEach(function(p) {
+                    if (p.style.display !== 'none') {
+                        p.style.display = 'none';
+                        var card = p.closest('.chart-card');
+                        if (card) {
+                            var btn = card.querySelector('.widget-filter-btn');
+                            if (btn) btn.classList.remove('active');
+                        }
+                    }
+                });
+            }
+            if (!e.target.closest('.widget-config') && !e.target.closest('.widget-burger-item')) {
+                document.querySelectorAll('.widget-config').forEach(function(c) { c.style.display = 'none'; });
+            }
         });
 
         loadWidgets();
