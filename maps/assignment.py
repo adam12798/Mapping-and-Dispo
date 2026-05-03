@@ -18,7 +18,7 @@ def to_naive_eastern(dt):
         dt = dt.astimezone(EASTERN)
     return dt.replace(tzinfo=None)
 
-APPOINTMENT_DURATION = 90   # minutes per appointment
+APPOINTMENT_DURATION = 60   # minutes per appointment
 WORK_START_HOUR = 8         # 8:00 AM
 WORK_END_HOUR = 22          # 10:00 PM
 AVG_SPEED_MPH = 45          # average MA driving speed (haversine, not road distance)
