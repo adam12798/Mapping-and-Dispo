@@ -1,0 +1,334 @@
+{% extends "maps/base.html" %}
+{% load static %}
+
+{% block title %}Rep Count{% endblock %}
+
+{% block head_extra %}
+    <style>
+        .rc-container {
+            padding: 0;
+            max-width: 100%;
+            background: #fff;
+            min-height: calc(100vh - 44px);
+        }
+        .rc-toolbar {
+            padding: 16px 24px 12px;
+            border-bottom: 2px solid #98c1d9;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .rc-toolbar h2 {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 20px;
+            color: #293241;
+            margin: 0;
+        }
+        .week-nav {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Montserrat', sans-serif;
+        }
+        .week-nav button {
+            background: #3d5a80;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .week-nav button:hover { background: #293241; }
+        .week-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #293241;
+            min-width: 200px;
+            text-align: center;
+        }
+        .default-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            color: #3d5a80;
+        }
+        .default-control label { font-weight: 600; }
+        .default-control input {
+            width: 50px;
+            padding: 4px 8px;
+            border: 1px solid #98c1d9;
+            border-radius: 4px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 14px;
+            text-align: center;
+        }
+        .default-control button {
+            background: #3d5a80;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 12px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .default-control button:hover { background: #293241; }
+        .rc-grid-wrap {
+            padding: 24px;
+            overflow-x: auto;
+        }
+        .rc-grid {
+            display: grid;
+            grid-template-columns: 120px repeat(4, 1fr);
+            border: 1px solid #98c1d9;
+            border-radius: 8px;
+            overflow: hidden;
+            font-family: 'Montserrat', sans-serif;
+            min-width: 600px;
+        }
+        .rc-header {
+            background: #293241;
+            color: #e0fbfc;
+            padding: 12px;
+            font-size: 12px;
+            font-weight: 700;
+            text-align: center;
+            text-transform: uppercase;
+        }
+        .rc-header:first-child { text-align: left; }
+        .rc-day-label {
+            background: #f8fdfe;
+            padding: 12px;
+            font-weight: 600;
+            font-size: 13px;
+            color: #293241;
+            border-bottom: 1px solid #e0fbfc;
+            border-right: 1px solid #e0fbfc;
+            display: flex;
+            flex-direction: column;
+        }
+        .rc-day-label .day-name { font-size: 12px; color: #3d5a80; }
+        .rc-day-label .day-date { font-size: 14px; }
+        .rc-day-label.today { background: #e0fbfc; }
+        .rc-cell {
+            padding: 12px;
+            border-bottom: 1px solid #e0fbfc;
+            border-right: 1px solid #e0fbfc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.2s;
+        }
+        .rc-cell.open { background: rgba(39,174,96,0.08); }
+        .rc-cell.full { background: rgba(243,156,18,0.12); }
+        .rc-cell.over { background: rgba(231,76,60,0.1); }
+        .rc-cell input {
+            width: 48px;
+            padding: 6px;
+            border: 1px solid #98c1d9;
+            border-radius: 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            text-align: center;
+            color: #293241;
+        }
+        .rc-cell input:focus { outline: none; border-color: #3d5a80; box-shadow: 0 0 0 3px rgba(61,90,128,0.25); }
+        .rc-booking {
+            font-size: 11px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .rc-booking .booked-count { color: #3d5a80; }
+        .rc-booking .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .rc-booking .status-dot.green { background: #27ae60; }
+        .rc-booking .status-dot.yellow { background: #f39c12; }
+        .rc-booking .status-dot.red { background: #e74c3c; }
+
+        @media (max-width: 768px) {
+            .rc-container { padding-bottom: 64px; }
+            .rc-toolbar { padding: 12px; flex-direction: column; align-items: flex-start; }
+            .default-control { margin-left: 0; }
+            .rc-grid-wrap { padding: 12px; }
+            .rc-grid { grid-template-columns: 80px repeat(4, 1fr); min-width: 450px; }
+            .rc-header { font-size: 10px; padding: 8px 4px; }
+            .rc-day-label { padding: 8px; font-size: 11px; }
+            .rc-cell { padding: 8px; }
+            .rc-cell input { width: 40px; font-size: 14px; }
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="rc-container">
+        <div class="rc-toolbar">
+            <h2>Rep Count</h2>
+            <div class="week-nav">
+                <button onclick="cycleWeek(-1)">&lsaquo;</button>
+                <span class="week-label" id="week-label"></span>
+                <button onclick="cycleWeek(1)">&rsaquo;</button>
+            </div>
+            <div class="default-control">
+                <label>Default per block:</label>
+                <input type="number" id="default-count" min="0" max="20" value="3">
+                <button onclick="saveDefault()">Set</button>
+            </div>
+        </div>
+        <div class="rc-grid-wrap">
+            <div class="rc-grid" id="rc-grid"></div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        var BLOCKS = [
+            {key: 'morning', label: '9-11 AM'},
+            {key: 'midday', label: '12-2 PM'},
+            {key: 'afternoon', label: '3-5 PM'},
+            {key: 'evening', label: '6-8 PM'}
+        ];
+        var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        var MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        var weekStart = getMonday(new Date());
+        var defaultCount = 3;
+        var overrides = {};
+        var bookings = {};
+
+        function getMonday(d) {
+            var day = d.getDay();
+            var diff = d.getDate() - day + (day === 0 ? -6 : 1);
+            return new Date(d.getFullYear(), d.getMonth(), diff);
+        }
+
+        function dateStr(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
+        function todayStr() {
+            var t = new Date();
+            return dateStr(t);
+        }
+
+        function updateWeekLabel() {
+            var end = new Date(weekStart);
+            end.setDate(end.getDate() + 6);
+            document.getElementById('week-label').textContent =
+                MONTH_NAMES[weekStart.getMonth()] + ' ' + weekStart.getDate() + ' — ' +
+                MONTH_NAMES[end.getMonth()] + ' ' + end.getDate() + ', ' + end.getFullYear();
+        }
+
+        function cycleWeek(offset) {
+            weekStart.setDate(weekStart.getDate() + offset * 7);
+            loadWeek();
+        }
+
+        function loadWeek() {
+            updateWeekLabel();
+            var ws = dateStr(weekStart);
+
+            Promise.all([
+                fetch('/api/rep-count/default/').then(function(r) { return r.json(); }),
+                fetch('/api/rep-count/overrides/?week_start=' + ws).then(function(r) { return r.json(); }),
+                fetch('/api/rep-count/bookings/?week_start=' + ws).then(function(r) { return r.json(); })
+            ]).then(function(results) {
+                defaultCount = results[0].count;
+                document.getElementById('default-count').value = defaultCount;
+
+                overrides = {};
+                results[1].overrides.forEach(function(o) {
+                    overrides[o.date + '_' + o.time_block] = o.count;
+                });
+
+                bookings = {};
+                results[2].bookings.forEach(function(b) {
+                    bookings[b.date + '_' + b.time_block] = b.booked;
+                });
+
+                renderGrid();
+            });
+        }
+
+        function renderGrid() {
+            var grid = document.getElementById('rc-grid');
+            var html = '';
+
+            html += '<div class="rc-header"></div>';
+            BLOCKS.forEach(function(b) {
+                html += '<div class="rc-header">' + b.label + '</div>';
+            });
+
+            var today = todayStr();
+            for (var i = 0; i < 7; i++) {
+                var d = new Date(weekStart);
+                d.setDate(d.getDate() + i);
+                var ds = dateStr(d);
+                var isToday = ds === today;
+
+                html += '<div class="rc-day-label' + (isToday ? ' today' : '') + '">';
+                html += '<span class="day-name">' + DAY_NAMES[d.getDay()] + '</span>';
+                html += '<span class="day-date">' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate() + '</span>';
+                html += '</div>';
+
+                BLOCKS.forEach(function(b) {
+                    var key = ds + '_' + b.key;
+                    var rc = (key in overrides) ? overrides[key] : defaultCount;
+                    var booked = bookings[key] || 0;
+                    var statusClass = booked < rc ? 'open' : (booked === rc ? 'full' : 'over');
+                    var dotClass = booked < rc ? 'green' : (booked === rc ? 'yellow' : 'red');
+
+                    html += '<div class="rc-cell ' + statusClass + '" data-date="' + ds + '" data-block="' + b.key + '">';
+                    html += '<input type="number" min="0" max="20" value="' + rc + '" onchange="saveOverride(\'' + ds + '\', \'' + b.key + '\', parseInt(this.value))">';
+                    html += '<div class="rc-booking"><span class="status-dot ' + dotClass + '"></span><span class="booked-count">' + booked + ' booked</span></div>';
+                    html += '</div>';
+                });
+            }
+
+            grid.innerHTML = html;
+        }
+
+        function saveOverride(date, block, count) {
+            overrides[date + '_' + block] = count;
+            renderGrid();
+            fetch('/api/rep-count/overrides/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: date, time_block: block, count: count })
+            });
+        }
+
+        function saveDefault() {
+            var val = parseInt(document.getElementById('default-count').value) || 3;
+            defaultCount = val;
+            fetch('/api/rep-count/default/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ count: val })
+            }).then(function() {
+                renderGrid();
+            });
+        }
+
+        loadWeek();
+    </script>
+{% endblock %}

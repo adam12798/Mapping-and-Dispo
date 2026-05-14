@@ -1,0 +1,454 @@
+{% extends "maps/base.html" %}
+{% load static %}
+
+{% block title %}Provider Portal{% endblock %}
+
+{% block head_extra %}
+    <style>
+        .pv-container {
+            padding: 0;
+            max-width: 100%;
+            background: #fff;
+            min-height: calc(100vh - 44px);
+        }
+        .pv-toolbar {
+            padding: 16px 24px 12px;
+            border-bottom: 2px solid #98c1d9;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .pv-toolbar h2 {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 20px;
+            color: #293241;
+            margin: 0 0 12px 0;
+        }
+        .pv-sections {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+        }
+        .pv-section h3 {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            color: #293241;
+            margin: 0 0 12px 0;
+        }
+
+        /* Availability grid */
+        .av-week-nav {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            font-family: 'Montserrat', sans-serif;
+        }
+        .av-week-nav button {
+            background: #3d5a80;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .av-week-nav button:hover { background: #293241; }
+        .av-week-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #293241;
+            min-width: 200px;
+            text-align: center;
+        }
+        .av-grid {
+            display: grid;
+            grid-template-columns: 100px repeat(4, 1fr);
+            border: 1px solid #98c1d9;
+            border-radius: 8px;
+            overflow: hidden;
+            font-family: 'Montserrat', sans-serif;
+            min-width: 500px;
+        }
+        .av-header {
+            background: #293241;
+            color: #e0fbfc;
+            padding: 10px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            text-align: center;
+            text-transform: uppercase;
+        }
+        .av-header:first-child { text-align: left; }
+        .av-day {
+            background: #f8fdfe;
+            padding: 10px 8px;
+            font-weight: 600;
+            font-size: 12px;
+            color: #293241;
+            border-bottom: 1px solid #e0fbfc;
+            border-right: 1px solid #e0fbfc;
+        }
+        .av-day.today { background: #e0fbfc; }
+        .av-cell {
+            padding: 10px 8px;
+            border-bottom: 1px solid #e0fbfc;
+            border-right: 1px solid #e0fbfc;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 700;
+            transition: background 0.2s;
+        }
+        .av-cell.open { background: rgba(39,174,96,0.08); color: #27ae60; }
+        .av-cell.full { background: rgba(243,156,18,0.12); color: #f39c12; }
+        .av-cell.over { background: rgba(231,76,60,0.1); color: #e74c3c; }
+        .av-cell .av-open-count { font-size: 20px; display: block; }
+        .av-cell .av-label { font-size: 10px; font-weight: 500; }
+
+        /* Lead table */
+        .pv-filters {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            font-family: 'Montserrat', sans-serif;
+            flex-wrap: wrap;
+        }
+        .pv-filters label { font-size: 13px; font-weight: 600; color: #3d5a80; }
+        .pv-filters input {
+            padding: 6px 10px;
+            border: 1px solid #98c1d9;
+            border-radius: 4px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+        }
+        .pv-filters button {
+            background: #3d5a80;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 16px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .pv-filters button:hover { background: #293241; }
+        .pv-table-wrap { overflow-x: auto; }
+        .pv-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+        }
+        .pv-table thead th {
+            background: #293241;
+            color: #e0fbfc;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .pv-table tbody td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #e0fbfc;
+            color: #293241;
+        }
+        .pv-table tbody tr:hover { background: #f8fdfe; }
+        .pv-table tbody tr.other-lead td {
+            color: #98c1d9;
+            font-style: italic;
+        }
+        .pv-dispo-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .pv-empty {
+            text-align: center;
+            padding: 40px;
+            color: #98c1d9;
+            font-family: 'Montserrat', sans-serif;
+        }
+        .pv-tab-bar {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .pv-tab {
+            padding: 8px 16px;
+            border: 1px solid #98c1d9;
+            border-radius: 6px;
+            background: #f8fdfe;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: #3d5a80;
+            cursor: pointer;
+        }
+        .pv-tab.active { background: #3d5a80; color: #fff; border-color: #3d5a80; }
+        .pv-tab .tab-count {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            margin-left: 4px;
+        }
+        .pv-tab.active .tab-count { background: rgba(255,255,255,0.3); }
+
+        @media (max-width: 768px) {
+            .pv-container { padding-bottom: 64px; }
+            .pv-sections { padding: 12px; gap: 24px; }
+            .pv-toolbar { padding: 12px; }
+            .av-grid { grid-template-columns: 70px repeat(4, 1fr); min-width: 360px; }
+            .av-header { font-size: 9px; padding: 8px 4px; }
+            .av-day { padding: 8px 4px; font-size: 11px; }
+            .av-cell { padding: 8px 4px; }
+            .av-cell .av-open-count { font-size: 16px; }
+            .pv-filters { flex-direction: column; align-items: stretch; }
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="pv-container">
+        <div class="pv-toolbar">
+            <h2>Provider Portal</h2>
+        </div>
+        <div class="pv-sections">
+            <div class="pv-section">
+                <h3>Appointment Availability</h3>
+                <div class="av-week-nav">
+                    <button onclick="cycleWeek(-1)">&lsaquo;</button>
+                    <span class="av-week-label" id="av-week-label"></span>
+                    <button onclick="cycleWeek(1)">&rsaquo;</button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <div class="av-grid" id="av-grid"></div>
+                </div>
+            </div>
+
+            <div class="pv-section">
+                <h3>Lead Results</h3>
+                <div class="pv-filters">
+                    <label>From:</label>
+                    <input type="date" id="lead-start">
+                    <label>To:</label>
+                    <input type="date" id="lead-end">
+                    <button onclick="loadLeads()">Load</button>
+                </div>
+                <div class="pv-tab-bar" id="lead-tabs"></div>
+                <div class="pv-table-wrap">
+                    <table class="pv-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Phone</th>
+                                <th>Address</th>
+                                <th>City</th>
+                                <th>Date / Time</th>
+                                <th>Disposition</th>
+                                <th>Rep</th>
+                                <th>Type</th>
+                            </tr>
+                        </thead>
+                        <tbody id="lead-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        var BLOCKS = [
+            {key: 'morning', label: '9-11 AM'},
+            {key: 'midday', label: '12-2 PM'},
+            {key: 'afternoon', label: '3-5 PM'},
+            {key: 'evening', label: '6-8 PM'}
+        ];
+        var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        var MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        var dispoColors = {
+            sale: '#27ae60', no_sale: '#8e44ad', follow_up: '#e67e22', credit_fail: '#ff69b4',
+            cancel_door: '#95a5a6', cpfu: '#98c1d9', rep_no_show: '#111', no_coverage: '#c0392b',
+            needs_reschedule: '#3498db', incomplete_deal: '#d4a017', future_contact: '#1abc9c',
+            dq: '#8B4513', no_show: '#800000'
+        };
+        var dispoLabels = {
+            sale: 'Sale', no_sale: 'No Sale', follow_up: 'Follow Up', credit_fail: 'Credit Fail',
+            cancel_door: 'Cancel at Door', cpfu: 'CPFU', rep_no_show: 'Rep No Show',
+            no_coverage: 'No Coverage', needs_reschedule: 'Needs Reschedule',
+            incomplete_deal: 'Incomplete Deal', future_contact: 'Future Contact',
+            dq: 'DQ', no_show: 'No Show'
+        };
+
+        var weekStart = getMonday(new Date());
+        var showTab = 'own';
+        var leadData = { own_leads: [], other_leads: [] };
+
+        function getMonday(d) {
+            var day = d.getDay();
+            var diff = d.getDate() - day + (day === 0 ? -6 : 1);
+            return new Date(d.getFullYear(), d.getMonth(), diff);
+        }
+
+        function dateStr(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
+        function todayStr() { return dateStr(new Date()); }
+
+        function updateWeekLabel() {
+            var end = new Date(weekStart);
+            end.setDate(end.getDate() + 6);
+            document.getElementById('av-week-label').textContent =
+                MONTH_NAMES[weekStart.getMonth()] + ' ' + weekStart.getDate() + ' — ' +
+                MONTH_NAMES[end.getMonth()] + ' ' + end.getDate() + ', ' + end.getFullYear();
+        }
+
+        function cycleWeek(offset) {
+            weekStart.setDate(weekStart.getDate() + offset * 7);
+            loadAvailability();
+        }
+
+        function loadAvailability() {
+            updateWeekLabel();
+            var ws = dateStr(weekStart);
+            fetch('/api/provider/availability/?week_start=' + ws)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    renderAvailability(data.availability);
+                });
+        }
+
+        function renderAvailability(items) {
+            var lookup = {};
+            items.forEach(function(a) { lookup[a.date + '_' + a.time_block] = a; });
+
+            var grid = document.getElementById('av-grid');
+            var html = '<div class="av-header"></div>';
+            BLOCKS.forEach(function(b) { html += '<div class="av-header">' + b.label + '</div>'; });
+
+            var today = todayStr();
+            for (var i = 0; i < 7; i++) {
+                var d = new Date(weekStart);
+                d.setDate(d.getDate() + i);
+                var ds = dateStr(d);
+                var isToday = ds === today;
+
+                html += '<div class="av-day' + (isToday ? ' today' : '') + '">' + DAY_NAMES[d.getDay()] + '<br>' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate() + '</div>';
+
+                BLOCKS.forEach(function(b) {
+                    var a = lookup[ds + '_' + b.key] || { open: 0, booked: 0, rep_count: 0 };
+                    var cls = a.open > 0 ? 'open' : (a.booked > a.rep_count ? 'over' : 'full');
+                    html += '<div class="av-cell ' + cls + '">';
+                    html += '<span class="av-open-count">' + a.open + '</span>';
+                    html += '<span class="av-label">' + (a.open === 1 ? 'spot open' : 'spots open') + '</span>';
+                    html += '</div>';
+                });
+            }
+            grid.innerHTML = html;
+        }
+
+        // Leads
+        function initDateRange() {
+            var today = new Date();
+            var start = new Date(today);
+            start.setDate(start.getDate() - 30);
+            document.getElementById('lead-start').value = dateStr(start);
+            document.getElementById('lead-end').value = dateStr(today);
+        }
+
+        function loadLeads() {
+            var s = document.getElementById('lead-start').value;
+            var e = document.getElementById('lead-end').value;
+            if (!s || !e) return;
+            fetch('/api/provider/leads/?start=' + s + '&end=' + e)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    leadData = data;
+                    renderTabs();
+                    renderLeadTable();
+                });
+        }
+
+        function renderTabs() {
+            var html = '';
+            html += '<button class="pv-tab' + (showTab === 'own' ? ' active' : '') + '" onclick="showTab=\'own\';renderTabs();renderLeadTable();">Your Leads<span class="tab-count">' + leadData.own_leads.length + '</span></button>';
+            html += '<button class="pv-tab' + (showTab === 'other' ? ' active' : '') + '" onclick="showTab=\'other\';renderTabs();renderLeadTable();">Other Appointments<span class="tab-count">' + leadData.other_leads.length + '</span></button>';
+            document.getElementById('lead-tabs').innerHTML = html;
+        }
+
+        function escHtml(s) {
+            var d = document.createElement('div');
+            d.textContent = s || '';
+            return d.innerHTML;
+        }
+
+        function renderLeadTable() {
+            var tbody = document.getElementById('lead-tbody');
+            var html = '';
+
+            if (showTab === 'own') {
+                if (leadData.own_leads.length === 0) {
+                    html = '<tr><td colspan="8" class="pv-empty">No leads found for this period</td></tr>';
+                } else {
+                    leadData.own_leads.forEach(function(l) {
+                        var dispoHtml = '';
+                        if (l.disposition) {
+                            var color = dispoColors[l.disposition] || '#999';
+                            var label = dispoLabels[l.disposition] || l.disposition;
+                            dispoHtml = '<span class="pv-dispo-badge" style="background:' + color + '">' + label + '</span>';
+                        }
+                        html += '<tr>';
+                        html += '<td>' + escHtml(l.homeowner_name) + '</td>';
+                        html += '<td>' + escHtml(l.phone_number) + '</td>';
+                        html += '<td>' + escHtml(l.address) + '</td>';
+                        html += '<td>' + escHtml(l.city) + '</td>';
+                        html += '<td>' + escHtml(l.appointment_datetime) + '</td>';
+                        html += '<td>' + dispoHtml + '</td>';
+                        html += '<td>' + escHtml(l.rep_name) + '</td>';
+                        html += '<td>' + escHtml(l.appointment_type) + '</td>';
+                        html += '</tr>';
+                    });
+                }
+            } else {
+                if (leadData.other_leads.length === 0) {
+                    html = '<tr><td colspan="8" class="pv-empty">No other appointments in this period</td></tr>';
+                } else {
+                    leadData.other_leads.forEach(function(l) {
+                        html += '<tr class="other-lead">';
+                        html += '<td>---</td>';
+                        html += '<td>---</td>';
+                        html += '<td>---</td>';
+                        html += '<td>' + escHtml(l.city) + '</td>';
+                        html += '<td>' + escHtml(l.date) + ' ' + escHtml(l.time_block) + '</td>';
+                        html += '<td>---</td>';
+                        html += '<td>---</td>';
+                        html += '<td>' + escHtml(l.appointment_type) + '</td>';
+                        html += '</tr>';
+                    });
+                }
+            }
+
+            tbody.innerHTML = html;
+        }
+
+        initDateRange();
+        loadAvailability();
+        loadLeads();
+    </script>
+{% endblock %}

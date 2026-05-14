@@ -129,10 +129,12 @@ class UserProfile(models.Model):
     ROLE_CHOICES = [
         ('manager', 'Manager'),
         ('rep', 'Rep'),
+        ('provider', 'Provider'),
     ]
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='rep')
     rep = models.OneToOneField(Rep, null=True, blank=True, on_delete=models.SET_NULL, related_name='user_profile')
+    lead_sources = models.TextField(blank=True)
 
     def __str__(self):
         return f"{self.user.username} ({self.role})"
@@ -140,6 +142,15 @@ class UserProfile(models.Model):
     @property
     def is_manager(self):
         return self.role == 'manager'
+
+    @property
+    def is_provider(self):
+        return self.role == 'provider'
+
+    def get_lead_sources_list(self):
+        if not self.lead_sources:
+            return []
+        return [s.strip() for s in self.lead_sources.split(',') if s.strip()]
 
 
 class LeadMessage(models.Model):
@@ -171,3 +182,33 @@ class LeadUpdate(models.Model):
 
     def __str__(self):
         return f"{self.user.username} on {self.lead} ({self.created_at:%m/%d %I:%M %p})"
+
+
+class RepCountDefault(models.Model):
+    count = models.IntegerField(default=3)
+
+    def __str__(self):
+        return f"Default rep count: {self.count}"
+
+    @classmethod
+    def get_default(cls):
+        obj, _ = cls.objects.get_or_create(pk=1, defaults={'count': 3})
+        return obj.count
+
+
+class RepCountOverride(models.Model):
+    TIME_BLOCK_CHOICES = [
+        ('morning', '9-11 AM'),
+        ('midday', '12-2 PM'),
+        ('afternoon', '3-5 PM'),
+        ('evening', '6-8 PM'),
+    ]
+    date = models.DateField()
+    time_block = models.CharField(max_length=10, choices=TIME_BLOCK_CHOICES)
+    count = models.IntegerField()
+
+    class Meta:
+        unique_together = [('date', 'time_block')]
+
+    def __str__(self):
+        return f"{self.date} {self.get_time_block_display()}: {self.count} reps"

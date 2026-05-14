@@ -21,7 +21,7 @@ from django.conf import settings
 from django.db.models import Q
 
 from .assignment import auto_assign_leads
-from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog
+from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride
 
 
 def manager_required(view_func):
@@ -31,6 +31,18 @@ def manager_required(view_func):
             return redirect(f'/login/?next={request.path}')
         profile = getattr(request.user, 'profile', None)
         if not profile or not profile.is_manager:
+            return JsonResponse({'error': 'Forbidden'}, status=403)
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+
+def provider_required(view_func):
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect(f'/login/?next={request.path}')
+        profile = getattr(request.user, 'profile', None)
+        if not profile or not profile.is_provider:
             return JsonResponse({'error': 'Forbidden'}, status=403)
         return view_func(request, *args, **kwargs)
     return wrapper
@@ -55,6 +67,9 @@ def twilio_check(request):
 
 def login_view(request):
     if request.user.is_authenticated:
+        profile = getattr(request.user, 'profile', None)
+        if profile and profile.is_provider:
+            return redirect('/provider/')
         return redirect('/')
     error = ''
     if request.method == 'POST':
@@ -63,7 +78,10 @@ def login_view(request):
         user = authenticate(request, username=username, password=password)
         if user is not None and user.is_active:
             login(request, user)
-            next_url = request.GET.get('next', '/')
+            next_url = request.GET.get('next')
+            if not next_url:
+                profile = getattr(user, 'profile', None)
+                next_url = '/provider/' if profile and profile.is_provider else '/'
             return redirect(next_url)
         else:
             error = 'Invalid username or password'
@@ -1569,6 +1587,7 @@ def users_api(request):
             'rep_id': u.profile.rep_id if hasattr(u, 'profile') else None,
             'rep_name': u.profile.rep.name if hasattr(u, 'profile') and u.profile.rep else '',
             'is_active': u.is_active,
+            'lead_sources': u.profile.lead_sources if hasattr(u, 'profile') else '',
         } for u in users]
         return JsonResponse(data, safe=False)
 
@@ -1584,7 +1603,8 @@ def users_api(request):
             return JsonResponse({'error': 'Username already taken'}, status=400)
         user = User.objects.create_user(username=username, password=password)
         rep = Rep.objects.get(pk=rep_id) if rep_id else None
-        UserProfile.objects.create(user=user, role=role, rep=rep)
+        lead_sources = data.get('lead_sources', '')
+        UserProfile.objects.create(user=user, role=role, rep=rep, lead_sources=lead_sources)
         return JsonResponse({'status': 'ok', 'id': user.id})
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -1609,6 +1629,8 @@ def user_update_api(request, pk):
             profile.role = data['role']
         if 'rep_id' in data:
             profile.rep = Rep.objects.get(pk=data['rep_id']) if data['rep_id'] else None
+        if 'lead_sources' in data:
+            profile.lead_sources = data['lead_sources']
         profile.save()
         if 'is_active' in data:
             user.is_active = data['is_active']
@@ -1965,3 +1987,194 @@ def sms_webhook(request):
         '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
         content_type='text/xml',
     )
+
+
+# ===== Time block helpers =====
+TIME_BLOCKS = [
+    ('morning', '9-11 AM', 9, 11),
+    ('midday', '12-2 PM', 12, 14),
+    ('afternoon', '3-5 PM', 15, 17),
+    ('evening', '6-8 PM', 18, 20),
+]
+
+
+def _count_bookings_for_block(date_obj, hour_start, hour_end):
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+    leads = Lead.objects.filter(appointment_datetime__date=date_obj)
+    count = 0
+    for lead in leads:
+        if lead.appointment_datetime:
+            local_dt = lead.appointment_datetime.astimezone(eastern)
+            if hour_start <= local_dt.hour < hour_end:
+                count += 1
+    return count
+
+
+def _get_rep_count(date_obj, block_key):
+    try:
+        override = RepCountOverride.objects.get(date=date_obj, time_block=block_key)
+        return override.count
+    except RepCountOverride.DoesNotExist:
+        return RepCountDefault.get_default()
+
+
+# ===== Rep Count (Manager) =====
+@manager_required
+def rep_count_view(request):
+    return render(request, 'maps/rep_count.html', {'active_tab': 'rep_count'})
+
+
+@csrf_exempt
+@manager_required
+def rep_count_default_api(request):
+    if request.method == 'GET':
+        return JsonResponse({'count': RepCountDefault.get_default()})
+    if request.method == 'PUT':
+        data = json.loads(request.body)
+        obj, _ = RepCountDefault.objects.get_or_create(pk=1, defaults={'count': 3})
+        obj.count = data.get('count', 3)
+        obj.save()
+        return JsonResponse({'status': 'ok', 'count': obj.count})
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+@manager_required
+def rep_count_overrides_api(request):
+    if request.method == 'GET':
+        week_start = request.GET.get('week_start')
+        if not week_start:
+            return JsonResponse({'error': 'week_start required'}, status=400)
+        start = datetime.strptime(week_start, '%Y-%m-%d').date()
+        from datetime import timedelta
+        end = start + timedelta(days=6)
+        overrides = RepCountOverride.objects.filter(date__gte=start, date__lte=end)
+        data = [{'date': o.date.isoformat(), 'time_block': o.time_block, 'count': o.count} for o in overrides]
+        return JsonResponse({'overrides': data})
+
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        date_str = data.get('date')
+        block = data.get('time_block')
+        count = data.get('count')
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+        obj, _ = RepCountOverride.objects.update_or_create(
+            date=date_obj, time_block=block,
+            defaults={'count': count}
+        )
+        return JsonResponse({'status': 'ok'})
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@manager_required
+def rep_count_bookings_api(request):
+    week_start = request.GET.get('week_start')
+    if not week_start:
+        return JsonResponse({'error': 'week_start required'}, status=400)
+    start = datetime.strptime(week_start, '%Y-%m-%d').date()
+    from datetime import timedelta
+    bookings = []
+    for day_offset in range(7):
+        date_obj = start + timedelta(days=day_offset)
+        for block_key, block_label, hour_start, hour_end in TIME_BLOCKS:
+            count = _count_bookings_for_block(date_obj, hour_start, hour_end)
+            bookings.append({
+                'date': date_obj.isoformat(),
+                'time_block': block_key,
+                'booked': count,
+            })
+    return JsonResponse({'bookings': bookings})
+
+
+# ===== Provider Portal =====
+@provider_required
+def provider_view(request):
+    return render(request, 'maps/provider.html', {'active_tab': 'provider'})
+
+
+@provider_required
+def provider_availability_api(request):
+    week_start = request.GET.get('week_start')
+    if not week_start:
+        return JsonResponse({'error': 'week_start required'}, status=400)
+    start = datetime.strptime(week_start, '%Y-%m-%d').date()
+    from datetime import timedelta
+    availability = []
+    for day_offset in range(7):
+        date_obj = start + timedelta(days=day_offset)
+        for block_key, block_label, hour_start, hour_end in TIME_BLOCKS:
+            rep_count = _get_rep_count(date_obj, block_key)
+            booked = _count_bookings_for_block(date_obj, hour_start, hour_end)
+            availability.append({
+                'date': date_obj.isoformat(),
+                'time_block': block_key,
+                'rep_count': rep_count,
+                'booked': booked,
+                'open': max(0, rep_count - booked),
+            })
+    return JsonResponse({'availability': availability})
+
+
+@provider_required
+def provider_leads_api(request):
+    start_str = request.GET.get('start')
+    end_str = request.GET.get('end')
+    if not start_str or not end_str:
+        return JsonResponse({'error': 'start and end required'}, status=400)
+    start = datetime.strptime(start_str, '%Y-%m-%d').date()
+    end = datetime.strptime(end_str, '%Y-%m-%d').date()
+
+    profile = request.user.profile
+    sources = profile.get_lead_sources_list()
+    source_q = Q()
+    for s in sources:
+        source_q |= Q(source__iexact=s)
+
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+
+    all_leads = Lead.objects.filter(
+        appointment_datetime__date__gte=start,
+        appointment_datetime__date__lte=end,
+    ).select_related('rep')
+
+    own_leads = []
+    other_leads = []
+
+    for lead in all_leads:
+        is_own = any(lead.source.strip().lower() == s.lower() for s in sources) if sources else False
+        local_dt = lead.appointment_datetime.astimezone(eastern) if lead.appointment_datetime else None
+        time_str = local_dt.strftime('%I:%M %p') if local_dt else ''
+        block_label = ''
+        if local_dt:
+            for bk, bl, hs, he in TIME_BLOCKS:
+                if hs <= local_dt.hour < he:
+                    block_label = bl
+                    break
+
+        if is_own:
+            own_leads.append({
+                'id': lead.id,
+                'homeowner_name': lead.homeowner_name,
+                'phone_number': lead.phone_number,
+                'address': lead.address,
+                'city': lead.city,
+                'appointment_datetime': local_dt.strftime('%m/%d/%Y %I:%M %p') if local_dt else '',
+                'time': time_str,
+                'time_block': block_label,
+                'disposition': lead.disposition,
+                'rep_name': lead.rep.name if lead.rep else '',
+                'appointment_type': lead.appointment_type,
+                'source': lead.source,
+            })
+        else:
+            other_leads.append({
+                'city': lead.city,
+                'time_block': block_label,
+                'date': local_dt.strftime('%m/%d/%Y') if local_dt else '',
+                'appointment_type': lead.appointment_type,
+            })
+
+    return JsonResponse({'own_leads': own_leads, 'other_leads': other_leads})

@@ -40,4 +40,13 @@ urlpatterns = [
     path('api/users/<int:pk>/', views.user_update_api, name='user_update_api'),
     path('api/leads/<int:lead_id>/updates/', views.lead_updates_api, name='lead_updates_api'),
     path('api/leads/<int:lead_id>/messages/', views.lead_messages_api, name='lead_messages_api'),
+    # Rep Count (manager)
+    path('rep-count/', views.rep_count_view, name='rep_count'),
+    path('api/rep-count/default/', views.rep_count_default_api, name='rep_count_default_api'),
+    path('api/rep-count/overrides/', views.rep_count_overrides_api, name='rep_count_overrides_api'),
+    path('api/rep-count/bookings/', views.rep_count_bookings_api, name='rep_count_bookings_api'),
+    # Provider portal
+    path('provider/', views.provider_view, name='provider'),
+    path('api/provider/availability/', views.provider_availability_api, name='provider_availability_api'),
+    path('api/provider/leads/', views.provider_leads_api, name='provider_leads_api'),
 ]

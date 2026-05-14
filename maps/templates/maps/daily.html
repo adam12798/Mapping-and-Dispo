@@ -35,11 +35,294 @@
         .sms-time { font-size:10px;color:#98c1d9;margin-top:2px;padding:0 4px; }
         .sms-time.outbound { text-align:right; }
         .sms-empty { text-align:center;color:#98c1d9;padding:40px 20px;font-size:14px; }
+
+        /* Mobile daily: hidden on desktop */
+        .daily-mobile-view { display: none; }
+        .daily-detail-sheet { display: none; }
+
+        @media (max-width: 768px) {
+            .daily-container .crm-table-wrapper { display: none !important; }
+            .daily-mobile-view {
+                display: block;
+                flex: 1;
+                overflow: hidden;
+            }
+            .daily-mobile-scroll {
+                overflow-x: auto;
+                overflow-y: auto;
+                height: calc(100vh - 44px - 56px - 110px);
+                -webkit-overflow-scrolling: touch;
+            }
+            .daily-mobile-table {
+                border-collapse: separate;
+                border-spacing: 0;
+                font-family: 'Montserrat', sans-serif;
+                font-size: 13px;
+                width: max-content;
+                min-width: 100%;
+            }
+            .daily-mobile-table thead th {
+                position: sticky;
+                top: 0;
+                z-index: 3;
+                background: #293241;
+                color: #e0fbfc;
+                padding: 10px 12px;
+                text-align: left;
+                font-weight: 600;
+                font-size: 11px;
+                text-transform: uppercase;
+                white-space: nowrap;
+            }
+            .daily-mobile-table thead .dm-sticky {
+                position: sticky;
+                left: 0;
+                z-index: 5;
+                background: #293241;
+            }
+            .daily-mobile-table tbody td {
+                padding: 12px;
+                border-bottom: 1px solid #e8f4f8;
+                white-space: nowrap;
+                font-size: 13px;
+                color: #293241;
+                background: #fff;
+            }
+            .daily-mobile-table tbody .dm-name-cell {
+                position: sticky;
+                left: 0;
+                z-index: 2;
+                background: #fff;
+                font-weight: 600;
+                color: #3d5a80;
+                cursor: pointer;
+                min-width: 130px;
+                max-width: 160px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .daily-mobile-table tbody .dm-name-cell::after {
+                content: '';
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                right: 0;
+                width: 2px;
+                background: #98c1d9;
+            }
+            .daily-mobile-table tbody tr:active td { background: #e0fbfc; }
+            .daily-mobile-table tbody tr:active .dm-name-cell { background: #e0fbfc; }
+            .dm-dispo-badge {
+                display: inline-block;
+                padding: 3px 8px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 600;
+                color: #fff;
+            }
+            .dm-type-badge {
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 600;
+                color: #fff;
+                text-transform: uppercase;
+            }
+            .dm-empty {
+                text-align: center;
+                padding: 40px 20px;
+                color: #98c1d9;
+                font-family: 'Montserrat', sans-serif;
+            }
+
+            /* Detail bottom sheet */
+            .daily-detail-sheet.open {
+                display: flex;
+                flex-direction: column;
+                justify-content: flex-end;
+                position: fixed;
+                inset: 0;
+                z-index: 2001;
+            }
+            .daily-detail-backdrop {
+                position: absolute;
+                inset: 0;
+                background: rgba(41, 50, 65, 0.5);
+            }
+            .daily-detail-panel {
+                position: relative;
+                background: #fff;
+                border-radius: 16px 16px 0 0;
+                max-height: 85vh;
+                overflow-y: auto;
+                box-shadow: 0 -8px 32px rgba(0,0,0,0.25);
+                padding-bottom: 72px;
+                animation: dm-slideUp 0.25s ease;
+            }
+            @keyframes dm-slideUp {
+                from { transform: translateY(100%); }
+                to { transform: translateY(0); }
+            }
+            .daily-detail-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 20px 20px 12px;
+                border-bottom: 1px solid #e0fbfc;
+                position: sticky;
+                top: 0;
+                background: #fff;
+                z-index: 1;
+                border-radius: 16px 16px 0 0;
+            }
+            .daily-detail-header::before {
+                content: '';
+                position: absolute;
+                top: 8px;
+                left: 50%;
+                transform: translateX(-50%);
+                width: 40px;
+                height: 4px;
+                background: #98c1d9;
+                border-radius: 2px;
+            }
+            .daily-detail-header h3 {
+                margin: 0;
+                font-family: 'Montserrat', sans-serif;
+                font-size: 17px;
+                font-weight: 700;
+                color: #293241;
+            }
+            .daily-detail-close {
+                background: none;
+                border: none;
+                font-size: 28px;
+                color: #3d5a80;
+                cursor: pointer;
+                padding: 0 4px;
+                line-height: 1;
+            }
+            .daily-detail-body { padding: 16px 20px; }
+            .detail-field { margin-bottom: 14px; }
+            .detail-field-label {
+                font-family: 'Montserrat', sans-serif;
+                font-size: 10px;
+                font-weight: 700;
+                color: #3d5a80;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 4px;
+            }
+            .detail-field input,
+            .detail-field select,
+            .detail-field textarea {
+                width: 100%;
+                padding: 10px 12px;
+                border: 1px solid #98c1d9;
+                border-radius: 8px;
+                font-family: 'Montserrat', sans-serif;
+                font-size: 14px;
+                background: #f8fdfe;
+                box-sizing: border-box;
+                min-height: 44px;
+            }
+            .detail-field input:focus,
+            .detail-field select:focus,
+            .detail-field textarea:focus {
+                outline: none;
+                border-color: #3d5a80;
+                box-shadow: 0 0 0 3px rgba(61,90,128,0.25);
+                background: #fff;
+            }
+            .detail-field textarea { min-height: 70px; resize: vertical; }
+            .detail-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0 12px;
+            }
+            .detail-phone-link {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 14px;
+                color: #3d5a80;
+                text-decoration: none;
+                padding: 8px 0;
+                font-family: 'Montserrat', sans-serif;
+            }
+            .detail-address-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+                padding: 4px 0;
+            }
+            .detail-address-text {
+                font-size: 14px;
+                color: #293241;
+                font-family: 'Montserrat', sans-serif;
+            }
+            .detail-navigate {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 6px 12px;
+                background: #3d5a80;
+                color: #fff;
+                border-radius: 6px;
+                text-decoration: none;
+                font-size: 12px;
+                font-weight: 600;
+                font-family: 'Montserrat', sans-serif;
+            }
+            .detail-actions {
+                display: flex;
+                gap: 8px;
+                margin-top: 16px;
+            }
+            .detail-action-btn {
+                flex: 1;
+                padding: 12px;
+                border: none;
+                border-radius: 8px;
+                font-family: 'Montserrat', sans-serif;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+            }
+            .detail-tags {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                padding: 4px 0;
+            }
+            .detail-tag {
+                padding: 4px 10px;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: 600;
+                border: 1px solid #98c1d9;
+                background: transparent;
+                color: #3d5a80;
+                cursor: pointer;
+                font-family: 'Montserrat', sans-serif;
+            }
+            .detail-tag.active {
+                background: #3d5a80;
+                color: #fff;
+                border-color: #3d5a80;
+            }
+        }
     </style>
 {% endblock %}
 
 {% block content %}
-    <div class="crm-container">
+    <div class="crm-container daily-container">
         <div class="crm-toolbar">
             <div class="crm-header">
                 <h2>Daily Appointments</h2>
@@ -172,6 +455,35 @@
             </tbody>
         </table>
         </div>
+
+        <div class="daily-mobile-view" id="daily-mobile-view">
+            <div class="daily-mobile-scroll">
+                <table class="daily-mobile-table">
+                    <thead>
+                        <tr>
+                            <th class="dm-sticky">Name</th>
+                            <th>Time</th>
+                            <th>Rep</th>
+                            <th>Dispo</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody id="daily-mobile-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detail Bottom Sheet -->
+    <div class="daily-detail-sheet" id="daily-detail-sheet">
+        <div class="daily-detail-backdrop" onclick="closeDailyDetail()"></div>
+        <div class="daily-detail-panel">
+            <div class="daily-detail-header">
+                <h3 id="detail-name"></h3>
+                <button class="daily-detail-close" onclick="closeDailyDetail()">&times;</button>
+            </div>
+            <div class="daily-detail-body" id="detail-body"></div>
+        </div>
     </div>
 
     <!-- Chatter Modal -->
@@ -246,6 +558,7 @@
             document.querySelectorAll('.sat-select').forEach(function(sel) {
                 updateSatColor(sel);
             });
+            buildMobileView();
         });
 
         function cycleDay(offset) {
@@ -311,6 +624,7 @@
             var th = document.querySelectorAll('.crm-table thead th')[colIndex];
             var arrow = th.querySelector('.sort-arrow');
             if (arrow) arrow.textContent = currentSortAsc ? ' \u25B2' : ' \u25BC';
+            buildMobileView();
         }
 
         function saveField(leadId, field, value, inputEl) {
@@ -668,6 +982,7 @@
             });
 
             updateFilterCount();
+            buildMobileView();
         }
 
         function clearFilters() {
@@ -942,5 +1257,278 @@
         if (bulkBtn) bulkBtn.style.display = 'none';
         document.querySelectorAll('.row-delete').forEach(function(el) { el.style.display = 'none'; });
         {% endif %}
+
+        // === Mobile spreadsheet view ===
+        function buildMobileView() {
+            var tbody = document.getElementById('daily-mobile-tbody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            var rows = document.querySelectorAll('.crm-table tbody tr[data-id]');
+            var hasRows = false;
+
+            for (var i = 0; i < rows.length; i++) {
+                var row = rows[i];
+                if (row.style.display === 'none') continue;
+                hasRows = true;
+
+                var id = row.dataset.id;
+                var nameEl = row.querySelector('[data-field="homeowner_name"]');
+                var timeEl = row.querySelector('[data-field="appointment_datetime"]');
+                var repEl = row.querySelector('[data-field="rep_id"]');
+                var dispoEl = row.querySelector('[data-field="disposition"]');
+                var typeEl = row.querySelector('[data-field="appointment_type"]');
+
+                var name = nameEl ? nameEl.value : '';
+                var timeVal = timeEl ? timeEl.value : '';
+                var repName = (repEl && repEl.selectedIndex >= 0) ? repEl.options[repEl.selectedIndex].textContent.trim() : '';
+                var dispoVal = dispoEl ? dispoEl.value : '';
+                var dispoText = (dispoEl && dispoEl.selectedIndex >= 0) ? dispoEl.options[dispoEl.selectedIndex].textContent.trim() : '';
+                var typeVal = typeEl ? typeEl.value : '';
+                var typeText = (typeEl && typeEl.selectedIndex >= 0) ? typeEl.options[typeEl.selectedIndex].textContent.trim() : '';
+
+                var timeStr = '';
+                if (timeVal) {
+                    var d = new Date(timeVal);
+                    if (!isNaN(d.getTime())) {
+                        var h = d.getHours(), m = d.getMinutes();
+                        var ampm = h >= 12 ? 'PM' : 'AM';
+                        h = h % 12 || 12;
+                        timeStr = h + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+                    }
+                }
+
+                var tr = document.createElement('tr');
+                tr.dataset.id = id;
+
+                var nameCell = document.createElement('td');
+                nameCell.className = 'dm-name-cell';
+                nameCell.textContent = name || '—';
+                nameCell.onclick = (function(lid) { return function() { openDailyDetail(lid); }; })(id);
+                tr.appendChild(nameCell);
+
+                var timeCell = document.createElement('td');
+                timeCell.textContent = timeStr || '—';
+                tr.appendChild(timeCell);
+
+                var repCell = document.createElement('td');
+                repCell.textContent = repName || '—';
+                if (!repName || repName === 'Unassigned') repCell.style.color = '#98c1d9';
+                tr.appendChild(repCell);
+
+                var dispoCell = document.createElement('td');
+                if (dispoVal) {
+                    var dbadge = document.createElement('span');
+                    dbadge.className = 'dm-dispo-badge';
+                    dbadge.style.background = dispoColors[dispoVal] || '#999';
+                    dbadge.textContent = dispoText;
+                    dispoCell.appendChild(dbadge);
+                } else {
+                    dispoCell.textContent = '—';
+                    dispoCell.style.color = '#98c1d9';
+                }
+                tr.appendChild(dispoCell);
+
+                var typeColors2 = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+                var typeCell = document.createElement('td');
+                if (typeVal) {
+                    var tbadge = document.createElement('span');
+                    tbadge.className = 'dm-type-badge';
+                    tbadge.style.background = typeColors2[typeVal] || '#999';
+                    tbadge.textContent = typeText;
+                    typeCell.appendChild(tbadge);
+                } else {
+                    typeCell.textContent = '—';
+                    typeCell.style.color = '#98c1d9';
+                }
+                tr.appendChild(typeCell);
+
+                tbody.appendChild(tr);
+            }
+
+            if (!hasRows) {
+                var emptyTr = document.createElement('tr');
+                var emptyTd = document.createElement('td');
+                emptyTd.colSpan = 5;
+                emptyTd.className = 'dm-empty';
+                emptyTd.textContent = 'No appointments for this date';
+                emptyTr.appendChild(emptyTd);
+                tbody.appendChild(emptyTr);
+            }
+        }
+
+        // Detail bottom sheet
+        var currentDetailId = null;
+
+        function escapeDetailHtml(s) {
+            var div = document.createElement('div');
+            div.textContent = s || '';
+            return div.innerHTML;
+        }
+
+        function openDailyDetail(leadId) {
+            var row = document.querySelector('.crm-table tbody tr[data-id="' + leadId + '"]');
+            if (!row) return;
+            currentDetailId = leadId;
+
+            var gv = function(f) { var el = row.querySelector('[data-field="' + f + '"]'); return el ? el.value : ''; };
+            var gsh = function(f) { var el = row.querySelector('[data-field="' + f + '"]'); return el ? el.innerHTML : ''; };
+
+            var name = gv('homeowner_name');
+            var phone = gv('phone_number');
+            var address = gv('address');
+            var city = gv('city');
+            var state = gv('state');
+            var source = gv('source');
+            var apptTime = gv('appointment_datetime');
+            var followUp = gv('follow_up_date');
+            var notes = gv('call_notes');
+            var transcript = gv('call_transcript');
+            var tagsPills = row.querySelector('.tag-pills');
+            var tagsValue = tagsPills ? (tagsPills.dataset.value || '') : '';
+
+            document.getElementById('detail-name').textContent = name;
+            var dis = {% if is_manager %}''{% else %}' disabled'{% endif %};
+            var html = '';
+
+            // Phone
+            html += '<div class="detail-field"><div class="detail-field-label">Phone</div>';
+            if (phone) {
+                html += '<a class="detail-phone-link" href="tel:' + escapeDetailHtml(phone) + '">' + escapeDetailHtml(phone) + '</a>';
+            } else {
+                html += '<span style="color:#98c1d9;font-size:14px;">—</span>';
+            }
+            html += '</div>';
+
+            // Address
+            html += '<div class="detail-field"><div class="detail-field-label">Address</div>';
+            html += '<div class="detail-address-row">';
+            var fullAddr = (address || '') + (city ? ', ' + city : '') + (state ? ', ' + state : '');
+            html += '<span class="detail-address-text">' + escapeDetailHtml(fullAddr || '—') + '</span>';
+            if (address) {
+                html += ' <a class="detail-navigate" href="https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(address + ', ' + (city || '') + ', MA') + '" target="_blank">';
+                html += '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4.5 20.3l.7.7L12 18l6.8 3 .7-.7z"/></svg> Navigate</a>';
+            }
+            html += '</div></div>';
+
+            // Grid fields
+            html += '<div class="detail-grid">';
+
+            html += '<div class="detail-field"><div class="detail-field-label">Appt Time</div>';
+            html += '<input type="datetime-local" value="' + escapeDetailHtml(apptTime) + '" data-lead="' + leadId + '" data-field="appointment_datetime" onchange="saveDetailField(this)"' + dis + '></div>';
+
+            html += '<div class="detail-field"><div class="detail-field-label">Appt Type</div>';
+            html += '<select data-lead="' + leadId + '" data-field="appointment_type" onchange="saveDetailField(this)"' + dis + '>' + gsh('appointment_type') + '</select></div>';
+
+            html += '<div class="detail-field"><div class="detail-field-label">Format</div>';
+            html += '<select data-lead="' + leadId + '" data-field="appointment_format" onchange="saveDetailField(this)"' + dis + '>' + gsh('appointment_format') + '</select></div>';
+
+            html += '<div class="detail-field"><div class="detail-field-label">Rep</div>';
+            html += '<select data-lead="' + leadId + '" data-field="rep_id" onchange="saveDetailField(this)"' + dis + '>' + gsh('rep_id') + '</select></div>';
+
+            html += '<div class="detail-field"><div class="detail-field-label">Sit</div>';
+            html += '<select data-lead="' + leadId + '" data-field="sat" onchange="saveDetailField(this); updateSatColor(this);"' + dis + '>' + gsh('sat') + '</select></div>';
+
+            html += '<div class="detail-field"><div class="detail-field-label">Disposition</div>';
+            html += '<select data-lead="' + leadId + '" data-field="disposition" onchange="saveDetailField(this); updateDispoColor(this);"' + dis + '>' + gsh('disposition') + '</select></div>';
+
+            html += '</div>';
+
+            // Follow Up
+            html += '<div class="detail-field"><div class="detail-field-label">Follow Up Date</div>';
+            html += '<input type="date" value="' + escapeDetailHtml(followUp) + '" data-lead="' + leadId + '" data-field="follow_up_date" onchange="saveDetailField(this)"' + dis + '></div>';
+
+            // Tags
+            html += '<div class="detail-field"><div class="detail-field-label">Tags</div>';
+            html += '<div class="detail-tags" data-lead="' + leadId + '">';
+            ['Solar', 'Roof', 'Hvac', 'Battery', 'MassSave'].forEach(function(tag) {
+                var isActive = tagsValue.indexOf(tag) !== -1;
+                html += '<button type="button" class="detail-tag' + (isActive ? ' active' : '') + '" data-tag="' + tag + '"' + (dis ? ' disabled' : '') + ' onclick="toggleDetailTag(this, ' + leadId + ')">' + tag + '</button>';
+            });
+            html += '</div></div>';
+
+            // Call Notes
+            html += '<div class="detail-field"><div class="detail-field-label">Call Notes</div>';
+            html += '<input type="text" value="' + escapeDetailHtml(notes) + '" data-lead="' + leadId + '" data-field="call_notes" onchange="saveDetailField(this)"' + dis + ' placeholder="—"></div>';
+
+            // Transcript
+            html += '<div class="detail-field"><div class="detail-field-label">Transcript</div>';
+            html += '<textarea data-lead="' + leadId + '" data-field="call_transcript" onchange="saveDetailField(this)"' + dis + ' placeholder="—">' + escapeDetailHtml(transcript) + '</textarea></div>';
+
+            // Source
+            html += '<div class="detail-field"><div class="detail-field-label">Source</div>';
+            html += '<span style="font-size:14px;color:#293241;font-family:Montserrat,sans-serif;">' + escapeDetailHtml(source || '—') + '</span></div>';
+
+            // Action buttons
+            html += '<div class="detail-actions">';
+            html += '<button class="detail-action-btn" style="background:#3d5a80;color:#fff;" onclick="openChatter(' + leadId + ', \'' + name.replace(/'/g, "\\'") + '\'); closeDailyDetail();">';
+            html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Updates</button>';
+            html += '<button class="detail-action-btn" style="background:#ee6c4d;color:#fff;" onclick="openSmsThread(' + leadId + ', \'' + name.replace(/'/g, "\\'") + '\'); closeDailyDetail();">';
+            html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8l10 6 10-6"/></svg> SMS</button>';
+            html += '</div>';
+
+            {% if is_manager %}
+            html += '<button class="detail-action-btn" style="background:#ee6c4d;color:#fff;margin-top:8px;width:100%;" onclick="deleteDetailLead(' + leadId + ')">';
+            html += '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg> Delete Lead</button>';
+            {% endif %}
+
+            document.getElementById('detail-body').innerHTML = html;
+
+            // Color the dispo and sat selects
+            var detailDispo = document.querySelector('#detail-body [data-field="disposition"]');
+            if (detailDispo) updateDispoColor(detailDispo);
+            var detailSat = document.querySelector('#detail-body [data-field="sat"]');
+            if (detailSat) updateSatColor(detailSat);
+
+            document.getElementById('daily-detail-sheet').classList.add('open');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeDailyDetail() {
+            document.getElementById('daily-detail-sheet').classList.remove('open');
+            document.body.style.overflow = '';
+            currentDetailId = null;
+            buildMobileView();
+        }
+
+        function saveDetailField(el) {
+            var leadId = el.dataset.lead;
+            var field = el.dataset.field;
+            var value = el.value;
+            saveField(leadId, field, value, el);
+            var row = document.querySelector('.crm-table tbody tr[data-id="' + leadId + '"]');
+            if (row) {
+                var origEl = row.querySelector('[data-field="' + field + '"]');
+                if (origEl) origEl.value = value;
+            }
+        }
+
+        function toggleDetailTag(btn, leadId) {
+            btn.classList.toggle('active');
+            var container = btn.closest('.detail-tags');
+            var tags = [];
+            container.querySelectorAll('.detail-tag.active').forEach(function(b) { tags.push(b.dataset.tag); });
+            var tagsStr = tags.join(',');
+            saveField(leadId, 'tags', tagsStr, btn);
+            var row = document.querySelector('.crm-table tbody tr[data-id="' + leadId + '"]');
+            if (row) {
+                var pills = row.querySelector('.tag-pills');
+                if (pills) {
+                    pills.dataset.value = tagsStr;
+                    pills.querySelectorAll('.tag-pill').forEach(function(p) {
+                        p.classList.toggle('active', tags.indexOf(p.dataset.tag) !== -1);
+                    });
+                }
+            }
+        }
+
+        function deleteDetailLead(leadId) {
+            if (!confirm('Delete this lead?')) return;
+            fetch('/api/leads/' + leadId + '/', { method: 'DELETE' })
+                .then(function() {
+                    var row = document.querySelector('.crm-table tbody tr[data-id="' + leadId + '"]');
+                    if (row) row.remove();
+                    closeDailyDetail();
+                });
+        }
     </script>
 {% endblock %}
