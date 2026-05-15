@@ -49,4 +49,5 @@ urlpatterns = [
     path('provider/', views.provider_view, name='provider'),
     path('api/provider/availability/', views.provider_availability_api, name='provider_availability_api'),
     path('api/provider/leads/', views.provider_leads_api, name='provider_leads_api'),
+    path('api/provider/slot/', views.provider_slot_api, name='provider_slot_api'),
 ]

@@ -2189,3 +2189,33 @@ def provider_leads_api(request):
             })
 
     return JsonResponse({'own_leads': own_leads, 'other_leads': other_leads})
+
+
+@provider_required
+def provider_slot_api(request):
+    date_str = request.GET.get('date')
+    block_key = request.GET.get('block')
+    if not date_str or not block_key:
+        return JsonResponse({'error': 'date and block required'}, status=400)
+    date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+    block_hours = {bk: (hs, he) for bk, bl, hs, he in TIME_BLOCKS}
+    if block_key not in block_hours:
+        return JsonResponse({'error': 'invalid block'}, status=400)
+    hour_start, hour_end = block_hours[block_key]
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+    start_dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour_start), tzinfo=eastern)
+    end_dt = datetime.combine(date_obj, datetime.min.time().replace(hour=hour_end), tzinfo=eastern)
+    leads = Lead.objects.filter(
+        appointment_datetime__gte=start_dt,
+        appointment_datetime__lt=end_dt,
+    ).select_related('rep')
+    items = []
+    for lead in leads:
+        local_dt = lead.appointment_datetime.astimezone(eastern)
+        items.append({
+            'city': lead.city,
+            'time': local_dt.strftime('%I:%M %p'),
+            'appointment_type': lead.appointment_type,
+        })
+    return JsonResponse({'appointments': items})
