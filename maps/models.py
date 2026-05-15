@@ -136,6 +136,7 @@ class UserProfile(models.Model):
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='rep')
     rep = models.OneToOneField(Rep, null=True, blank=True, on_delete=models.SET_NULL, related_name='user_profile')
     lead_sources = models.TextField(blank=True)
+    hourly_availability = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.user.username} ({self.role})"

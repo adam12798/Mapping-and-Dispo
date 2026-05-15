@@ -225,6 +225,9 @@
                 html += '<div class="lead-sources-input">';
                 html += buildSourcePicker('u' + u.id, u.lead_sources || '', u.id);
                 html += '</div>';
+                html += '<label style="display:flex;align-items:center;gap:4px;font-size:11px;font-family:Montserrat,sans-serif;color:#3d5a80;margin-top:4px;cursor:pointer;">';
+                html += '<input type="checkbox"' + (u.hourly_availability ? ' checked' : '') + ' onchange="updateUser(' + u.id + ', {hourly_availability: this.checked})">';
+                html += 'Hourly view</label>';
             } else {
                 html += '<select class="crm-select" data-field="rep_id" onchange="updateUser(' + u.id + ', {rep_id: this.value || null})">';
                 html += '<option value="">— None —</option>';

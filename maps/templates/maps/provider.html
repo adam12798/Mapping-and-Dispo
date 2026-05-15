@@ -325,6 +325,21 @@
             {key: 'afternoon', label: '3-6 PM'},
             {key: 'evening', label: '6-9 PM'}
         ];
+        var HOURLY_MODE = {{ hourly_availability|yesno:"true,false" }};
+        var HOURS = [
+            {hour: 9, label: '9 AM', block: 'morning'},
+            {hour: 10, label: '10 AM', block: 'morning'},
+            {hour: 11, label: '11 AM', block: 'morning'},
+            {hour: 12, label: '12 PM', block: 'midday'},
+            {hour: 13, label: '1 PM', block: 'midday'},
+            {hour: 14, label: '2 PM', block: 'midday'},
+            {hour: 15, label: '3 PM', block: 'afternoon'},
+            {hour: 16, label: '4 PM', block: 'afternoon'},
+            {hour: 17, label: '5 PM', block: 'afternoon'},
+            {hour: 18, label: '6 PM', block: 'evening'},
+            {hour: 19, label: '7 PM', block: 'evening'},
+            {hour: 20, label: '8 PM', block: 'evening'}
+        ];
         var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         var MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
@@ -382,43 +397,76 @@
             var ws = dateStr(weekStart);
             fetch('/api/provider/availability/?week_start=' + ws)
                 .then(function(r) { return r.json(); })
-                .then(function(data) { renderAvailability(data.availability); });
+                .then(function(data) { renderAvailability(data.availability, data.hourly); });
         }
 
-        function renderAvailability(items) {
-            var lookup = {};
-            items.forEach(function(a) { lookup[a.date + '_' + a.time_block] = a; });
-
+        function renderAvailability(items, hourly) {
             var grid = document.getElementById('av-grid');
             var today = todayStr();
             var html = '';
 
-            // Header row: empty corner + 7 day columns
-            html += '<div class="av-header"></div>';
-            for (var i = 0; i < 7; i++) {
-                var d = new Date(weekStart);
-                d.setDate(d.getDate() + i);
-                var ds = dateStr(d);
-                html += '<div class="av-header' + (ds === today ? ' today-col' : '') + '">' +
-                    DAY_NAMES[d.getDay()] + '<br>' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate() + '</div>';
-            }
+            if (hourly) {
+                var lookup = {};
+                items.forEach(function(a) { lookup[a.date + '_' + a.hour] = a; });
 
-            // One row per time block
-            BLOCKS.forEach(function(b) {
-                html += '<div class="av-block-label">' + b.label + '</div>';
+                // Update grid columns for hourly (more rows)
+                grid.style.gridTemplateColumns = '80px repeat(7, 1fr)';
+
+                html += '<div class="av-header"></div>';
                 for (var i = 0; i < 7; i++) {
                     var d = new Date(weekStart);
                     d.setDate(d.getDate() + i);
                     var ds = dateStr(d);
-                    var a = lookup[ds + '_' + b.key] || { open: 0, booked: 0, rep_count: 0 };
-                    var cls = a.open > 0 ? 'open' : (a.booked > a.rep_count ? 'over' : 'full');
-                    var selCls = (selectedSlot && selectedSlot.date === ds && selectedSlot.block === b.key) ? ' selected' : '';
-                    html += '<div class="av-cell ' + cls + selCls + '" onclick="openSlotDetail(\'' + ds + '\', \'' + b.key + '\', \'' + b.label + '\')">';
-                    html += '<span class="av-open-count">' + a.open + '</span>';
-                    html += '<span class="av-label">' + (a.open === 1 ? 'spot' : 'spots') + '</span>';
-                    html += '</div>';
+                    html += '<div class="av-header' + (ds === today ? ' today-col' : '') + '">' +
+                        DAY_NAMES[d.getDay()] + '<br>' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate() + '</div>';
                 }
-            });
+
+                HOURS.forEach(function(h) {
+                    html += '<div class="av-block-label">' + h.label + '</div>';
+                    for (var i = 0; i < 7; i++) {
+                        var d = new Date(weekStart);
+                        d.setDate(d.getDate() + i);
+                        var ds = dateStr(d);
+                        var a = lookup[ds + '_' + h.hour] || { open: 0, booked: 0 };
+                        var cls = a.open > 0 ? 'open' : 'full';
+                        var selCls = (selectedSlot && selectedSlot.date === ds && selectedSlot.block === h.block) ? ' selected' : '';
+                        html += '<div class="av-cell ' + cls + selCls + '" onclick="openSlotDetail(\'' + ds + '\', \'' + h.block + '\', \'' + h.label + '\')">';
+                        html += '<span class="av-open-count">' + a.open + '</span>';
+                        html += '<span class="av-label">' + (a.booked > 0 ? a.booked + ' booked' : (a.open === 1 ? 'spot' : 'spots')) + '</span>';
+                        html += '</div>';
+                    }
+                });
+            } else {
+                var lookup = {};
+                items.forEach(function(a) { lookup[a.date + '_' + a.time_block] = a; });
+
+                grid.style.gridTemplateColumns = '90px repeat(7, 1fr)';
+
+                html += '<div class="av-header"></div>';
+                for (var i = 0; i < 7; i++) {
+                    var d = new Date(weekStart);
+                    d.setDate(d.getDate() + i);
+                    var ds = dateStr(d);
+                    html += '<div class="av-header' + (ds === today ? ' today-col' : '') + '">' +
+                        DAY_NAMES[d.getDay()] + '<br>' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate() + '</div>';
+                }
+
+                BLOCKS.forEach(function(b) {
+                    html += '<div class="av-block-label">' + b.label + '</div>';
+                    for (var i = 0; i < 7; i++) {
+                        var d = new Date(weekStart);
+                        d.setDate(d.getDate() + i);
+                        var ds = dateStr(d);
+                        var a = lookup[ds + '_' + b.key] || { open: 0, booked: 0, rep_count: 0 };
+                        var cls = a.open > 0 ? 'open' : (a.booked > a.rep_count ? 'over' : 'full');
+                        var selCls = (selectedSlot && selectedSlot.date === ds && selectedSlot.block === b.key) ? ' selected' : '';
+                        html += '<div class="av-cell ' + cls + selCls + '" onclick="openSlotDetail(\'' + ds + '\', \'' + b.key + '\', \'' + b.label + '\')">';
+                        html += '<span class="av-open-count">' + a.open + '</span>';
+                        html += '<span class="av-label">' + (a.open === 1 ? 'spot' : 'spots') + '</span>';
+                        html += '</div>';
+                    }
+                });
+            }
 
             grid.innerHTML = html;
         }

@@ -1600,6 +1600,7 @@ def users_api(request):
             'rep_name': u.profile.rep.name if hasattr(u, 'profile') and u.profile.rep else '',
             'is_active': u.is_active,
             'lead_sources': u.profile.lead_sources if hasattr(u, 'profile') else '',
+            'hourly_availability': u.profile.hourly_availability if hasattr(u, 'profile') else False,
         } for u in users]
         return JsonResponse(data, safe=False)
 
@@ -1616,7 +1617,8 @@ def users_api(request):
         user = User.objects.create_user(username=username, password=password)
         rep = Rep.objects.get(pk=rep_id) if rep_id else None
         lead_sources = data.get('lead_sources', '')
-        UserProfile.objects.create(user=user, role=role, rep=rep, lead_sources=lead_sources)
+        hourly = data.get('hourly_availability', False)
+        UserProfile.objects.create(user=user, role=role, rep=rep, lead_sources=lead_sources, hourly_availability=hourly)
         return JsonResponse({'status': 'ok', 'id': user.id})
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -1643,6 +1645,8 @@ def user_update_api(request, pk):
             profile.rep = Rep.objects.get(pk=data['rep_id']) if data['rep_id'] else None
         if 'lead_sources' in data:
             profile.lead_sources = data['lead_sources']
+        if 'hourly_availability' in data:
+            profile.hourly_availability = data['hourly_availability']
         profile.save()
         if 'is_active' in data:
             user.is_active = data['is_active']
@@ -2088,6 +2092,19 @@ def _count_bookings_for_block(date_obj, hour_start, hour_end):
     return count
 
 
+def _count_bookings_for_hour(date_obj, hour):
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+    leads = Lead.objects.filter(appointment_datetime__date=date_obj, cancelled=False)
+    count = 0
+    for lead in leads:
+        if lead.appointment_datetime:
+            local_dt = lead.appointment_datetime.astimezone(eastern)
+            if local_dt.hour == hour:
+                count += 1
+    return count
+
+
 def _get_rep_count(date_obj, block_key):
     try:
         override = RepCountOverride.objects.get(date=date_obj, time_block=block_key)
@@ -2172,7 +2189,10 @@ def rep_count_bookings_api(request):
 # ===== Provider Portal =====
 @provider_required
 def provider_view(request):
-    return render(request, 'maps/provider.html', {'active_tab': 'provider'})
+    hourly = False
+    if hasattr(request.user, 'profile'):
+        hourly = request.user.profile.hourly_availability
+    return render(request, 'maps/provider.html', {'active_tab': 'provider', 'hourly_availability': hourly})
 
 
 @provider_required
@@ -2182,20 +2202,40 @@ def provider_availability_api(request):
         return JsonResponse({'error': 'week_start required'}, status=400)
     start = datetime.strptime(week_start, '%Y-%m-%d').date()
     from datetime import timedelta
+
+    hourly = False
+    if hasattr(request.user, 'profile'):
+        hourly = request.user.profile.hourly_availability
+
     availability = []
     for day_offset in range(7):
         date_obj = start + timedelta(days=day_offset)
         for block_key, block_label, hour_start, hour_end in TIME_BLOCKS:
             rep_count = _get_rep_count(date_obj, block_key)
             booked = _count_bookings_for_block(date_obj, hour_start, hour_end)
-            availability.append({
-                'date': date_obj.isoformat(),
-                'time_block': block_key,
-                'rep_count': rep_count,
-                'booked': booked,
-                'open': max(0, rep_count - booked),
-            })
-    return JsonResponse({'availability': availability})
+            block_open = max(0, rep_count - booked)
+
+            if hourly:
+                for h in range(hour_start, hour_end):
+                    hour_booked = _count_bookings_for_hour(date_obj, h)
+                    label = datetime.strptime(str(h), '%H').strftime('%I %p').lstrip('0')
+                    availability.append({
+                        'date': date_obj.isoformat(),
+                        'hour': h,
+                        'hour_label': label,
+                        'block_key': block_key,
+                        'booked': hour_booked,
+                        'open': block_open,
+                    })
+            else:
+                availability.append({
+                    'date': date_obj.isoformat(),
+                    'time_block': block_key,
+                    'rep_count': rep_count,
+                    'booked': booked,
+                    'open': block_open,
+                })
+    return JsonResponse({'availability': availability, 'hourly': hourly})
 
 
 @provider_required
