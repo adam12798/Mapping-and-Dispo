@@ -1571,7 +1571,18 @@ def calls_view(request):
 def users_view(request):
     reps = list(Rep.objects.order_by('name').values('id', 'name'))
     import json as json_mod
-    return render(request, 'maps/users.html', {'reps_json': json_mod.dumps(reps), 'active_tab': 'users'})
+    raw_sources = Lead.objects.exclude(source='').values_list('source', flat=True).distinct()
+    seen = {}
+    for s in raw_sources:
+        key = s.strip().lower()
+        if key and key not in seen:
+            seen[key] = s.strip()
+    all_sources = sorted(seen.values(), key=lambda x: x.lower())
+    return render(request, 'maps/users.html', {
+        'reps_json': json_mod.dumps(reps),
+        'sources_json': json_mod.dumps(all_sources),
+        'active_tab': 'users',
+    })
 
 
 @csrf_exempt

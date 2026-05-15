@@ -27,10 +27,129 @@
     </div>
 {% endblock %}
 
+{% block head_extra %}
+    <style>
+        .source-picker {
+            position: relative;
+            display: inline-block;
+            min-width: 180px;
+        }
+        .source-picker-toggle {
+            width: 100%;
+            padding: 6px 28px 6px 10px;
+            border: 1px solid #98c1d9;
+            border-radius: 4px;
+            background: #fff;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            color: #293241;
+            cursor: pointer;
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            appearance: none;
+        }
+        .source-picker-toggle::after {
+            content: '▾';
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 12px;
+            color: #3d5a80;
+            pointer-events: none;
+        }
+        .source-picker-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #fff;
+            border: 1px solid #98c1d9;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+            z-index: 20;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .source-picker-dropdown.open { display: block; }
+        .source-picker-dropdown label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 12px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            color: #293241;
+            cursor: pointer;
+        }
+        .source-picker-dropdown label:hover { background: #e0fbfc; }
+        .source-picker-dropdown input[type="checkbox"] { accent-color: #3d5a80; }
+    </style>
+{% endblock %}
 {% block scripts %}
     <script>
         var allReps = {{ reps_json|safe }};
+        var allSources = {{ sources_json|safe }};
         var currentUserId = {{ request.user.id }};
+
+        function parseUserSources(str) {
+            if (!str) return [];
+            return str.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+        }
+
+        function sourcesMatch(a, b) {
+            return a.toLowerCase() === b.toLowerCase();
+        }
+
+        function isSourceSelected(userSources, src) {
+            for (var i = 0; i < userSources.length; i++) {
+                if (sourcesMatch(userSources[i], src)) return true;
+            }
+            return false;
+        }
+
+        function buildSourcePicker(id, selectedCsv, onChangeCallback) {
+            var selected = parseUserSources(selectedCsv);
+            var html = '<div class="source-picker" id="sp-' + id + '">';
+            var label = selected.length ? selected.join(', ') : '— Select Sources —';
+            html += '<button type="button" class="source-picker-toggle" onclick="toggleSourcePicker(\'' + id + '\')">' + escHtml(label) + '</button>';
+            html += '<div class="source-picker-dropdown" id="spd-' + id + '">';
+            allSources.forEach(function(src) {
+                var checked = isSourceSelected(selected, src) ? ' checked' : '';
+                html += '<label><input type="checkbox" value="' + escHtml(src) + '"' + checked + ' onchange="onSourceCheck(\'' + id + '\', ' + onChangeCallback + ')"> ' + escHtml(src) + '</label>';
+            });
+            html += '</div></div>';
+            return html;
+        }
+
+        function toggleSourcePicker(id) {
+            var dd = document.getElementById('spd-' + id);
+            var wasOpen = dd.classList.contains('open');
+            document.querySelectorAll('.source-picker-dropdown.open').forEach(function(el) { el.classList.remove('open'); });
+            if (!wasOpen) dd.classList.add('open');
+        }
+
+        function onSourceCheck(id, userId) {
+            var dd = document.getElementById('spd-' + id);
+            var checks = dd.querySelectorAll('input[type="checkbox"]');
+            var vals = [];
+            checks.forEach(function(c) { if (c.checked) vals.push(c.value); });
+            var csv = vals.join(', ');
+            var toggle = dd.parentElement.querySelector('.source-picker-toggle');
+            toggle.textContent = csv || '— Select Sources —';
+            if (userId) {
+                updateUser(userId, { lead_sources: csv });
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.source-picker')) {
+                document.querySelectorAll('.source-picker-dropdown.open').forEach(function(el) { el.classList.remove('open'); });
+            }
+        });
 
         function loadUsers() {
             fetch('/api/users/').then(function(r) { return r.json(); }).then(function(users) {
@@ -50,7 +169,9 @@
                         html += '<option value="' + r.id + '"' + (u.rep_id == r.id ? ' selected' : '') + '>' + escHtml(r.name) + '</option>';
                     });
                     html += '</select>';
-                    html += '<input type="text" class="crm-input lead-sources-input" data-field="lead_sources" value="' + escHtml(u.lead_sources || '') + '" placeholder="e.g. SolarLeads, GreenHome" onchange="updateUser(' + u.id + ', {lead_sources: this.value})" style="' + (u.role !== 'provider' ? 'display:none' : '') + '">';
+                    html += '<div class="lead-sources-input" style="' + (u.role !== 'provider' ? 'display:none' : '') + '">';
+                    html += buildSourcePicker('u' + u.id, u.lead_sources || '', u.id);
+                    html += '</div>';
                     html += '</td>';
                     html += '<td><select class="crm-select" data-field="is_active" onchange="updateUser(' + u.id + ', {is_active: this.value === \'true\'})">';
                     html += '<option value="true"' + (u.is_active ? ' selected' : '') + '>Active</option>';
@@ -84,7 +205,9 @@
             allReps.forEach(function(r) {
                 html += '<option value="' + r.id + '">' + escHtml(r.name) + '</option>';
             });
-            html += '</select><input type="text" class="crm-input" id="new-lead-sources" placeholder="e.g. SolarLeads, GreenHome" style="display:none;margin-top:4px;"></td>';
+            html += '</select><div id="new-lead-sources-wrap" style="display:none;margin-top:4px;">';
+            html += buildSourcePicker('new', '', 'null');
+            html += '</div></td>';
             html += '<td colspan="2"><input type="password" class="crm-input" id="new-password" placeholder="Password"></td>';
             html += '<td class="action-col"><button class="add-btn" style="padding:4px 10px;font-size:12px;" onclick="createUser()">Save</button></td>';
             html += '</tr>';
@@ -92,12 +215,21 @@
             document.getElementById('new-username').focus();
         }
 
+        function getPickerValue(id) {
+            var dd = document.getElementById('spd-' + id);
+            if (!dd) return '';
+            var checks = dd.querySelectorAll('input[type="checkbox"]');
+            var vals = [];
+            checks.forEach(function(c) { if (c.checked) vals.push(c.value); });
+            return vals.join(', ');
+        }
+
         function createUser() {
             var username = document.getElementById('new-username').value.trim();
             var password = document.getElementById('new-password').value;
             var role = document.getElementById('new-role').value;
             var repId = document.getElementById('new-rep').value;
-            var leadSources = document.getElementById('new-lead-sources') ? document.getElementById('new-lead-sources').value : '';
+            var leadSources = getPickerValue('new');
             if (!username || !password) { alert('Username and password required'); return; }
             fetch('/api/users/', {
                 method: 'POST',
@@ -138,25 +270,25 @@
         function toggleLeadSources(sel) {
             var row = sel.closest('tr');
             var repSel = row.querySelector('[data-field="rep_id"]');
-            var srcInput = row.querySelector('.lead-sources-input');
+            var srcWrap = row.querySelector('.lead-sources-input');
             if (sel.value === 'provider') {
                 if (repSel) repSel.style.display = 'none';
-                if (srcInput) srcInput.style.display = '';
+                if (srcWrap) srcWrap.style.display = '';
             } else {
                 if (repSel) repSel.style.display = '';
-                if (srcInput) srcInput.style.display = 'none';
+                if (srcWrap) srcWrap.style.display = 'none';
             }
         }
 
         function toggleNewLeadSources(sel) {
             var repSel = document.getElementById('new-rep');
-            var srcInput = document.getElementById('new-lead-sources');
+            var srcWrap = document.getElementById('new-lead-sources-wrap');
             if (sel.value === 'provider') {
                 if (repSel) repSel.style.display = 'none';
-                if (srcInput) srcInput.style.display = '';
+                if (srcWrap) srcWrap.style.display = '';
             } else {
                 if (repSel) repSel.style.display = '';
-                if (srcInput) srcInput.style.display = 'none';
+                if (srcWrap) srcWrap.style.display = 'none';
             }
         }
 
