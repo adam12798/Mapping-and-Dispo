@@ -1,0 +1,325 @@
+{% extends "maps/base.html" %}
+{% load static %}
+
+{% block title %}My Leads{% endblock %}
+
+{% block head_extra %}
+    <style>
+        .pcrm-container {
+            padding: 0;
+            max-width: 100%;
+            background: #fff;
+            min-height: calc(100vh - 44px);
+            display: flex;
+            flex-direction: column;
+        }
+        .pcrm-toolbar {
+            padding: 12px 24px;
+            border-bottom: 2px solid #98c1d9;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            font-family: 'Montserrat', sans-serif;
+        }
+        .pcrm-toolbar h2 {
+            font-size: 20px;
+            color: #293241;
+            margin: 0;
+        }
+        .pcrm-search {
+            padding: 6px 12px;
+            border: 1px solid #98c1d9;
+            border-radius: 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            width: 220px;
+        }
+        .pcrm-search:focus { outline: none; border-color: #3d5a80; box-shadow: 0 0 0 3px rgba(61,90,128,0.15); }
+        .pcrm-count {
+            font-size: 13px;
+            color: #3d5a80;
+            font-weight: 600;
+            margin-left: auto;
+        }
+        .pcrm-table-wrap {
+            flex: 1;
+            overflow: auto;
+            position: relative;
+        }
+        .pcrm-table {
+            width: max-content;
+            min-width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+        }
+        .pcrm-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 3;
+            background: #293241;
+            color: #e0fbfc;
+            padding: 10px 14px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }
+        .pcrm-table thead th:hover { background: #3d5a80; }
+        .pcrm-table thead th.pcrm-sticky {
+            position: sticky;
+            left: 0;
+            z-index: 5;
+        }
+        .pcrm-table tbody td {
+            padding: 8px 14px;
+            border-bottom: 1px solid #e8f4f8;
+            color: #293241;
+            white-space: nowrap;
+            background: #fff;
+        }
+        .pcrm-table tbody tr:hover td { background: #f8fdfe; }
+        .pcrm-table tbody .pcrm-name {
+            position: sticky;
+            left: 0;
+            z-index: 2;
+            background: #fff;
+            font-weight: 600;
+            color: #3d5a80;
+        }
+        .pcrm-table tbody tr:hover .pcrm-name { background: #f8fdfe; }
+        .pcrm-name::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+            width: 2px;
+            background: #98c1d9;
+        }
+        .pcrm-dispo {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .pcrm-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #fff;
+            text-transform: uppercase;
+        }
+        .pcrm-notes {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .pcrm-transcript {
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .pcrm-empty {
+            text-align: center;
+            padding: 60px 24px;
+            color: #98c1d9;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 15px;
+        }
+        .sort-arrow {
+            font-size: 10px;
+            margin-left: 4px;
+            opacity: 0.5;
+        }
+        .sort-arrow.active { opacity: 1; }
+
+        @media (max-width: 768px) {
+            .pcrm-container { padding-bottom: 64px; }
+            .pcrm-toolbar { padding: 10px 12px; }
+            .pcrm-toolbar h2 { font-size: 16px; }
+            .pcrm-search { width: 140px; }
+            .pcrm-table thead th { padding: 8px 10px; font-size: 10px; }
+            .pcrm-table tbody td { padding: 6px 10px; font-size: 12px; }
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="pcrm-container">
+        <div class="pcrm-toolbar">
+            <h2>My Leads</h2>
+            <input type="text" class="pcrm-search" id="pcrm-search" placeholder="Search name, phone, city..." oninput="debounceSearch()">
+            <span class="pcrm-count" id="pcrm-count"></span>
+        </div>
+        <div class="pcrm-table-wrap">
+            <table class="pcrm-table">
+                <thead>
+                    <tr>
+                        <th class="pcrm-sticky" onclick="sortBy('homeowner_name')">Name <span class="sort-arrow" id="sort-homeowner_name">&#9650;</span></th>
+                        <th onclick="sortBy('phone_number')">Phone <span class="sort-arrow" id="sort-phone_number"></span></th>
+                        <th onclick="sortBy('address')">Address <span class="sort-arrow" id="sort-address"></span></th>
+                        <th onclick="sortBy('city')">City <span class="sort-arrow" id="sort-city"></span></th>
+                        <th onclick="sortBy('state')">State <span class="sort-arrow" id="sort-state"></span></th>
+                        <th onclick="sortBy('source')">Source <span class="sort-arrow" id="sort-source"></span></th>
+                        <th onclick="sortBy('tags')">Tags <span class="sort-arrow" id="sort-tags"></span></th>
+                        <th onclick="sortBy('appointment_type')">Appt Type <span class="sort-arrow" id="sort-appointment_type"></span></th>
+                        <th onclick="sortBy('appointment_format')">Format <span class="sort-arrow" id="sort-appointment_format"></span></th>
+                        <th onclick="sortBy('appointment_datetime')">Date / Time <span class="sort-arrow" id="sort-appointment_datetime"></span></th>
+                        <th onclick="sortBy('rep_name')">Rep <span class="sort-arrow" id="sort-rep_name"></span></th>
+                        <th onclick="sortBy('sat')">Sit <span class="sort-arrow" id="sort-sat"></span></th>
+                        <th onclick="sortBy('disposition')">Dispo <span class="sort-arrow" id="sort-disposition"></span></th>
+                        <th onclick="sortBy('follow_up_date')">Follow Up <span class="sort-arrow" id="sort-follow_up_date"></span></th>
+                        <th onclick="sortBy('call_notes')">Call Notes <span class="sort-arrow" id="sort-call_notes"></span></th>
+                        <th onclick="sortBy('call_transcript')">Transcript <span class="sort-arrow" id="sort-call_transcript"></span></th>
+                    </tr>
+                </thead>
+                <tbody id="pcrm-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        var dispoColors = {
+            sale: '#27ae60', no_sale: '#8e44ad', follow_up: '#e67e22', credit_fail: '#ff69b4',
+            cancel_door: '#95a5a6', cpfu: '#98c1d9', rep_no_show: '#111', no_coverage: '#c0392b',
+            needs_reschedule: '#3498db', incomplete_deal: '#d4a017', future_contact: '#1abc9c',
+            dq: '#8B4513', no_show: '#800000'
+        };
+        var dispoLabels = {
+            sale: 'Sale', no_sale: 'No Sale', follow_up: 'Follow Up', credit_fail: 'Credit Fail',
+            cancel_door: 'Cancel at Door', cpfu: 'CPFU', rep_no_show: 'Rep No Show',
+            no_coverage: 'No Coverage', needs_reschedule: 'Needs Reschedule',
+            incomplete_deal: 'Incomplete Deal', future_contact: 'Future Contact',
+            dq: 'DQ', no_show: 'No Show'
+        };
+        var satLabels = { yes: 'Yes', no: 'No' };
+        var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+        var formatLabels = { in_person: 'In Person', virtual: 'Virtual' };
+
+        var allLeads = [];
+        var sortField = 'appointment_datetime';
+        var sortAsc = false;
+        var searchTimer = null;
+
+        function escHtml(s) {
+            var d = document.createElement('div');
+            d.textContent = s || '';
+            return d.innerHTML;
+        }
+
+        function loadLeads() {
+            var search = document.getElementById('pcrm-search').value.trim();
+            var url = '/api/provider/crm/';
+            if (search) url += '?search=' + encodeURIComponent(search);
+            fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+                allLeads = data.leads;
+                doSort();
+                renderTable();
+            });
+        }
+
+        function debounceSearch() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(loadLeads, 300);
+        }
+
+        function doSort() {
+            var field = sortField;
+            var asc = sortAsc;
+            allLeads.sort(function(a, b) {
+                var va = (a[field] || '').toString().toLowerCase();
+                var vb = (b[field] || '').toString().toLowerCase();
+                if (va < vb) return asc ? -1 : 1;
+                if (va > vb) return asc ? 1 : -1;
+                return 0;
+            });
+        }
+
+        function sortBy(field) {
+            if (sortField === field) {
+                sortAsc = !sortAsc;
+            } else {
+                sortField = field;
+                sortAsc = true;
+            }
+            document.querySelectorAll('.sort-arrow').forEach(function(el) {
+                el.classList.remove('active');
+                el.innerHTML = '';
+            });
+            var arrow = document.getElementById('sort-' + field);
+            if (arrow) {
+                arrow.classList.add('active');
+                arrow.innerHTML = sortAsc ? '&#9650;' : '&#9660;';
+            }
+            doSort();
+            renderTable();
+        }
+
+        function renderTable() {
+            var tbody = document.getElementById('pcrm-tbody');
+            document.getElementById('pcrm-count').textContent = allLeads.length + ' lead' + (allLeads.length !== 1 ? 's' : '');
+
+            if (allLeads.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="16" class="pcrm-empty">No leads found</td></tr>';
+                return;
+            }
+
+            var html = '';
+            allLeads.forEach(function(l) {
+                html += '<tr>';
+                html += '<td class="pcrm-name">' + escHtml(l.homeowner_name) + '</td>';
+                html += '<td>' + escHtml(l.phone_number) + '</td>';
+                html += '<td>' + escHtml(l.address) + '</td>';
+                html += '<td>' + escHtml(l.city) + '</td>';
+                html += '<td>' + escHtml(l.state) + '</td>';
+                html += '<td>' + escHtml(l.source) + '</td>';
+                html += '<td>' + escHtml(l.tags) + '</td>';
+
+                if (l.appointment_type) {
+                    var tc = typeColors[l.appointment_type] || '#999';
+                    html += '<td><span class="pcrm-type" style="background:' + tc + '">' + escHtml(l.appointment_type) + '</span></td>';
+                } else {
+                    html += '<td style="color:#98c1d9;">—</td>';
+                }
+
+                html += '<td>' + (formatLabels[l.appointment_format] || escHtml(l.appointment_format) || '<span style="color:#98c1d9;">—</span>') + '</td>';
+                html += '<td>' + (escHtml(l.appointment_datetime) || '<span style="color:#98c1d9;">—</span>') + '</td>';
+                html += '<td>' + (escHtml(l.rep_name) || '<span style="color:#98c1d9;">—</span>') + '</td>';
+                html += '<td>' + (satLabels[l.sat] || '<span style="color:#98c1d9;">—</span>') + '</td>';
+
+                if (l.disposition) {
+                    var dc = dispoColors[l.disposition] || '#999';
+                    var dl = dispoLabels[l.disposition] || l.disposition;
+                    html += '<td><span class="pcrm-dispo" style="background:' + dc + '">' + dl + '</span></td>';
+                } else {
+                    html += '<td style="color:#98c1d9;">—</td>';
+                }
+
+                html += '<td>' + (escHtml(l.follow_up_date) || '<span style="color:#98c1d9;">—</span>') + '</td>';
+                html += '<td class="pcrm-notes">' + (escHtml(l.call_notes) || '<span style="color:#98c1d9;">—</span>') + '</td>';
+
+                var trans = l.call_transcript || '';
+                var transDisplay = trans.length > 50 ? trans.substring(0, 50) + '…' : trans;
+                html += '<td class="pcrm-transcript" title="' + escHtml(trans) + '">' + (escHtml(transDisplay) || '<span style="color:#98c1d9;">—</span>') + '</td>';
+
+                html += '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
+
+        loadLeads();
+    </script>
+{% endblock %}

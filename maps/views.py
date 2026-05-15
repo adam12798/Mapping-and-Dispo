@@ -2192,6 +2192,56 @@ def provider_leads_api(request):
 
 
 @provider_required
+def provider_crm_view(request):
+    return render(request, 'maps/provider_crm.html', {'active_tab': 'provider_crm'})
+
+
+@provider_required
+def provider_crm_api(request):
+    profile = request.user.profile
+    sources = profile.get_lead_sources_list()
+    if not sources:
+        return JsonResponse({'leads': []})
+    source_q = Q()
+    for s in sources:
+        source_q |= Q(source__iexact=s)
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+    leads = Lead.objects.filter(source_q).select_related('rep').order_by('-appointment_datetime')
+
+    search = request.GET.get('search', '').strip().lower()
+    data = []
+    for lead in leads:
+        local_dt = lead.appointment_datetime.astimezone(eastern) if lead.appointment_datetime else None
+        row = {
+            'id': lead.id,
+            'homeowner_name': lead.homeowner_name,
+            'phone_number': lead.phone_number,
+            'address': lead.address,
+            'city': lead.city,
+            'state': lead.state,
+            'source': lead.source,
+            'tags': lead.tags,
+            'appointment_type': lead.appointment_type,
+            'appointment_format': lead.appointment_format,
+            'appointment_datetime': local_dt.strftime('%m/%d/%Y %I:%M %p') if local_dt else '',
+            'appointment_date': local_dt.strftime('%Y-%m-%d') if local_dt else '',
+            'rep_name': lead.rep.name if lead.rep else '',
+            'sat': lead.sat,
+            'disposition': lead.disposition,
+            'follow_up_date': lead.follow_up_date.isoformat() if lead.follow_up_date else '',
+            'call_notes': lead.call_notes,
+            'call_transcript': lead.call_transcript,
+        }
+        if search:
+            haystack = (row['homeowner_name'] + row['phone_number'] + row['address'] + row['city']).lower()
+            if search not in haystack:
+                continue
+        data.append(row)
+    return JsonResponse({'leads': data})
+
+
+@provider_required
 def provider_slot_api(request):
     date_str = request.GET.get('date')
     block_key = request.GET.get('block')

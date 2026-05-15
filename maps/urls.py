@@ -50,4 +50,6 @@ urlpatterns = [
     path('api/provider/availability/', views.provider_availability_api, name='provider_availability_api'),
     path('api/provider/leads/', views.provider_leads_api, name='provider_leads_api'),
     path('api/provider/slot/', views.provider_slot_api, name='provider_slot_api'),
+    path('provider/crm/', views.provider_crm_view, name='provider_crm'),
+    path('api/provider/crm/', views.provider_crm_api, name='provider_crm_api'),
 ]
