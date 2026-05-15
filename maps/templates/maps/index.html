@@ -451,6 +451,7 @@
                 return leadDate === dateVal;
             });
             dayLeads.forEach(function(lead) {
+                if (lead.cancelled) return;
                 var color = (!lead.appointment_type || !lead.appointment_format) ? '#ff69b4' : (leadTypeColors[lead.appointment_type] || '#ff69b4');
                 var marker = L.marker([lead.lat, lead.lng], {
                     icon: makePinIcon(color, '')
@@ -759,19 +760,24 @@
                             var parts = lead.appointment_datetime.split(' ');
                             if (parts.length >= 3) timeStr = parts[1] + ' ' + parts[2];
                         }
-                        html += '<div class="sidebar-row" data-lead-id="' + lead.id + '" onclick="panTo(' + lead.lat + ',' + lead.lng + ')">';
-                        html += '<div class="appt-name">' + displayName + '</div>';
+                        var rowStyle = lead.cancelled ? 'opacity:0.5;' : '';
+                        html += '<div class="sidebar-row" data-lead-id="' + lead.id + '"' + (lead.cancelled ? '' : ' onclick="panTo(' + lead.lat + ',' + lead.lng + ')"') + ' style="' + rowStyle + '">';
+                        html += '<div class="appt-name">' + displayName;
+                        if (lead.cancelled) html += ' <span style="background:#e74c3c;color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;margin-left:6px;letter-spacing:0.5px;">CANCELLED</span>';
+                        html += '</div>';
                         html += '<div class="appt-details">';
                         if (lead.phone_number) html += '<span>' + lead.phone_number + '</span>';
                         var badgeLabel = lead.appointment_type || 'unknown';
                         html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + badgeLabel + '</span>';
                         if (timeStr) html += '<span>' + timeStr + '</span>';
-                        html += '<select class="sidebar-assign-select" onchange="assignRep(' + lead.id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
-                        html += '<option value=""' + (!lead.rep_id ? ' selected' : '') + '>Unassigned</option>';
-                        allReps.forEach(function(rep) {
-                            html += '<option value="' + rep.id + '"' + (lead.rep_id == rep.id ? ' selected' : '') + '>' + rep.name + '</option>';
-                        });
-                        html += '</select>';
+                        if (!lead.cancelled) {
+                            html += '<select class="sidebar-assign-select" onchange="assignRep(' + lead.id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
+                            html += '<option value=""' + (!lead.rep_id ? ' selected' : '') + '>Unassigned</option>';
+                            allReps.forEach(function(rep) {
+                                html += '<option value="' + rep.id + '"' + (lead.rep_id == rep.id ? ' selected' : '') + '>' + rep.name + '</option>';
+                            });
+                            html += '</select>';
+                        }
                         html += '</div>';
                         html += '</div>';
                     });

@@ -129,6 +129,7 @@ def leads_api(request):
             'created_at': lead.created_at.astimezone(eastern).strftime('%m/%d/%Y %I:%M %p'),
             'rep_id': lead.rep_id,
             'rep_name': lead.rep.name if lead.rep else '',
+            'cancelled': lead.cancelled,
         }
         for lead in leads
     ]
@@ -1840,6 +1841,71 @@ def sms_webhook(request):
                 content_type='text/xml',
             )
 
+    # Check for APPOINTMENT CANCELLED format
+    if body and 'APPOINTMENT CANCELLED' in body.upper():
+        cancel_fields = {}
+        for line in body.splitlines():
+            line = line.strip()
+            if ':' in line:
+                key, val = line.split(':', 1)
+                key = key.strip().lower()
+                val = val.strip()
+                if 'name' in key:
+                    cancel_fields['name'] = val
+                elif 'phone' in key:
+                    cancel_fields['phone'] = val
+                elif 'address' in key:
+                    cancel_fields['address'] = val
+                elif 'city' in key:
+                    cancel_fields['city'] = val
+                elif 'day and time' in key or 'time' in key:
+                    cancel_fields['datetime'] = val
+
+        name = cancel_fields.get('name', '')
+        phone = cancel_fields.get('phone', '')
+        address = cancel_fields.get('address', '')
+        lead = None
+        if name and phone:
+            lead = Lead.objects.filter(
+                homeowner_name__iexact=name,
+                phone_number__icontains=phone[-10:]
+            ).order_by('-created_at').first()
+        if not lead and name and address:
+            lead = Lead.objects.filter(
+                homeowner_name__iexact=name,
+                address__icontains=address
+            ).order_by('-created_at').first()
+        if not lead and name:
+            lead = Lead.objects.filter(
+                homeowner_name__iexact=name
+            ).order_by('-created_at').first()
+
+        if lead:
+            lead.cancelled = True
+            lead.raw_message = body
+            lead.save(update_fields=['cancelled', 'raw_message'])
+            LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+            system_user = User.objects.filter(is_superuser=True).first()
+            if system_user:
+                LeadUpdate.objects.create(lead=lead, user=system_user, text='Appointment cancelled via SMS')
+            send_sms(from_number, f"Cancelled: {lead.homeowner_name} appointment has been marked as cancelled.")
+        else:
+            Lead.objects.create(
+                address=cancel_fields.get('address', ''),
+                city=cancel_fields.get('city', ''),
+                homeowner_name=name,
+                phone_number=phone,
+                from_number=from_number,
+                raw_message=body,
+                cancelled=True,
+            )
+            send_sms(from_number, f"Cancelled: {name or 'Unknown'} — no matching appointment found, saved as cancelled lead.")
+
+        return HttpResponse(
+            '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            content_type='text/xml',
+        )
+
     # Check if sender is a rep — if so, treat as time off request
     rep = Rep.objects.filter(phone_number__icontains=from_number[-10:]).first() if from_number else None
     if rep and body:
@@ -2012,7 +2078,7 @@ TIME_BLOCKS = [
 def _count_bookings_for_block(date_obj, hour_start, hour_end):
     from zoneinfo import ZoneInfo
     eastern = ZoneInfo('America/New_York')
-    leads = Lead.objects.filter(appointment_datetime__date=date_obj)
+    leads = Lead.objects.filter(appointment_datetime__date=date_obj, cancelled=False)
     count = 0
     for lead in leads:
         if lead.appointment_datetime:
@@ -2262,6 +2328,7 @@ def provider_slot_api(request):
     leads = Lead.objects.filter(
         appointment_datetime__gte=start_dt,
         appointment_datetime__lt=end_dt,
+        cancelled=False,
     ).select_related('rep')
     items = []
     for lead in leads:

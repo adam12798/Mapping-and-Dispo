@@ -136,6 +136,59 @@ html, body {
     left: 0;
 }
 
+.hamburger-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.hamburger-btn {
+    background: none;
+    border: none;
+    color: var(--color-light-blue);
+    cursor: pointer;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    transition: color var(--transition-fast), background var(--transition-fast);
+}
+.hamburger-btn:hover {
+    color: var(--color-ice);
+    background: rgba(61,90,128,0.4);
+}
+.hamburger-btn.active {
+    color: var(--color-white);
+    background: var(--color-blue);
+}
+.hamburger-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: var(--color-navy);
+    border: 1px solid var(--color-blue);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    min-width: 160px;
+    z-index: 3000;
+    overflow: hidden;
+}
+.hamburger-menu.open { display: flex; flex-direction: column; }
+.hamburger-menu a {
+    color: var(--color-light-blue);
+    text-decoration: none;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 12px 18px;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    border-bottom: 1px solid rgba(61,90,128,0.3);
+}
+.hamburger-menu a:last-child { border-bottom: none; }
+.hamburger-menu a:hover { background: var(--color-blue); color: var(--color-white); }
+.hamburger-menu a.active { color: var(--color-coral); }
+
 #map {
     width: 100%;
     height: 100%;
@@ -1030,6 +1083,20 @@ td.bulk-highlight {
     max-height: 320px;
 }
 
+.cancelled-badge {
+    display: inline-block;
+    background: #e74c3c;
+    color: #fff;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
 /* Desktop-only: hide mobile elements */
 .navigate-btn { display: none; }
 .bottom-nav { display: none; }
@@ -1111,8 +1178,9 @@ td.bulk-highlight {
     }
     .bottom-nav .more-menu a.active { color: #ee6c4d; }
 
-    /* Hide desktop top nav tabs on mobile */
+    /* Hide desktop top nav tabs and hamburger on mobile */
     .nav-tab { display: none !important; }
+    .hamburger-wrap { display: none !important; }
     .top-nav { justify-content: space-between; }
 
     /* Add bottom padding to all content so bottom nav doesn't cover it */

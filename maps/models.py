@@ -51,6 +51,7 @@ class Lead(models.Model):
     follow_up_date = models.DateField(null=True, blank=True)
     call_notes = models.CharField(max_length=200, blank=True)
     call_transcript = models.TextField(blank=True)
+    cancelled = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.address} ({self.created_at:%m/%d/%Y})"

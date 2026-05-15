@@ -218,6 +218,7 @@ def auto_assign_leads(target_date, save=True):
         latitude__isnull=False,
         longitude__isnull=False,
         rep__isnull=True,
+        cancelled=False,
     ))
 
     # Pre-assigned (locked) leads — these are non-negotiable
@@ -226,6 +227,7 @@ def auto_assign_leads(target_date, save=True):
         latitude__isnull=False,
         longitude__isnull=False,
         rep__isnull=False,
+        cancelled=False,
     ).select_related('rep'))
 
     reps = list(Rep.objects.filter(

@@ -380,7 +380,10 @@
                 {% for lead in leads %}
                 <tr data-id="{{ lead.id }}">
                     <td class="checkbox-col sticky-col sticky-check"><input type="checkbox" class="row-select"></td>
-                    <td data-label="Name" class="sticky-col sticky-name"><input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}"></td>
+                    <td data-label="Name" class="sticky-col sticky-name">
+                        <input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}">
+                        {% if lead.cancelled %}<span class="cancelled-badge">CANCELLED</span>{% endif %}
+                    </td>
                     <td data-label="Phone"><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number }}"></td>
                     <td data-label="Address">
                         <input type="text" class="crm-input" data-field="address" value="{{ lead.address }}"{% if not lead.latitude %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this lead won't appear on the map"{% endif %}>
