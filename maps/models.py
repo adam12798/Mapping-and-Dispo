@@ -198,10 +198,10 @@ class RepCountDefault(models.Model):
 
 class RepCountOverride(models.Model):
     TIME_BLOCK_CHOICES = [
-        ('morning', '9-11 AM'),
-        ('midday', '12-2 PM'),
-        ('afternoon', '3-5 PM'),
-        ('evening', '6-8 PM'),
+        ('morning', '9-12 PM'),
+        ('midday', '12-3 PM'),
+        ('afternoon', '3-6 PM'),
+        ('evening', '6-9 PM'),
     ]
     date = models.DateField()
     time_block = models.CharField(max_length=10, choices=TIME_BLOCK_CHOICES)

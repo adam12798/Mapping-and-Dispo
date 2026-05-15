@@ -2002,10 +2002,10 @@ def sms_webhook(request):
 
 # ===== Time block helpers =====
 TIME_BLOCKS = [
-    ('morning', '9-11 AM', 9, 11),
-    ('midday', '12-2 PM', 12, 14),
-    ('afternoon', '3-5 PM', 15, 17),
-    ('evening', '6-8 PM', 18, 20),
+    ('morning', '9-12 PM', 9, 12),
+    ('midday', '12-3 PM', 12, 15),
+    ('afternoon', '3-6 PM', 15, 18),
+    ('evening', '6-9 PM', 18, 21),
 ]
 
 
