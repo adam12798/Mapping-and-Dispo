@@ -91,37 +91,35 @@
         }
         .rc-grid {
             display: grid;
-            grid-template-columns: 120px repeat(4, 1fr);
+            grid-template-columns: 90px repeat(7, 1fr);
             border: 1px solid #98c1d9;
             border-radius: 8px;
             overflow: hidden;
             font-family: 'Montserrat', sans-serif;
-            min-width: 600px;
+            min-width: 650px;
         }
         .rc-header {
             background: #293241;
             color: #e0fbfc;
-            padding: 12px;
-            font-size: 12px;
+            padding: 10px 6px;
+            font-size: 11px;
             font-weight: 700;
             text-align: center;
             text-transform: uppercase;
         }
-        .rc-header:first-child { text-align: left; }
-        .rc-day-label {
+        .rc-header:first-child { text-align: left; padding-left: 10px; }
+        .rc-header.today-col { background: #3d5a80; }
+        .rc-block-label {
             background: #f8fdfe;
-            padding: 12px;
+            padding: 12px 10px;
             font-weight: 600;
-            font-size: 13px;
+            font-size: 12px;
             color: #293241;
             border-bottom: 1px solid #e0fbfc;
             border-right: 1px solid #e0fbfc;
             display: flex;
-            flex-direction: column;
+            align-items: center;
         }
-        .rc-day-label .day-name { font-size: 12px; color: #3d5a80; }
-        .rc-day-label .day-date { font-size: 14px; }
-        .rc-day-label.today { background: #e0fbfc; }
         .rc-cell {
             padding: 12px;
             border-bottom: 1px solid #e0fbfc;
@@ -169,9 +167,9 @@
             .rc-toolbar { padding: 12px; flex-direction: column; align-items: flex-start; }
             .default-control { margin-left: 0; }
             .rc-grid-wrap { padding: 12px; }
-            .rc-grid { grid-template-columns: 80px repeat(4, 1fr); min-width: 450px; }
-            .rc-header { font-size: 10px; padding: 8px 4px; }
-            .rc-day-label { padding: 8px; font-size: 11px; }
+            .rc-grid { grid-template-columns: 70px repeat(7, 1fr); min-width: 500px; }
+            .rc-header { font-size: 9px; padding: 8px 4px; }
+            .rc-block-label { padding: 8px 6px; font-size: 11px; }
             .rc-cell { padding: 8px; }
             .rc-cell input { width: 40px; font-size: 14px; }
         }
@@ -271,26 +269,26 @@
 
         function renderGrid() {
             var grid = document.getElementById('rc-grid');
+            var today = todayStr();
             var html = '';
 
+            // Header row: empty corner + 7 day columns
             html += '<div class="rc-header"></div>';
-            BLOCKS.forEach(function(b) {
-                html += '<div class="rc-header">' + b.label + '</div>';
-            });
-
-            var today = todayStr();
             for (var i = 0; i < 7; i++) {
                 var d = new Date(weekStart);
                 d.setDate(d.getDate() + i);
                 var ds = dateStr(d);
-                var isToday = ds === today;
+                html += '<div class="rc-header' + (ds === today ? ' today-col' : '') + '">' +
+                    DAY_NAMES[d.getDay()] + '<br>' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate() + '</div>';
+            }
 
-                html += '<div class="rc-day-label' + (isToday ? ' today' : '') + '">';
-                html += '<span class="day-name">' + DAY_NAMES[d.getDay()] + '</span>';
-                html += '<span class="day-date">' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate() + '</span>';
-                html += '</div>';
-
-                BLOCKS.forEach(function(b) {
+            // One row per time block
+            BLOCKS.forEach(function(b) {
+                html += '<div class="rc-block-label">' + b.label + '</div>';
+                for (var i = 0; i < 7; i++) {
+                    var d = new Date(weekStart);
+                    d.setDate(d.getDate() + i);
+                    var ds = dateStr(d);
                     var key = ds + '_' + b.key;
                     var rc = (key in overrides) ? overrides[key] : defaultCount;
                     var booked = bookings[key] || 0;
@@ -301,8 +299,8 @@
                     html += '<input type="number" min="0" max="20" value="' + rc + '" onchange="saveOverride(\'' + ds + '\', \'' + b.key + '\', parseInt(this.value))">';
                     html += '<div class="rc-booking"><span class="status-dot ' + dotClass + '"></span><span class="booked-count">' + booked + ' booked</span></div>';
                     html += '</div>';
-                });
-            }
+                }
+            });
 
             grid.innerHTML = html;
         }
