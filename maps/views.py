@@ -2027,7 +2027,7 @@ def _get_rep_count(date_obj, block_key):
         override = RepCountOverride.objects.get(date=date_obj, time_block=block_key)
         return override.count
     except RepCountOverride.DoesNotExist:
-        return RepCountDefault.get_default()
+        return RepCountDefault.get_default(block_key)
 
 
 # ===== Rep Count (Manager) =====
@@ -2040,13 +2040,17 @@ def rep_count_view(request):
 @manager_required
 def rep_count_default_api(request):
     if request.method == 'GET':
-        return JsonResponse({'count': RepCountDefault.get_default()})
+        blocks = ['morning', 'midday', 'afternoon', 'evening']
+        defaults = {b: RepCountDefault.get_default(b) for b in blocks}
+        return JsonResponse({'defaults': defaults})
     if request.method == 'PUT':
         data = json.loads(request.body)
-        obj, _ = RepCountDefault.objects.get_or_create(pk=1, defaults={'count': 3})
-        obj.count = data.get('count', 3)
+        block_key = data.get('time_block', '')
+        count = data.get('count', 3)
+        obj, _ = RepCountDefault.objects.get_or_create(time_block=block_key, defaults={'count': 3})
+        obj.count = count
         obj.save()
-        return JsonResponse({'status': 'ok', 'count': obj.count})
+        return JsonResponse({'status': 'ok', 'time_block': block_key, 'count': obj.count})
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 

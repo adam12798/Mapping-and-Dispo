@@ -185,14 +185,18 @@ class LeadUpdate(models.Model):
 
 
 class RepCountDefault(models.Model):
+    time_block = models.CharField(max_length=10, blank=True, default='')
     count = models.IntegerField(default=3)
 
+    class Meta:
+        unique_together = [('time_block',)]
+
     def __str__(self):
-        return f"Default rep count: {self.count}"
+        return f"Default rep count ({self.time_block or 'global'}): {self.count}"
 
     @classmethod
-    def get_default(cls):
-        obj, _ = cls.objects.get_or_create(pk=1, defaults={'count': 3})
+    def get_default(cls, block_key=''):
+        obj, _ = cls.objects.get_or_create(time_block=block_key, defaults={'count': 3})
         return obj.count
 
 
