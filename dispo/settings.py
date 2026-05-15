@@ -146,3 +146,7 @@ CSRF_TRUSTED_ORIGINS = ['https://*.ngrok-free.dev', 'https://*.up.railway.app']
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
+
+# Sessions — stay logged in for 1 week
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 7
+SESSION_SAVE_EVERY_REQUEST = True
