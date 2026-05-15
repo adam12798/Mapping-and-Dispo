@@ -2231,7 +2231,6 @@ def provider_crm_api(request):
             'disposition': lead.disposition,
             'follow_up_date': lead.follow_up_date.isoformat() if lead.follow_up_date else '',
             'call_notes': lead.call_notes,
-            'call_transcript': lead.call_transcript,
         }
         if search:
             haystack = (row['homeowner_name'] + row['phone_number'] + row['address'] + row['city']).lower()

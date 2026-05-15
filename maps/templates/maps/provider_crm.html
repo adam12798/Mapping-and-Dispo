@@ -17,16 +17,23 @@
             padding: 12px 24px;
             border-bottom: 2px solid #98c1d9;
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            font-family: 'Montserrat', sans-serif;
+        }
+        .pcrm-toolbar-top {
             display: flex;
             align-items: center;
             gap: 16px;
             flex-wrap: wrap;
-            font-family: 'Montserrat', sans-serif;
         }
         .pcrm-toolbar h2 {
             font-size: 20px;
             color: #293241;
             margin: 0;
+        }
+        .pcrm-search-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         .pcrm-search {
             padding: 6px 12px;
@@ -125,11 +132,6 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .pcrm-transcript {
-            max-width: 180px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
         .pcrm-empty {
             text-align: center;
             padding: 60px 24px;
@@ -158,9 +160,21 @@
 {% block content %}
     <div class="pcrm-container">
         <div class="pcrm-toolbar">
-            <h2>My Leads</h2>
-            <input type="text" class="pcrm-search" id="pcrm-search" placeholder="Search name, phone, city..." oninput="debounceSearch()">
-            <span class="pcrm-count" id="pcrm-count"></span>
+            <div class="pcrm-toolbar-top">
+                <h2>My Leads</h2>
+                <div class="pcrm-search-wrap">
+                    <input type="text" class="pcrm-search" id="pcrm-search" placeholder="Search leads..." oninput="applyFilters()">
+                    <button class="filter-toggle-btn" id="filter-toggle" onclick="toggleFilterPanel()">Filters</button>
+                </div>
+                <span class="pcrm-count" id="pcrm-count"></span>
+            </div>
+            <div class="crm-filters" id="filter-panel" style="display:none;">
+                <div id="filter-rows"></div>
+                <div class="filter-actions">
+                    <button class="filter-add-btn" onclick="addFilterRow()">+ Add Filter</button>
+                    <button class="filter-clear" onclick="clearFilters()">Clear All</button>
+                </div>
+            </div>
         </div>
         <div class="pcrm-table-wrap">
             <table class="pcrm-table">
@@ -181,7 +195,6 @@
                         <th onclick="sortBy('disposition')">Dispo <span class="sort-arrow" id="sort-disposition"></span></th>
                         <th onclick="sortBy('follow_up_date')">Follow Up <span class="sort-arrow" id="sort-follow_up_date"></span></th>
                         <th onclick="sortBy('call_notes')">Call Notes <span class="sort-arrow" id="sort-call_notes"></span></th>
-                        <th onclick="sortBy('call_transcript')">Transcript <span class="sort-arrow" id="sort-call_transcript"></span></th>
                     </tr>
                 </thead>
                 <tbody id="pcrm-tbody"></tbody>
@@ -205,14 +218,63 @@
             incomplete_deal: 'Incomplete Deal', future_contact: 'Future Contact',
             dq: 'DQ', no_show: 'No Show'
         };
-        var satLabels = { yes: 'Yes', no: 'No' };
+        var satLabels = { yes: 'Yes', no: 'No', 'true': 'Yes', 'false': 'No' };
         var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
         var formatLabels = { in_person: 'In Person', virtual: 'Virtual' };
 
         var allLeads = [];
+        var filteredLeads = [];
         var sortField = 'appointment_datetime';
         var sortAsc = false;
-        var searchTimer = null;
+
+        var FILTER_COLUMNS = [
+            {key: 'address', label: 'Address', type: 'text'},
+            {key: 'call_notes', label: 'Call Notes', type: 'text'},
+            {key: 'city', label: 'City', type: 'text'},
+            {key: 'appointment_date', label: 'Date', type: 'date'},
+            {key: 'disposition', label: 'Disposition', type: 'select', options: [
+                {value: 'cancel_door', label: 'Cancel at Door'}, {value: 'cpfu', label: 'CPFU'},
+                {value: 'credit_fail', label: 'Credit Fail'}, {value: 'dq', label: 'DQ'},
+                {value: 'follow_up', label: 'Follow Up'}, {value: 'future_contact', label: 'Future Contact'},
+                {value: 'incomplete_deal', label: 'Incomplete Deal'}, {value: 'needs_reschedule', label: 'Needs Reschedule'},
+                {value: 'no_coverage', label: 'No Coverage'}, {value: 'no_sale', label: 'No Sale'},
+                {value: 'no_show', label: 'No Show'}, {value: 'rep_no_show', label: 'Rep No Show'},
+                {value: 'sale', label: 'Sale'}
+            ]},
+            {key: 'follow_up_date', label: 'Follow Up Date', type: 'date'},
+            {key: 'appointment_format', label: 'Format', type: 'select', options: [
+                {value: 'in_person', label: 'In Person'}, {value: 'virtual', label: 'Virtual'}
+            ]},
+            {key: 'homeowner_name', label: 'Name', type: 'text'},
+            {key: 'phone_number', label: 'Phone', type: 'text'},
+            {key: 'appointment_type', label: 'Product Type', type: 'select', options: [
+                {value: 'both', label: 'Both'}, {value: 'hvac', label: 'HVAC'}, {value: 'solar', label: 'Solar'}
+            ]},
+            {key: 'rep_name', label: 'Rep', type: 'text'},
+            {key: 'sat', label: 'Sit', type: 'select', options: [
+                {value: 'false', label: 'No Sit'}, {value: 'true', label: 'Sit'}
+            ]},
+            {key: 'source', label: 'Source', type: 'text'},
+            {key: 'state', label: 'State', type: 'text'},
+            {key: 'tags', label: 'Tags', type: 'text'},
+        ];
+
+        var FILTER_CONDITIONS = {
+            text: [
+                {value: 'contains', label: 'contains'}, {value: 'not_contains', label: 'does not contain'},
+                {value: 'is', label: 'is'}, {value: 'is_not', label: 'is not'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ],
+            select: [
+                {value: 'is', label: 'is'}, {value: 'is_not', label: 'is not'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ],
+            date: [
+                {value: 'is', label: 'is'}, {value: 'between', label: 'is between'},
+                {value: 'before', label: 'is before'}, {value: 'after', label: 'is after'},
+                {value: 'is_empty', label: 'is empty'}, {value: 'is_not_empty', label: 'is not empty'}
+            ]
+        };
 
         function escHtml(s) {
             var d = document.createElement('div');
@@ -220,26 +282,209 @@
             return d.innerHTML;
         }
 
+        // ── Filter UI ──
+        function toggleFilterPanel() {
+            var panel = document.getElementById('filter-panel');
+            var btn = document.getElementById('filter-toggle');
+            if (panel.style.display === 'none') {
+                panel.style.display = '';
+                btn.classList.add('active');
+                if (!document.getElementById('filter-rows').children.length) addFilterRow();
+            } else {
+                panel.style.display = 'none';
+                btn.classList.remove('active');
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            var panel = document.getElementById('filter-panel');
+            var toggle = document.getElementById('filter-toggle');
+            if (panel && panel.style.display !== 'none' && !panel.contains(e.target) && e.target !== toggle) {
+                panel.style.display = 'none';
+                toggle.classList.remove('active');
+            }
+        });
+
+        function addFilterRow() {
+            var container = document.getElementById('filter-rows');
+            var row = document.createElement('div');
+            row.className = 'filter-row';
+
+            var colSel = document.createElement('select');
+            colSel.className = 'filter-col';
+            colSel.innerHTML = '<option value="">Column...</option>';
+            FILTER_COLUMNS.forEach(function(c) {
+                colSel.innerHTML += '<option value="' + c.key + '">' + c.label + '</option>';
+            });
+            colSel.onchange = function() { onFilterColChange(this); };
+
+            var condSel = document.createElement('select');
+            condSel.className = 'filter-cond';
+            condSel.style.display = 'none';
+
+            var valWrap = document.createElement('div');
+            valWrap.className = 'filter-val-wrap';
+
+            var removeBtn = document.createElement('button');
+            removeBtn.className = 'filter-row-remove';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = function() { row.remove(); applyFilters(); updateFilterCount(); };
+
+            row.appendChild(colSel);
+            row.appendChild(condSel);
+            row.appendChild(valWrap);
+            row.appendChild(removeBtn);
+            container.appendChild(row);
+            updateFilterCount();
+        }
+
+        function onFilterColChange(colSel) {
+            var row = colSel.closest('.filter-row');
+            var condSel = row.querySelector('.filter-cond');
+            var valWrap = row.querySelector('.filter-val-wrap');
+            condSel.innerHTML = '';
+            valWrap.innerHTML = '';
+
+            if (!colSel.value) { condSel.style.display = 'none'; applyFilters(); return; }
+
+            var col = FILTER_COLUMNS.find(function(c) { return c.key === colSel.value; });
+            var conds = FILTER_CONDITIONS[col.type] || FILTER_CONDITIONS.text;
+            conds.forEach(function(c) {
+                condSel.innerHTML += '<option value="' + c.value + '">' + c.label + '</option>';
+            });
+            condSel.style.display = '';
+            condSel.onchange = function() { buildValueInput(row, col); applyFilters(); };
+            buildValueInput(row, col);
+            applyFilters();
+        }
+
+        function buildValueInput(row, col) {
+            var valWrap = row.querySelector('.filter-val-wrap');
+            var cond = row.querySelector('.filter-cond').value;
+            valWrap.innerHTML = '';
+            if (cond === 'is_empty' || cond === 'is_not_empty') return;
+
+            if (col.type === 'select' && col.options) {
+                var sel = document.createElement('select');
+                sel.innerHTML = '<option value="">Select...</option>';
+                col.options.forEach(function(o) {
+                    sel.innerHTML += '<option value="' + o.value + '">' + o.label + '</option>';
+                });
+                sel.onchange = function() { applyFilters(); };
+                valWrap.appendChild(sel);
+            } else if (col.type === 'date') {
+                var inp = document.createElement('input');
+                inp.type = 'date';
+                inp.className = 'filter-date-from';
+                inp.onchange = function() { applyFilters(); };
+                valWrap.appendChild(inp);
+                if (cond === 'between') {
+                    var span = document.createElement('span');
+                    span.textContent = ' and ';
+                    span.style.cssText = 'font-size:12px;color:#3d5a80;';
+                    valWrap.appendChild(span);
+                    var inp2 = document.createElement('input');
+                    inp2.type = 'date';
+                    inp2.className = 'filter-date-to';
+                    inp2.onchange = function() { applyFilters(); };
+                    valWrap.appendChild(inp2);
+                }
+            } else {
+                var inp = document.createElement('input');
+                inp.type = 'text';
+                inp.placeholder = 'Value...';
+                inp.oninput = function() { applyFilters(); };
+                valWrap.appendChild(inp);
+            }
+        }
+
+        function updateFilterCount() {
+            var btn = document.getElementById('filter-toggle');
+            var rows = document.getElementById('filter-rows').children;
+            var n = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var cs = rows[i].querySelector('.filter-col');
+                if (cs && cs.value) n++;
+            }
+            btn.textContent = n > 0 ? 'Filters (' + n + ')' : 'Filters';
+        }
+
+        function clearFilters() {
+            document.getElementById('pcrm-search').value = '';
+            document.getElementById('filter-rows').innerHTML = '';
+            applyFilters();
+            updateFilterCount();
+        }
+
+        function checkCondition(cv, cond, fv, fieldType, fv2) {
+            if (fieldType === 'date') cv = (cv || '').substring(0, 10);
+            var cl = (cv || '').toLowerCase();
+            var fl = (fv || '').toLowerCase();
+            switch (cond) {
+                case 'contains': return cl.indexOf(fl) !== -1;
+                case 'not_contains': return cl.indexOf(fl) === -1;
+                case 'is': return cl === fl;
+                case 'is_not': return cl !== fl;
+                case 'is_empty': return cl === '';
+                case 'is_not_empty': return cl !== '';
+                case 'before': return cv && fv && cv < fv;
+                case 'after': return cv && fv && cv > fv;
+                case 'between': return cv && fv && fv2 && cv >= fv && cv <= fv2;
+                default: return true;
+            }
+        }
+
+        // ── Data loading + filtering ──
         function loadLeads() {
-            var search = document.getElementById('pcrm-search').value.trim();
-            var url = '/api/provider/crm/';
-            if (search) url += '?search=' + encodeURIComponent(search);
-            fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+            fetch('/api/provider/crm/').then(function(r) { return r.json(); }).then(function(data) {
                 allLeads = data.leads;
-                doSort();
-                renderTable();
+                applyFilters();
             });
         }
 
-        function debounceSearch() {
-            clearTimeout(searchTimer);
-            searchTimer = setTimeout(loadLeads, 300);
+        function applyFilters() {
+            var search = document.getElementById('pcrm-search').value.toLowerCase().trim();
+            var filterRows = document.getElementById('filter-rows').children;
+
+            var filters = [];
+            for (var i = 0; i < filterRows.length; i++) {
+                var fr = filterRows[i];
+                var colKey = fr.querySelector('.filter-col').value;
+                if (!colKey) continue;
+                var cond = fr.querySelector('.filter-cond').value;
+                var valEl = fr.querySelector('.filter-val-wrap select, .filter-val-wrap input');
+                var val = valEl ? valEl.value : '';
+                var val2 = '';
+                if (cond === 'between') {
+                    var toEl = fr.querySelector('.filter-date-to');
+                    val2 = toEl ? toEl.value : '';
+                }
+                var col = FILTER_COLUMNS.find(function(c) { return c.key === colKey; });
+                filters.push({key: colKey, cond: cond, val: val, val2: val2, type: col ? col.type : 'text'});
+            }
+
+            filteredLeads = allLeads.filter(function(lead) {
+                if (search) {
+                    var haystack = (lead.homeowner_name + ' ' + lead.phone_number + ' ' + lead.address + ' ' + lead.city + ' ' + lead.rep_name + ' ' + lead.source + ' ' + lead.tags).toLowerCase();
+                    if (haystack.indexOf(search) === -1) return false;
+                }
+                for (var i = 0; i < filters.length; i++) {
+                    var f = filters[i];
+                    var cv = (lead[f.key] || '').toString();
+                    if (!checkCondition(cv, f.cond, f.val, f.type, f.val2)) return false;
+                }
+                return true;
+            });
+
+            doSort();
+            renderTable();
+            updateFilterCount();
         }
 
         function doSort() {
             var field = sortField;
             var asc = sortAsc;
-            allLeads.sort(function(a, b) {
+            filteredLeads.sort(function(a, b) {
                 var va = (a[field] || '').toString().toLowerCase();
                 var vb = (b[field] || '').toString().toLowerCase();
                 if (va < vb) return asc ? -1 : 1;
@@ -270,15 +515,15 @@
 
         function renderTable() {
             var tbody = document.getElementById('pcrm-tbody');
-            document.getElementById('pcrm-count').textContent = allLeads.length + ' lead' + (allLeads.length !== 1 ? 's' : '');
+            document.getElementById('pcrm-count').textContent = filteredLeads.length + ' of ' + allLeads.length + ' leads';
 
-            if (allLeads.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="16" class="pcrm-empty">No leads found</td></tr>';
+            if (filteredLeads.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="15" class="pcrm-empty">No leads found</td></tr>';
                 return;
             }
 
             var html = '';
-            allLeads.forEach(function(l) {
+            filteredLeads.forEach(function(l) {
                 html += '<tr>';
                 html += '<td class="pcrm-name">' + escHtml(l.homeowner_name) + '</td>';
                 html += '<td>' + escHtml(l.phone_number) + '</td>';
@@ -310,10 +555,6 @@
 
                 html += '<td>' + (escHtml(l.follow_up_date) || '<span style="color:#98c1d9;">—</span>') + '</td>';
                 html += '<td class="pcrm-notes">' + (escHtml(l.call_notes) || '<span style="color:#98c1d9;">—</span>') + '</td>';
-
-                var trans = l.call_transcript || '';
-                var transDisplay = trans.length > 50 ? trans.substring(0, 50) + '…' : trans;
-                html += '<td class="pcrm-transcript" title="' + escHtml(trans) + '">' + (escHtml(transDisplay) || '<span style="color:#98c1d9;">—</span>') + '</td>';
 
                 html += '</tr>';
             });
