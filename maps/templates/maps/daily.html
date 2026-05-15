@@ -129,6 +129,11 @@
                 color: #fff;
                 text-transform: uppercase;
             }
+            .dm-notes-cell {
+                max-width: 150px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
             .dm-empty {
                 text-align: center;
                 padding: 40px 20px;
@@ -462,10 +467,21 @@
                     <thead>
                         <tr>
                             <th class="dm-sticky">Name</th>
+                            <th>Phone</th>
+                            <th>Address</th>
+                            <th>City</th>
+                            <th>State</th>
+                            <th>Source</th>
+                            <th>Tags</th>
+                            <th>Appt Type</th>
+                            <th>Format</th>
                             <th>Time</th>
                             <th>Rep</th>
+                            <th>Sit</th>
                             <th>Dispo</th>
-                            <th>Type</th>
+                            <th>Follow Up</th>
+                            <th>Notes</th>
+                            <th>Transcript</th>
                         </tr>
                     </thead>
                     <tbody id="daily-mobile-tbody"></tbody>
@@ -1265,6 +1281,7 @@
             tbody.innerHTML = '';
             var rows = document.querySelectorAll('.crm-table tbody tr[data-id]');
             var hasRows = false;
+            var typeColors2 = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
 
             for (var i = 0; i < rows.length; i++) {
                 var row = rows[i];
@@ -1272,19 +1289,27 @@
                 hasRows = true;
 
                 var id = row.dataset.id;
-                var nameEl = row.querySelector('[data-field="homeowner_name"]');
-                var timeEl = row.querySelector('[data-field="appointment_datetime"]');
-                var repEl = row.querySelector('[data-field="rep_id"]');
-                var dispoEl = row.querySelector('[data-field="disposition"]');
-                var typeEl = row.querySelector('[data-field="appointment_type"]');
+                var gv = function(f) { var el = row.querySelector('[data-field="' + f + '"]'); return el ? el.value : ''; };
+                var gsel = function(f) { var el = row.querySelector('[data-field="' + f + '"]'); return (el && el.selectedIndex >= 0) ? { val: el.value, text: el.options[el.selectedIndex].textContent.trim() } : { val: '', text: '' }; };
 
-                var name = nameEl ? nameEl.value : '';
-                var timeVal = timeEl ? timeEl.value : '';
-                var repName = (repEl && repEl.selectedIndex >= 0) ? repEl.options[repEl.selectedIndex].textContent.trim() : '';
-                var dispoVal = dispoEl ? dispoEl.value : '';
-                var dispoText = (dispoEl && dispoEl.selectedIndex >= 0) ? dispoEl.options[dispoEl.selectedIndex].textContent.trim() : '';
-                var typeVal = typeEl ? typeEl.value : '';
-                var typeText = (typeEl && typeEl.selectedIndex >= 0) ? typeEl.options[typeEl.selectedIndex].textContent.trim() : '';
+                var name = gv('homeowner_name');
+                var phone = gv('phone_number');
+                var address = gv('address');
+                var city = gv('city');
+                var state = gv('state');
+                var source = gv('source');
+                var tagsEl = row.querySelector('[data-field="tags"]');
+                var tags = tagsEl ? (tagsEl.dataset.value || '') : '';
+                var type = gsel('appointment_type');
+                var format = gsel('appointment_format');
+                var timeVal = gv('appointment_datetime');
+                var rep = gsel('rep_id');
+                var sat = gsel('sat');
+                var dispo = gsel('disposition');
+                var followUp = gv('follow_up_date');
+                var notes = gv('call_notes');
+                var transcriptEl = row.querySelector('[data-field="call_transcript"]');
+                var transcript = transcriptEl ? transcriptEl.value : '';
 
                 var timeStr = '';
                 if (timeVal) {
@@ -1306,35 +1331,37 @@
                 nameCell.onclick = (function(lid) { return function() { openDailyDetail(lid); }; })(id);
                 tr.appendChild(nameCell);
 
-                var timeCell = document.createElement('td');
-                timeCell.textContent = timeStr || '—';
-                tr.appendChild(timeCell);
+                var phoneCell = document.createElement('td');
+                phoneCell.textContent = phone || '—';
+                tr.appendChild(phoneCell);
 
-                var repCell = document.createElement('td');
-                repCell.textContent = repName || '—';
-                if (!repName || repName === 'Unassigned') repCell.style.color = '#98c1d9';
-                tr.appendChild(repCell);
+                var addrCell = document.createElement('td');
+                addrCell.textContent = address || '—';
+                tr.appendChild(addrCell);
 
-                var dispoCell = document.createElement('td');
-                if (dispoVal) {
-                    var dbadge = document.createElement('span');
-                    dbadge.className = 'dm-dispo-badge';
-                    dbadge.style.background = dispoColors[dispoVal] || '#999';
-                    dbadge.textContent = dispoText;
-                    dispoCell.appendChild(dbadge);
-                } else {
-                    dispoCell.textContent = '—';
-                    dispoCell.style.color = '#98c1d9';
-                }
-                tr.appendChild(dispoCell);
+                var cityCell = document.createElement('td');
+                cityCell.textContent = city || '—';
+                tr.appendChild(cityCell);
 
-                var typeColors2 = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+                var stateCell = document.createElement('td');
+                stateCell.textContent = state || '—';
+                tr.appendChild(stateCell);
+
+                var sourceCell = document.createElement('td');
+                sourceCell.textContent = source || '—';
+                tr.appendChild(sourceCell);
+
+                var tagsCell = document.createElement('td');
+                tagsCell.textContent = tags || '—';
+                if (!tags) tagsCell.style.color = '#98c1d9';
+                tr.appendChild(tagsCell);
+
                 var typeCell = document.createElement('td');
-                if (typeVal) {
+                if (type.val) {
                     var tbadge = document.createElement('span');
                     tbadge.className = 'dm-type-badge';
-                    tbadge.style.background = typeColors2[typeVal] || '#999';
-                    tbadge.textContent = typeText;
+                    tbadge.style.background = typeColors2[type.val] || '#999';
+                    tbadge.textContent = type.text;
                     typeCell.appendChild(tbadge);
                 } else {
                     typeCell.textContent = '—';
@@ -1342,13 +1369,62 @@
                 }
                 tr.appendChild(typeCell);
 
+                var formatCell = document.createElement('td');
+                formatCell.textContent = format.text || '—';
+                if (!format.val) formatCell.style.color = '#98c1d9';
+                tr.appendChild(formatCell);
+
+                var timeCell = document.createElement('td');
+                timeCell.textContent = timeStr || '—';
+                tr.appendChild(timeCell);
+
+                var repCell = document.createElement('td');
+                repCell.textContent = rep.text || '—';
+                if (!rep.val || rep.text === 'Unassigned') repCell.style.color = '#98c1d9';
+                tr.appendChild(repCell);
+
+                var satCell = document.createElement('td');
+                satCell.textContent = sat.text || '—';
+                if (!sat.val) satCell.style.color = '#98c1d9';
+                tr.appendChild(satCell);
+
+                var dispoCell = document.createElement('td');
+                if (dispo.val) {
+                    var dbadge = document.createElement('span');
+                    dbadge.className = 'dm-dispo-badge';
+                    dbadge.style.background = dispoColors[dispo.val] || '#999';
+                    dbadge.textContent = dispo.text;
+                    dispoCell.appendChild(dbadge);
+                } else {
+                    dispoCell.textContent = '—';
+                    dispoCell.style.color = '#98c1d9';
+                }
+                tr.appendChild(dispoCell);
+
+                var fuCell = document.createElement('td');
+                fuCell.textContent = followUp || '—';
+                if (!followUp) fuCell.style.color = '#98c1d9';
+                tr.appendChild(fuCell);
+
+                var notesCell = document.createElement('td');
+                notesCell.textContent = notes || '—';
+                notesCell.className = 'dm-notes-cell';
+                if (!notes) notesCell.style.color = '#98c1d9';
+                tr.appendChild(notesCell);
+
+                var transCell = document.createElement('td');
+                transCell.textContent = transcript ? transcript.substring(0, 40) + (transcript.length > 40 ? '…' : '') : '—';
+                transCell.className = 'dm-notes-cell';
+                if (!transcript) transCell.style.color = '#98c1d9';
+                tr.appendChild(transCell);
+
                 tbody.appendChild(tr);
             }
 
             if (!hasRows) {
                 var emptyTr = document.createElement('tr');
                 var emptyTd = document.createElement('td');
-                emptyTd.colSpan = 5;
+                emptyTd.colSpan = 16;
                 emptyTd.className = 'dm-empty';
                 emptyTd.textContent = 'No appointments for this date';
                 emptyTr.appendChild(emptyTd);
