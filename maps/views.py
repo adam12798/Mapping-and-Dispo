@@ -2149,7 +2149,7 @@ def provider_leads_api(request):
     all_leads = Lead.objects.filter(
         appointment_datetime__date__gte=start,
         appointment_datetime__date__lte=end,
-    ).select_related('rep')
+    ).select_related('rep').order_by('-appointment_datetime')
 
     own_leads = []
     other_leads = []
