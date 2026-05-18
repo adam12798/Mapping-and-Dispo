@@ -25,18 +25,6 @@
         {% endif %}
         {% if is_manager %}
         <a href="{% url 'dashboard' %}" class="nav-tab {% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a>
-        <div class="hamburger-wrap">
-            <button class="hamburger-btn {% if active_tab == 'rep_count' or active_tab == 'reps' or active_tab == 'time_off' or active_tab == 'calls' or active_tab == 'users' %}active{% endif %}" onclick="toggleHamburger(event)">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-            </button>
-            <div class="hamburger-menu" id="hamburger-menu">
-                <a href="{% url 'rep_count' %}" class="{% if active_tab == 'rep_count' %}active{% endif %}">Rep Count</a>
-                <a href="{% url 'reps' %}" class="{% if active_tab == 'reps' %}active{% endif %}">Reps</a>
-                <a href="{% url 'time_off' %}" class="{% if active_tab == 'time_off' %}active{% endif %}">Time Off</a>
-                <a href="{% url 'calls' %}" class="{% if active_tab == 'calls' %}active{% endif %}">Calls</a>
-                <a href="{% url 'users' %}" class="{% if active_tab == 'users' %}active{% endif %}">Users</a>
-            </div>
-        </div>
         {% endif %}
         {% if is_provider %}
         <a href="{% url 'provider' %}" class="nav-tab {% if active_tab == 'provider' %}active{% endif %}">Availability</a>
@@ -45,6 +33,20 @@
         <div style="margin-left:auto;display:flex;align-items:center;gap:12px;font-family:'Montserrat',sans-serif;">
             <span style="color:#98c1d9;font-size:13px;">{{ request.user.username }}</span>
             <a href="{% url 'logout' %}" class="nav-tab" style="font-size:13px;color:#ee6c4d;">Logout</a>
+            {% if is_manager %}
+            <div class="hamburger-wrap">
+                <button class="hamburger-btn {% if active_tab == 'rep_count' or active_tab == 'reps' or active_tab == 'time_off' or active_tab == 'calls' or active_tab == 'users' %}active{% endif %}" onclick="toggleHamburger(event)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <div class="hamburger-menu" id="hamburger-menu">
+                    <a href="{% url 'rep_count' %}" class="{% if active_tab == 'rep_count' %}active{% endif %}">Rep Count</a>
+                    <a href="{% url 'reps' %}" class="{% if active_tab == 'reps' %}active{% endif %}">Reps</a>
+                    <a href="{% url 'time_off' %}" class="{% if active_tab == 'time_off' %}active{% endif %}">Time Off</a>
+                    <a href="{% url 'calls' %}" class="{% if active_tab == 'calls' %}active{% endif %}">Calls</a>
+                    <a href="{% url 'users' %}" class="{% if active_tab == 'users' %}active{% endif %}">Users</a>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </nav>
     {% block content %}{% endblock %}
