@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd'
+
+
+def _format_dispo_for_ghl(dispo):
+    if not dispo:
+        return ''
+    return '_'.join(word.capitalize() for word in dispo.split('_'))
+
+
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime'
 
@@ -516,12 +525,12 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
                     ghl_payload = {
                         'phone': lead.phone_number,
                         'name': lead.homeowner_name,
-                        'disposition': disposition,
+                        'disposition': _format_dispo_for_ghl(disposition),
                         'call_transcript': lead.call_transcript or '',
                     }
                     async with aiohttp.ClientSession() as session:
                         async with session.post(
-                            'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                            GHL_WEBHOOK_URL,
                             json=ghl_payload,
                             timeout=aiohttp.ClientTimeout(total=10),
                         ) as resp:
@@ -620,12 +629,12 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
                 ghl_payload = {
                     'phone': lead.phone_number,
                     'name': lead.homeowner_name,
-                    'disposition': lead.disposition or '',
+                    'disposition': _format_dispo_for_ghl(lead.disposition),
                     'call_transcript': lead.call_transcript or '',
                 }
                 async with aiohttp.ClientSession() as session:
                     async with session.post(
-                        'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                        GHL_WEBHOOK_URL,
                         json=ghl_payload,
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:

@@ -771,11 +771,12 @@
                         html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + badgeLabel + '</span>';
                         if (timeStr) html += '<span>' + timeStr + '</span>';
                         if (!lead.cancelled) {
-                            html += '<select class="sidebar-assign-select" onchange="assignRep(' + lead.id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
+                            html += '<select class="sidebar-assign-select" onchange="handleSidebarSelect(' + lead.id + ', this); event.stopPropagation();" onclick="event.stopPropagation();">';
                             html += '<option value=""' + (!lead.rep_id ? ' selected' : '') + '>Unassigned</option>';
                             allReps.forEach(function(rep) {
                                 html += '<option value="' + rep.id + '"' + (lead.rep_id == rep.id ? ' selected' : '') + '>' + rep.name + '</option>';
                             });
+                            html += '<option value="__no_coverage__" style="color:#c0392b;font-weight:600;">No Coverage</option>';
                             html += '</select>';
                         }
                         html += '</div>';
@@ -924,7 +925,6 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ rep_id: repId })
             }).then(function() {
-                // Update local data
                 allLeads.forEach(function(lead) {
                     if (lead.id === leadId) {
                         lead.rep_id = repId ? parseInt(repId) : null;
@@ -933,6 +933,25 @@
                     }
                 });
             });
+        }
+
+        function handleSidebarSelect(leadId, selectEl) {
+            var val = selectEl.value;
+            if (val === '__no_coverage__') {
+                fetch('/api/leads/' + leadId + '/', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ disposition: 'no_coverage' })
+                }).then(function() {
+                    allLeads.forEach(function(lead) {
+                        if (lead.id === leadId) lead.disposition = 'no_coverage';
+                    });
+                    filterLeadsByDate();
+                    updateSidebar(null);
+                });
+            } else {
+                assignRep(leadId, val);
+            }
         }
 
         function autoAssign() {

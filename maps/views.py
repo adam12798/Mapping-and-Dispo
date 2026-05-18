@@ -24,6 +24,16 @@ from .assignment import auto_assign_leads
 from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride
 
 
+GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd'
+
+
+def _format_dispo_for_ghl(dispo):
+    """Format disposition for GHL: no_coverage -> No_Coverage, sale -> Sale, etc."""
+    if not dispo:
+        return ''
+    return '_'.join(word.capitalize() for word in dispo.split('_'))
+
+
 def manager_required(view_func):
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
@@ -365,11 +375,11 @@ def lead_update(request, pk):
             ghl_payload = json.dumps({
                 'phone': lead.phone_number,
                 'name': lead.homeowner_name,
-                'disposition': lead.disposition or '',
+                'disposition': _format_dispo_for_ghl(lead.disposition),
                 'call_transcript': lead.call_transcript or '',
             }).encode()
             ghl_req = urllib.request.Request(
-                'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                GHL_WEBHOOK_URL,
                 data=ghl_payload,
                 headers={'Content-Type': 'application/json'},
             )
@@ -464,11 +474,11 @@ def leads_bulk_update(request):
                 ghl_payload = json.dumps({
                     'phone': lead.phone_number,
                     'name': lead.homeowner_name,
-                    'disposition': lead.disposition or '',
+                    'disposition': _format_dispo_for_ghl(lead.disposition),
                     'call_transcript': lead.call_transcript or '',
                 }).encode()
                 ghl_req = urllib.request.Request(
-                    'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                    GHL_WEBHOOK_URL,
                     data=ghl_payload,
                     headers={'Content-Type': 'application/json'},
                 )
@@ -1431,11 +1441,11 @@ def apply_manager_sms_update(lead, parsed):
                 ghl_payload = json.dumps({
                     'phone': lead.phone_number,
                     'name': lead.homeowner_name,
-                    'disposition': lead.disposition or '',
+                    'disposition': _format_dispo_for_ghl(lead.disposition),
                     'call_transcript': lead.call_transcript or '',
                 }).encode()
                 ghl_req = urllib.request.Request(
-                    'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
+                    GHL_WEBHOOK_URL,
                     data=ghl_payload,
                     headers={'Content-Type': 'application/json'},
                 )
