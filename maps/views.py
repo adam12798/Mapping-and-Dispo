@@ -1185,7 +1185,8 @@ def dashboard_chart_api(request):
 
 
 def parse_sms_fields(body):
-    """Parse structured SMS line by line, matching 'label: value' patterns."""
+    """Parse structured SMS line by line, matching 'label: value' patterns.
+    Notes field is special — everything after 'Notes:' is captured as multi-line."""
     # Strip unsubscribe footers
     body = re.sub(r'(?i)reply\s*"?\d+"?\s*to\s+unsubscribe.*$', '', body).strip()
 
@@ -1210,19 +1211,40 @@ def parse_sms_fields(body):
         'date': 'appointment_datetime',
         'time': 'appointment_datetime',
         'source': 'source',
+        'notes': 'notes',
     }
 
     fields = {}
-    for line in body.split('\n'):
-        line = line.strip()
+    lines = body.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        i += 1
         if ':' not in line:
             continue
-        # Split on first colon only
         label_part, _, value_part = line.partition(':')
         label = label_part.strip().lower()
         value = value_part.strip()
-        if label in label_map and value:
-            fields[label_map[label]] = value
+        if label not in label_map:
+            continue
+        field_key = label_map[label]
+        if field_key == 'notes':
+            note_lines = []
+            if value:
+                note_lines.append(value)
+            while i < len(lines):
+                next_line = lines[i].strip()
+                if ':' in next_line:
+                    next_label = next_line.partition(':')[0].strip().lower()
+                    if next_label in label_map:
+                        break
+                if next_line:
+                    note_lines.append(next_line)
+                i += 1
+            if note_lines:
+                fields['notes'] = ' '.join(note_lines)
+        elif value:
+            fields[field_key] = value
     return fields
 
 
@@ -2001,14 +2023,19 @@ def sms_webhook(request):
                     'appointment_type': appt_type,
                     'appointment_format': normalize_format(fields.get('format', '')),
                     'appointment_datetime': appt_datetime,
+                    'call_notes': fields.get('notes', ''),
                 }
                 if tags:
                     update_map['tags'] = tags
+                # Auto-clear cancelled flag when a lead is rescheduled
+                if lead.cancelled and appt_datetime:
+                    lead.cancelled = False
+                    changes.append('Cancelled → Rescheduled')
                 FIELD_DISPLAY = {
                     'address': 'Address', 'city': 'City', 'state': 'State',
                     'phone_number': 'Phone', 'source': 'Source', 'tags': 'Tags',
                     'appointment_type': 'Appt Type', 'appointment_format': 'Appt Format',
-                    'appointment_datetime': 'Appt Time',
+                    'appointment_datetime': 'Appt Time', 'call_notes': 'Notes',
                 }
                 for field, new_val in update_map.items():
                     if not new_val:
@@ -2055,6 +2082,7 @@ def sms_webhook(request):
                     appointment_type=appt_type,
                     appointment_format=normalize_format(fields.get('format', '')),
                     appointment_datetime=appt_datetime,
+                    call_notes=fields.get('notes', ''),
                     raw_message=body,
                 )
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
