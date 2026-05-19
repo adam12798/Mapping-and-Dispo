@@ -34,6 +34,39 @@ def _format_dispo_for_ghl(dispo):
     return '_'.join(word.capitalize() for word in dispo.split('_'))
 
 
+def _format_appt_dt_for_ghl(dt):
+    """Format appointment datetime for GHL: MM-DD-YYYY HH:MM AM/PM"""
+    if not dt:
+        return ''
+    try:
+        from zoneinfo import ZoneInfo
+        eastern = ZoneInfo('America/New_York')
+        local_dt = dt.astimezone(eastern)
+    except Exception:
+        local_dt = dt
+    return local_dt.strftime('%m-%d-%Y %I:%M %p')
+
+
+def _send_ghl_appt_webhook(lead, lead_id=None):
+    import logging
+    ghl_logger = logging.getLogger('ghl_webhook')
+    try:
+        ghl_payload = json.dumps({
+            'phone': lead.phone_number,
+            'appointment_type': lead.appointment_type or '',
+            'appointment_datetime': _format_appt_dt_for_ghl(lead.appointment_datetime),
+        }).encode()
+        ghl_req = urllib.request.Request(
+            GHL_WEBHOOK_URL,
+            data=ghl_payload,
+            headers={'Content-Type': 'application/json'},
+        )
+        resp = urllib.request.urlopen(ghl_req, timeout=10)
+        ghl_logger.info(f'GHL appt webhook sent for lead {lead_id or lead.id}: status {resp.status}')
+    except Exception as e:
+        ghl_logger.error(f'GHL appt webhook failed for lead {lead_id or lead.id}: {e}')
+
+
 def manager_required(view_func):
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
@@ -388,6 +421,10 @@ def lead_update(request, pk):
         except Exception as e:
             ghl_logger.error(f'GHL webhook failed for lead {pk}: {e}')
 
+    # Send webhook to Go High Level if appointment datetime was updated
+    if 'appointment_datetime' in data:
+        _send_ghl_appt_webhook(lead, pk)
+
     response = {'status': 'ok'}
     if geocode_failed:
         response['geocode_failed'] = True
@@ -486,6 +523,12 @@ def leads_bulk_update(request):
                 ghl_logger.info(f'GHL webhook sent for lead {lead.id}: status {resp.status}')
             except Exception as e:
                 ghl_logger.error(f'GHL webhook failed for lead {lead.id}: {e}')
+
+    # Fire GHL appt webhook for each lead if appointment_datetime was updated
+    if 'appointment_datetime' in update_kwargs:
+        leads = Lead.objects.filter(id__in=ids)
+        for lead in leads:
+            _send_ghl_appt_webhook(lead)
 
     return JsonResponse({'status': 'ok', 'updated': len(ids)})
 
@@ -2062,6 +2105,8 @@ def sms_webhook(request):
                     if system_user:
                         LeadUpdate.objects.create(lead=lead, user=system_user, text='SMS update:\n' + '\n'.join(changes))
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+                if appt_datetime:
+                    _send_ghl_appt_webhook(lead)
                 if changes:
                     confirm = f"Updated {lead.homeowner_name}:\n" + '\n'.join(f"- {c}" for c in changes)
                 else:
@@ -2086,6 +2131,8 @@ def sms_webhook(request):
                     raw_message=body,
                 )
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+                if appt_datetime:
+                    _send_ghl_appt_webhook(lead)
                 confirm = f"Appt booked: {name or 'Unknown'}"
                 if city:
                     confirm += f" in {city}"
