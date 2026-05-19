@@ -51,16 +51,13 @@ def _send_ghl_appt_webhook(lead, lead_id=None):
     import logging
     ghl_logger = logging.getLogger('ghl_webhook')
     try:
-        ghl_payload = json.dumps({
+        params = urllib.parse.urlencode({
             'phone': lead.phone_number,
             'appointment_type': lead.appointment_type or '',
             'appointment_datetime': _format_appt_dt_for_ghl(lead.appointment_datetime),
-        }).encode()
-        ghl_req = urllib.request.Request(
-            GHL_WEBHOOK_URL,
-            data=ghl_payload,
-            headers={'Content-Type': 'application/json'},
-        )
+        })
+        url = GHL_WEBHOOK_URL + '?' + params
+        ghl_req = urllib.request.Request(url, method='GET')
         resp = urllib.request.urlopen(ghl_req, timeout=10)
         ghl_logger.info(f'GHL appt webhook sent for lead {lead_id or lead.id}: status {resp.status}')
     except Exception as e:
