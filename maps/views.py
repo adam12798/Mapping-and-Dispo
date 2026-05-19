@@ -36,16 +36,20 @@ def _format_dispo_for_ghl(dispo):
 
 
 def _format_appt_dt_for_ghl(dt):
-    """Format appointment datetime for GHL: MM-DD-YYYY HH:MM AM/PM"""
     if not dt:
         return ''
     try:
         from zoneinfo import ZoneInfo
+        from datetime import datetime as dt_cls
         eastern = ZoneInfo('America/New_York')
+        if isinstance(dt, str):
+            dt = dt_cls.fromisoformat(dt)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=eastern)
         local_dt = dt.astimezone(eastern)
+        return local_dt.strftime('%m-%d-%Y %I:%M %p')
     except Exception:
-        local_dt = dt
-    return local_dt.strftime('%m-%d-%Y %I:%M %p')
+        return str(dt)
 
 
 def _send_ghl_appt_webhook(lead, lead_id=None):
