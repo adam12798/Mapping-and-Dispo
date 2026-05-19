@@ -25,6 +25,7 @@ from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate,
 
 
 GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd'
+GHL_APPT_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/bc69b54d-d701-432f-82be-80d8dcfa799b'
 
 
 def _format_dispo_for_ghl(dispo):
@@ -56,7 +57,7 @@ def _send_ghl_appt_webhook(lead, lead_id=None):
             'appointment_type': lead.appointment_type or '',
             'appointment_datetime': _format_appt_dt_for_ghl(lead.appointment_datetime),
         })
-        url = GHL_WEBHOOK_URL + '?' + params
+        url = GHL_APPT_WEBHOOK_URL + '?' + params
         ghl_req = urllib.request.Request(url, method='GET')
         resp = urllib.request.urlopen(ghl_req, timeout=10)
         ghl_logger.info(f'GHL appt webhook sent for lead {lead_id or lead.id}: status {resp.status}')
