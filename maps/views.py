@@ -52,9 +52,17 @@ def _format_appt_dt_for_ghl(dt):
         return str(dt)
 
 
+_ghl_appt_sent = {}
+
 def _send_ghl_appt_webhook(lead, lead_id=None):
-    import logging
+    import logging, time
     ghl_logger = logging.getLogger('ghl_webhook')
+    lid = lead_id or lead.id
+    now = time.time()
+    if _ghl_appt_sent.get(lid, 0) > now - 30:
+        ghl_logger.info(f'GHL appt webhook skipped for lead {lid}: sent within last 30s')
+        return
+    _ghl_appt_sent[lid] = now
     try:
         params = urllib.parse.urlencode({
             'phone': lead.phone_number,
