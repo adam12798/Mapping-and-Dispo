@@ -113,7 +113,7 @@ If they DID sit:
 - For **follow_up** or **cpfu**: ask "When would be a good time to follow up with the homeowner?" Get a specific date. Reps will often say relative dates like "next Tuesday", "this Friday", "in two weeks", etc. — convert these to the actual YYYY-MM-DD date based on today's date when calling update_disposition. If the date is more than a month out, the system automatically marks it as future contact.
 - After updating, if the rep has another appointment the same day, remind them of the time and drive time (if available). Example: "Right then, you've got the Smiths at 3 PM — about 25 minutes from here."
 
-Your appointment list includes past appointments from today so reps can debrief them, but do NOT proactively mention or remind reps about appointments that have already passed. Only mention upcoming appointments when discussing their schedule. If a rep asks "what's on my schedule?", only tell them about future appointments.
+Your appointment list includes past appointments from today. When a rep calls in to debrief an appointment, after handling that debrief, check if there are any EARLIER appointments from today that still have no disposition (dispo: none). If there are, proactively ask the rep about them one at a time — e.g. "By the way, I don't have an update on your earlier appointment with [name] at [time]. How did that one go?" Only ask about appointments with dispo: none — skip any that already have a disposition. If a rep asks "what's on my schedule?", only tell them about future appointments.
 
 Appointments are typically assigned around 7:30 PM EST the night before. If a rep asks when they'll get their schedule, let them know.
 
@@ -329,6 +329,7 @@ async def get_rep_context(caller_number):
     if manager and not rep:
         leads = await sync_to_async(list)(
             Lead.objects.filter(
+                cancelled=False,
                 appointment_datetime__gte=today_start,
                 appointment_datetime__lte=now_eastern + timedelta(days=3),
             ).select_related('rep').order_by('appointment_datetime')
@@ -369,6 +370,7 @@ async def get_rep_context(caller_number):
     leads = await sync_to_async(list)(
         Lead.objects.filter(
             rep=rep,
+            cancelled=False,
             appointment_datetime__gte=today_start,
             appointment_datetime__lte=now_eastern + timedelta(days=3),
         ).order_by('appointment_datetime')
@@ -387,16 +389,24 @@ async def get_rep_context(caller_number):
     lines = [f'You are speaking with {rep.name}.']
 
     if leads:
-        lines.append(f"\n{rep.name}'s upcoming appointments:")
+        lines.append(f"\n{rep.name}'s appointments:")
+        lines.append(f"(Current time: {now_eastern.strftime('%I:%M %p')})")
         for i, lead in enumerate(leads):
             dt = lead.appointment_datetime.astimezone(ZoneInfo('America/New_York'))
             appt_type = lead.appointment_type or 'unknown'
             fmt = lead.appointment_format or ''
             dispo = lead.disposition or 'none'
+            is_past = dt < now_eastern
+            time_label = 'EARLIER TODAY' if is_past and dt.date() == today else ''
+            needs_debrief = is_past and not lead.disposition and dt.date() == today
             line = (
                 f"- {dt:%a %m/%d at %I:%M %p}: {lead.homeowner_name or 'Unknown'} "
                 f"at {lead.address}, {lead.city} ({appt_type}, {fmt}) [dispo: {dispo}]"
             )
+            if time_label:
+                line += f" [{time_label}]"
+            if needs_debrief:
+                line += " [NEEDS DEBRIEF]"
             # Calculate drive time to next appointment on the same day
             if i < len(leads) - 1:
                 next_lead = leads[i + 1]
