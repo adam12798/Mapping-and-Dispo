@@ -50,6 +50,7 @@ class Lead(models.Model):
     sat = models.BooleanField(null=True, blank=True)
     follow_up_date = models.DateField(null=True, blank=True)
     call_notes = models.CharField(max_length=200, blank=True)
+    appt_notes = models.TextField(blank=True)
     call_transcript = models.TextField(blank=True)
     cancelled = models.BooleanField(default=False)
 

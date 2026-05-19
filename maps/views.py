@@ -301,7 +301,7 @@ def lead_update(request, pk):
     allowed_fields = [
         'homeowner_name', 'phone_number', 'address', 'city', 'state',
         'source', 'tags', 'appointment_type', 'appointment_format', 'appointment_datetime',
-        'disposition', 'sat', 'follow_up_date', 'call_notes', 'call_transcript',
+        'disposition', 'sat', 'follow_up_date', 'call_notes', 'appt_notes', 'call_transcript',
     ]
     FIELD_LABELS = {
         'homeowner_name': 'Name', 'phone_number': 'Phone', 'address': 'Address',
@@ -309,7 +309,7 @@ def lead_update(request, pk):
         'appointment_type': 'Appt Type',
         'appointment_format': 'Appt Format', 'appointment_datetime': 'Appt Time',
         'disposition': 'Disposition', 'sat': 'Sit', 'follow_up_date': 'Follow Up Date',
-        'call_notes': 'Call Notes', 'call_transcript': 'Transcript', 'rep_id': 'Rep',
+        'call_notes': 'Call Notes', 'appt_notes': 'Appt Notes', 'call_transcript': 'Transcript', 'rep_id': 'Rep',
     }
     VALUE_LABELS = {
         'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
@@ -2023,7 +2023,7 @@ def sms_webhook(request):
                     'appointment_type': appt_type,
                     'appointment_format': normalize_format(fields.get('format', '')),
                     'appointment_datetime': appt_datetime,
-                    'call_notes': fields.get('notes', ''),
+                    'appt_notes': fields.get('notes', ''),
                 }
                 if tags:
                     update_map['tags'] = tags
@@ -2035,7 +2035,7 @@ def sms_webhook(request):
                     'address': 'Address', 'city': 'City', 'state': 'State',
                     'phone_number': 'Phone', 'source': 'Source', 'tags': 'Tags',
                     'appointment_type': 'Appt Type', 'appointment_format': 'Appt Format',
-                    'appointment_datetime': 'Appt Time', 'call_notes': 'Notes',
+                    'appointment_datetime': 'Appt Time', 'appt_notes': 'Appt Notes',
                 }
                 for field, new_val in update_map.items():
                     if not new_val:
@@ -2082,7 +2082,7 @@ def sms_webhook(request):
                     appointment_type=appt_type,
                     appointment_format=normalize_format(fields.get('format', '')),
                     appointment_datetime=appt_datetime,
-                    call_notes=fields.get('notes', ''),
+                    appt_notes=fields.get('notes', ''),
                     raw_message=body,
                 )
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
@@ -2379,6 +2379,7 @@ def provider_crm_api(request):
             'disposition': lead.disposition,
             'follow_up_date': lead.follow_up_date.isoformat() if lead.follow_up_date else '',
             'call_notes': lead.call_notes,
+            'appt_notes': lead.appt_notes,
         }
         if search:
             haystack = (row['homeowner_name'] + row['phone_number'] + row['address'] + row['city']).lower()

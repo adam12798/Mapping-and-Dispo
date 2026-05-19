@@ -370,7 +370,8 @@
                     <th class="sortable" onclick="sortTable(13)">Dispo <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(14)">Follow Up Date <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(15)">Call Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(16)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(16)">Appt Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th class="sortable" onclick="sortTable(17)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th style="width:40px;text-align:center;">Updates</th>
                     <th style="width:40px;text-align:center;">SMS</th>
                     <th class="action-col"></th>
@@ -451,7 +452,8 @@
                         </select>
                     </td>
                     <td data-label="Follow Up"><input type="date" class="crm-input" data-field="follow_up_date" value="{{ lead.follow_up_date|date:'Y-m-d'|default:'' }}"></td>
-                    <td data-label="Notes"><input type="text" class="crm-input" data-field="call_notes" value="{{ lead.call_notes }}" placeholder="—"></td>
+                    <td data-label="Call Notes"><input type="text" class="crm-input" data-field="call_notes" value="{{ lead.call_notes }}" placeholder="—"></td>
+                    <td data-label="Appt Notes"><textarea class="crm-input" data-field="appt_notes" rows="1" style="resize:vertical;min-height:28px;max-width:300px;" placeholder="—">{{ lead.appt_notes }}</textarea></td>
                     <td data-label="Transcript"><textarea class="crm-input" data-field="call_transcript" rows="1" style="resize:vertical;min-height:28px;max-width:300px;">{{ lead.call_transcript }}</textarea></td>
                     <td data-label="" style="text-align:center;"><button class="chatter-btn" onclick="openChatter({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button></td>
                     <td data-label="" style="text-align:center;"><button class="sms-btn" onclick="openSmsThread({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8l10 6 10-6"/></svg></button></td>
@@ -746,6 +748,7 @@
 
         var FILTER_COLUMNS = [
             {key: 'address', label: 'Address', type: 'text'},
+            {key: 'appt_notes', label: 'Appt Notes', type: 'text'},
             {key: 'call_notes', label: 'Call Notes', type: 'text'},
             {key: 'city', label: 'City', type: 'text'},
             {key: 'appointment_datetime', label: 'Date & Time', type: 'datetime'},
@@ -1311,6 +1314,8 @@
                 var dispo = gsel('disposition');
                 var followUp = gv('follow_up_date');
                 var notes = gv('call_notes');
+                var apptNotesEl = row.querySelector('[data-field="appt_notes"]');
+                var apptNotes = apptNotesEl ? apptNotesEl.value : '';
                 var transcriptEl = row.querySelector('[data-field="call_transcript"]');
                 var transcript = transcriptEl ? transcriptEl.value : '';
 
@@ -1461,6 +1466,7 @@
             var apptTime = gv('appointment_datetime');
             var followUp = gv('follow_up_date');
             var notes = gv('call_notes');
+            var apptNotes = gv('appt_notes');
             var transcript = gv('call_transcript');
             var tagsPills = row.querySelector('.tag-pills');
             var tagsValue = tagsPills ? (tagsPills.dataset.value || '') : '';
@@ -1528,6 +1534,10 @@
             // Call Notes
             html += '<div class="detail-field"><div class="detail-field-label">Call Notes</div>';
             html += '<input type="text" value="' + escapeDetailHtml(notes) + '" data-lead="' + leadId + '" data-field="call_notes" onchange="saveDetailField(this)"' + dis + ' placeholder="—"></div>';
+
+            // Appt Notes
+            html += '<div class="detail-field"><div class="detail-field-label">Appt Notes</div>';
+            html += '<textarea data-lead="' + leadId + '" data-field="appt_notes" onchange="saveDetailField(this)"' + dis + ' placeholder="—">' + escapeDetailHtml(apptNotes) + '</textarea></div>';
 
             // Transcript
             html += '<div class="detail-field"><div class="detail-field-label">Transcript</div>';
