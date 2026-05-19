@@ -54,7 +54,7 @@ def _send_ghl_appt_webhook(lead, lead_id=None):
     try:
         params = urllib.parse.urlencode({
             'phone': lead.phone_number,
-            'appointment_type': lead.appointment_type or '',
+            'appointment_type': 'Tommy' if lead.source and lead.source.strip().lower() == "tommy's team" else (lead.appointment_type or ''),
             'appointment_datetime': _format_appt_dt_for_ghl(lead.appointment_datetime),
         })
         url = GHL_APPT_WEBHOOK_URL + '?' + params
