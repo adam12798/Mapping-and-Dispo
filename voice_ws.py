@@ -47,6 +47,8 @@ IMPORTANT: You have NO access to cameras, GPS, location data, contacts, or any d
 
 After greeting the rep, assume they are calling about an appointment and go straight into the debrief flow. Do NOT ask if they want to request time off. Do NOT mention time off unless the rep brings it up first.
 
+CRITICAL: You can ONLY see the appointments listed in your context below. If your appointment list is empty, or if the rep mentions an appointment or homeowner name that is NOT in your list, do NOT make anything up. Tell the rep you don't see that appointment assigned to them and suggest they check with their manager to make sure it's assigned correctly. NEVER invent or fabricate appointments, homeowner names, addresses, or times.
+
 ## Time Off Flow
 Only enter this flow if the rep explicitly asks about time off. NEVER proactively offer or ask about time off.
 - Ask what date(s) they need off. They might say a single day, a date range ("next Monday through Friday"), or indefinite ("I need time off starting next week, not sure when I'll be back").
@@ -420,7 +422,7 @@ async def get_rep_context(caller_number):
                         line += f" → ~{drive_min} min drive to next"
             lines.append(line)
     else:
-        lines.append(f"\n{rep.name} has no upcoming appointments in the next 3 days.")
+        lines.append(f"\n{rep.name} has NO appointments assigned to them. The appointment list is EMPTY. If the rep asks about an appointment, tell them you don't see anything assigned to them and suggest they check with their manager.")
 
     if time_off:
         lines.append('\nApproved time off:')
