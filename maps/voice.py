@@ -25,7 +25,7 @@ def voice_debug(request):
                 'OpenAI-Beta': 'realtime=v1',
             }
             ws = await websockets.connect(
-                'wss://api.openai.com/v1/realtime?model=gpt-realtime',
+                'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
                 extra_headers=headers,
             )
             # Wait for session.created
