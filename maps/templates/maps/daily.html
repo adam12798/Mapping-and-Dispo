@@ -508,7 +508,7 @@
     </div>
 
     <!-- Chatter Modal -->
-    <div id="chatter-modal" style="display:none;position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;">
+    <div id="chatter-modal" style="display:none;position:fixed;inset:0;z-index:2100;display:none;align-items:center;justify-content:center;">
         <div onclick="closeChatter()" style="position:absolute;inset:0;background:rgba(41,50,65,0.7);"></div>
         <div style="position:relative;background:#fff;border-radius:12px;width:440px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.3);">
             <div style="padding:16px 20px;border-bottom:1px solid #e0fbfc;display:flex;justify-content:space-between;align-items:center;">
@@ -524,7 +524,7 @@
     </div>
 
     <!-- SMS Thread Modal -->
-    <div id="sms-modal" class="sms-thread-modal">
+    <div id="sms-modal" class="sms-thread-modal" style="z-index:2100;">
         <div onclick="closeSmsModal()" style="position:absolute;inset:0;background:rgba(41,50,65,0.7);"></div>
         <div class="sms-phone">
             <div class="sms-phone-header">
@@ -1549,9 +1549,9 @@
 
             // Action buttons
             html += '<div class="detail-actions">';
-            html += '<button class="detail-action-btn" style="background:#3d5a80;color:#fff;" onclick="openChatter(' + leadId + ', \'' + name.replace(/'/g, "\\'") + '\'); closeDailyDetail();">';
+            html += '<button class="detail-action-btn" style="background:#3d5a80;color:#fff;" onclick="openChatter(' + leadId + ', \'' + name.replace(/'/g, "\\'") + '\');">';
             html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Updates</button>';
-            html += '<button class="detail-action-btn" style="background:#ee6c4d;color:#fff;" onclick="openSmsThread(' + leadId + ', \'' + name.replace(/'/g, "\\'") + '\'); closeDailyDetail();">';
+            html += '<button class="detail-action-btn" style="background:#ee6c4d;color:#fff;" onclick="openSmsThread(' + leadId + ', \'' + name.replace(/'/g, "\\'") + '\');">';
             html += '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8l10 6 10-6"/></svg> SMS</button>';
             html += '</div>';
 
