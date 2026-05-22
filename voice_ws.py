@@ -797,14 +797,14 @@ async def media_stream(ws: WebSocket):
                         session_config = {
                             'type': 'session.update',
                             'session': {
-                                'voice': 'echo',
+                                'type': 'realtime',
                                 'instructions': SYSTEM_PROMPT,
                                 'output_modalities': ['text', 'audio'],
                                 'temperature': 0.6,
                                 'audio': {
                                     'input': {
                                         'format': {
-                                            'type': 'g711_ulaw',
+                                            'type': 'audio/pcmu',
                                         },
                                         'transcription': {
                                             'model': 'gpt-4o-mini-transcribe',
@@ -820,8 +820,9 @@ async def media_stream(ws: WebSocket):
                                     },
                                     'output': {
                                         'format': {
-                                            'type': 'g711_ulaw',
+                                            'type': 'audio/pcmu',
                                         },
+                                        'voice': 'echo',
                                     },
                                 },
                             },
