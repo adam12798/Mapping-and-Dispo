@@ -69,6 +69,63 @@ def voice_debug(request):
             results['step2_session_update'] = data2.get('type', 'unknown')
             if data2.get('type') == 'error':
                 results['step2_error'] = data2.get('error', {})
+                await ws.close()
+                return
+
+            # Step 3: Send enriched session update (like Phase 2 with tools)
+            enriched = {
+                'type': 'session.update',
+                'session': {
+                    'instructions': 'You are a test assistant.',
+                    'tools': [{
+                        'type': 'function',
+                        'name': 'test_tool',
+                        'description': 'A test tool',
+                        'parameters': {
+                            'type': 'object',
+                            'properties': {'name': {'type': 'string'}},
+                            'required': ['name'],
+                        },
+                    }],
+                },
+            }
+            await ws.send(json.dumps(enriched))
+            msg3 = await asyncio.wait_for(ws.recv(), timeout=5)
+            data3 = json.loads(msg3)
+            results['step3_enriched_update'] = data3.get('type', 'unknown')
+            if data3.get('type') == 'error':
+                results['step3_error'] = data3.get('error', {})
+                await ws.close()
+                return
+
+            # Step 4: Send greeting + response.create
+            await ws.send(json.dumps({
+                'type': 'conversation.item.create',
+                'item': {
+                    'type': 'message',
+                    'role': 'user',
+                    'content': [{'type': 'input_text', 'text': 'Say hi'}],
+                },
+            }))
+            await ws.send(json.dumps({'type': 'response.create'}))
+
+            # Collect events for a few seconds to see what comes back
+            events = []
+            try:
+                end_time = asyncio.get_event_loop().time() + 5
+                while asyncio.get_event_loop().time() < end_time:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=3)
+                    evt = json.loads(raw)
+                    etype = evt.get('type', 'unknown')
+                    events.append(etype)
+                    if etype == 'error':
+                        results['step4_error'] = evt.get('error', {})
+                        break
+                    if etype == 'response.done':
+                        break
+            except asyncio.TimeoutError:
+                pass
+            results['step4_events'] = events
 
             await ws.close()
         except Exception as e:
