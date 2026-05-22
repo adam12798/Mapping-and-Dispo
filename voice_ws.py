@@ -793,24 +793,36 @@ async def media_stream(ws: WebSocket):
 
                     if msg_type == 'session.created':
                         logger.info('OpenAI session created, sending initial config...')
-                        # Phase 1: Send generic config to get OpenAI ready fast
+                        # Phase 1: Send generic config (GA API format)
                         session_config = {
                             'type': 'session.update',
                             'session': {
-                                'turn_detection': {
-                                    'type': 'server_vad',
-                                    'threshold': 0.85,
-                                    'silence_duration_ms': 700,
-                                    'prefix_padding_ms': 500,
-                                },
-                                'input_audio_format': 'g711_ulaw',
-                                'output_audio_format': 'g711_ulaw',
                                 'voice': 'echo',
                                 'instructions': SYSTEM_PROMPT,
-                                'modalities': ['text', 'audio'],
+                                'output_modalities': ['text', 'audio'],
                                 'temperature': 0.6,
-                                'input_audio_transcription': {
-                                    'model': 'gpt-4o-mini-transcribe',
+                                'audio': {
+                                    'input': {
+                                        'format': {
+                                            'type': 'g711_ulaw',
+                                        },
+                                        'transcription': {
+                                            'model': 'gpt-4o-mini-transcribe',
+                                        },
+                                        'turn_detection': {
+                                            'type': 'server_vad',
+                                            'threshold': 0.85,
+                                            'silence_duration_ms': 700,
+                                            'prefix_padding_ms': 500,
+                                            'create_response': True,
+                                            'interrupt_response': True,
+                                        },
+                                    },
+                                    'output': {
+                                        'format': {
+                                            'type': 'g711_ulaw',
+                                        },
+                                    },
                                 },
                             },
                         }
@@ -908,19 +920,20 @@ async def media_stream(ws: WebSocket):
                             'type': 'response.create',
                         }))
 
-                    elif msg_type == 'response.audio.delta':
-                        # Send audio back to Twilio
+                    elif msg_type in ('response.audio.delta', 'response.output_audio.delta'):
+                        # Send audio back to Twilio (handle both beta and GA event names)
                         if stream_sid:
-                            audio_payload = msg['delta']
-                            twilio_msg = {
-                                'event': 'media',
-                                'streamSid': stream_sid,
-                                'media': {'payload': audio_payload},
-                            }
-                            await ws.send_json(twilio_msg)
+                            audio_payload = msg.get('delta') or msg.get('data', '')
+                            if audio_payload:
+                                twilio_msg = {
+                                    'event': 'media',
+                                    'streamSid': stream_sid,
+                                    'media': {'payload': audio_payload},
+                                }
+                                await ws.send_json(twilio_msg)
 
-                    elif msg_type == 'response.audio_transcript.done':
-                        # Collect assistant transcript
+                    elif msg_type in ('response.audio_transcript.done', 'response.output_audio_transcript.done'):
+                        # Collect assistant transcript (handle both beta and GA event names)
                         text = msg.get('transcript', '')
                         if text:
                             transcript_parts.append(f'Alfred: {text}')
