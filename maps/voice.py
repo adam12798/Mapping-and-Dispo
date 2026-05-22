@@ -22,7 +22,6 @@ def voice_debug(request):
         try:
             headers = {
                 'Authorization': f'Bearer {api_key}',
-                'OpenAI-Beta': 'realtime=v1',
             }
             ws = await websockets.connect(
                 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview',

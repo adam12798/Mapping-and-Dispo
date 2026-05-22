@@ -737,7 +737,6 @@ async def media_stream(ws: WebSocket):
         # Connect to OpenAI Realtime API
         headers = {
             'Authorization': f'Bearer {OPENAI_API_KEY}',
-            'OpenAI-Beta': 'realtime=v1',
         }
         openai_ws = await websockets.connect(
             OPENAI_REALTIME_URL,
