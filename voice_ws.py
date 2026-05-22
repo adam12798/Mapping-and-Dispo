@@ -799,7 +799,7 @@ async def media_stream(ws: WebSocket):
                             'session': {
                                 'type': 'realtime',
                                 'instructions': SYSTEM_PROMPT,
-                                'output_modalities': ['text', 'audio'],
+                                'output_modalities': ['audio'],
                                 'audio': {
                                     'input': {
                                         'format': {

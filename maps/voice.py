@@ -42,7 +42,7 @@ def voice_debug(request):
                 'session': {
                     'type': 'realtime',
                     'instructions': 'You are a test assistant.',
-                    'output_modalities': ['text', 'audio'],
+                    'output_modalities': ['audio'],
                     'audio': {
                         'input': {
                             'format': {'type': 'audio/pcmu'},
