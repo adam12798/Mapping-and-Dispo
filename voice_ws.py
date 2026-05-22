@@ -852,6 +852,7 @@ async def media_stream(ws: WebSocket):
                                 enriched_prompt = base_prompt
 
                             enriched_session = {
+                                'type': 'realtime',
                                 'instructions': enriched_prompt,
                             }
                             if is_manager_call:

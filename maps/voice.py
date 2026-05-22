@@ -76,6 +76,7 @@ def voice_debug(request):
             enriched = {
                 'type': 'session.update',
                 'session': {
+                    'type': 'realtime',
                     'instructions': 'You are a test assistant.',
                     'tools': [{
                         'type': 'function',
