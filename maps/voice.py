@@ -24,7 +24,7 @@ def voice_debug(request):
                 'Authorization': f'Bearer {api_key}',
             }
             ws = await websockets.connect(
-                'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime',
+                'wss://api.openai.com/v1/realtime?model=gpt-realtime',
                 extra_headers=headers,
             )
             # Wait for session.created
