@@ -112,6 +112,7 @@ def voice_debug(request):
 
             # Collect events for a few seconds to see what comes back
             events = []
+            audio_sample = None
             try:
                 end_time = asyncio.get_event_loop().time() + 5
                 while asyncio.get_event_loop().time() < end_time:
@@ -119,6 +120,8 @@ def voice_debug(request):
                     evt = json.loads(raw)
                     etype = evt.get('type', 'unknown')
                     events.append(etype)
+                    if etype == 'response.output_audio.delta' and audio_sample is None:
+                        audio_sample = {k: (v[:50] if isinstance(v, str) and len(v) > 50 else v) for k, v in evt.items()}
                     if etype == 'error':
                         results['step4_error'] = evt.get('error', {})
                         break
@@ -127,6 +130,8 @@ def voice_debug(request):
             except asyncio.TimeoutError:
                 pass
             results['step4_events'] = events
+            if audio_sample:
+                results['audio_event_sample'] = audio_sample
 
             await ws.close()
         except Exception as e:
