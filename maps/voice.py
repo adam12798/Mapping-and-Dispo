@@ -43,7 +43,6 @@ def voice_debug(request):
                     'type': 'realtime',
                     'instructions': 'You are a test assistant.',
                     'output_modalities': ['text', 'audio'],
-                    'temperature': 0.6,
                     'audio': {
                         'input': {
                             'format': {'type': 'audio/pcmu'},
