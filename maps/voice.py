@@ -33,6 +33,8 @@ def voice_debug(request):
             data = json.loads(msg)
             results['openai_connection'] = 'SUCCESS'
             results['openai_event'] = data.get('type', 'unknown')
+            if data.get('type') == 'error':
+                results['openai_error_detail'] = data.get('error', {})
             await ws.close()
         except Exception as e:
             results['openai_connection'] = 'FAILED'
