@@ -1352,7 +1352,9 @@ def parse_manager_update_sms(body):
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.OPENAI_API_KEY)
-    today_str = datetime.now().strftime('%A, %Y-%m-%d')
+    import zoneinfo
+    eastern = zoneinfo.ZoneInfo('America/New_York')
+    today_str = datetime.now(tz=eastern).strftime('%A, %Y-%m-%d')
 
     try:
         resp = client.chat.completions.create(
@@ -1470,13 +1472,17 @@ def apply_manager_sms_update(lead, parsed):
     if action == 'reschedule':
         if parsed.get('new_datetime'):
             try:
+                import zoneinfo
+                eastern = zoneinfo.ZoneInfo('America/New_York')
                 new_dt = dateparser.parse(parsed['new_datetime'])
                 if new_dt:
+                    if new_dt.tzinfo is None:
+                        new_dt = new_dt.replace(tzinfo=eastern)
                     lead.appointment_datetime = new_dt
                     if lead.cancelled:
                         lead.cancelled = False
                         changes.append('Cancelled → Rescheduled')
-                    changes.append(f"Rescheduled to {new_dt.strftime('%m/%d/%Y at %I:%M %p')}")
+                    changes.append(f"Rescheduled to {new_dt.astimezone(eastern).strftime('%m/%d/%Y at %I:%M %p')}")
             except (ValueError, OverflowError):
                 pass
         else:
@@ -1556,7 +1562,9 @@ def parse_time_off_request(body, rep):
     parse_lines = lines if len(lines) == 1 else lines[1:]
 
     requests = []
-    today = date.today()
+    import zoneinfo
+    eastern = zoneinfo.ZoneInfo('America/New_York')
+    today = datetime.now(tz=eastern).date()
 
     for line in parse_lines:
         lower = line.lower()
@@ -2032,12 +2040,16 @@ def sms_webhook(request):
 
             lat, lng = geocode(geocode_address) if address else (None, None)
 
-            # Parse appointment datetime
+            # Parse appointment datetime (treat as Eastern time)
             appt_datetime = None
             raw_datetime = fields.get('appointment_datetime', '')
             if raw_datetime:
                 try:
+                    import zoneinfo
+                    eastern = zoneinfo.ZoneInfo('America/New_York')
                     appt_datetime = dateparser.parse(raw_datetime, fuzzy=True)
+                    if appt_datetime and appt_datetime.tzinfo is None:
+                        appt_datetime = appt_datetime.replace(tzinfo=eastern)
                 except (ValueError, OverflowError):
                     pass
 
@@ -2116,13 +2128,6 @@ def sms_webhook(request):
                     if system_user:
                         LeadUpdate.objects.create(lead=lead, user=system_user, text='SMS update:\n' + '\n'.join(changes))
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
-                if appt_datetime:
-                    _send_ghl_appt_webhook(lead)
-                if changes:
-                    confirm = f"Updated {lead.homeowner_name}:\n" + '\n'.join(f"- {c}" for c in changes)
-                else:
-                    confirm = f"Got it -- {lead.homeowner_name} already up to date, no changes needed."
-                send_sms(from_number, confirm)
             else:
                 lead = Lead.objects.create(
                     address=address,
@@ -2142,14 +2147,6 @@ def sms_webhook(request):
                     raw_message=body,
                 )
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
-                if appt_datetime:
-                    _send_ghl_appt_webhook(lead)
-                confirm = f"Appt booked: {name or 'Unknown'}"
-                if city:
-                    confirm += f" in {city}"
-                if appt_datetime:
-                    confirm += f" on {appt_datetime.strftime('%m/%d/%Y at %I:%M %p')}"
-                send_sms(from_number, confirm)
     except Exception:
         # Always save the lead even if parsing fails
         lead = Lead.objects.create(
