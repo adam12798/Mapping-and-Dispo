@@ -41,7 +41,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Phone number: +18337990424
 - Credentials stored in `.env` (gitignored) and as env vars on Railway
-- **SMS Inbound**: Webhook receives leads (from setters), time off requests (from reps, matched by phone number), and manager APPROVE/DENY replies
+- **SMS Inbound**: Webhook receives leads (from setters), time off requests (from reps, matched by phone number), and manager APPROVE/DENY replies. No confirmation texts sent back to setters, no GHL webhook on new appointments.
 - **SMS Outbound**: Notifies managers of time off requests, confirms approve/deny to reps
 - **Voice Inbound**: Webhook at `/voice/answer/` returns TwiML with `<Connect><Stream>` to bridge to OpenAI Realtime API via WebSocket at `/media-stream`
 - Timezone: America/New_York (EST/EDT)
@@ -88,7 +88,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Debug: `/voice/debug/`, `/voice/logs/` (manager-only)
 - **Route API** (`/api/route/?date=YYYY-MM-DD`) — Pre-computed route for a given date, returns ordered stops + rep info.
 - **Disposition** — Sale (green #27ae60), No Sale (purple #8e44ad), Follow Up (orange #e67e22), Credit Fail (pink #e91e63), Cancel at Door (gray #95a5a6), CPFU (light blue #00bcd4), Rep No Show (black #2c3e50), No Coverage (cherry red #c0392b), Needs Reschedule (blue #3498db), Incomplete Deal (amber #d4a017, manager-set only), Future Contact (teal #1abc9c, auto-set when follow-up date >1 month out).
-- **Go High Level Webhook** — Disposition updates (from Alfred, manual CRM edits, or bulk updates) POST to GHL webhook with phone, name, disposition, and call_transcript. Fires from `voice_ws.py` (async via aiohttp), `views.py` lead_update (sync via urllib), and `views.py` leads_bulk_update (sync via urllib).
+- **Go High Level Webhook** — Disposition updates only (from Alfred, manual CRM edits, or bulk updates) POST to GHL webhook with phone, name, disposition, and call_transcript. Fires from `voice_ws.py` (async via aiohttp), `views.py` lead_update (sync via urllib), and `views.py` leads_bulk_update (sync via urllib). Does NOT fire on new/updated appointments from inbound SMS.
 
 ## Disposition Decision Tree (Alfred)
 
