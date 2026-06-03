@@ -1112,7 +1112,10 @@
                 if (data.error) {
                     status.innerHTML = '<span style="color:#e74c3c;">' + data.error + '</span>';
                 } else {
-                    status.innerHTML = '<span style="color:#27ae60;">Sent to ' + data.reps_notified + ' reps (' + data.leads_blasted + ' appointments)</span>';
+                    var msg = 'Sent to ' + data.reps_notified + '/' + (data.reps_tried ? data.reps_tried.length : '?') + ' reps (' + data.leads_blasted + ' appts)';
+                    if (data.reps_tried) msg += '<br><small>Tried: ' + data.reps_tried.join(', ') + '</small>';
+                    if (data.sms_errors && data.sms_errors.length) msg += '<br><small style="color:#e74c3c;">Errors: ' + data.sms_errors.join('; ') + '</small>';
+                    status.innerHTML = '<span style="color:#27ae60;">' + msg + '</span>';
                 }
             })
             .catch(function() {

@@ -970,19 +970,47 @@ def get_textblast_rep():
     return rep
 
 
+def send_sms_with_result(to, body):
+    """Send SMS via Twilio and return (success, error_detail)."""
+    import base64 as b64
+    if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        return False, 'Twilio credentials not configured'
+    if not to:
+        return False, 'No phone number'
+    url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
+    data = urllib.parse.urlencode({
+        'To': to,
+        'From': settings.TWILIO_PHONE_NUMBER,
+        'Body': body,
+    }).encode()
+    req = urllib.request.Request(url, data=data)
+    credentials = f'{settings.TWILIO_ACCOUNT_SID}:{settings.TWILIO_AUTH_TOKEN}'
+    auth = b64.b64encode(credentials.encode()).decode()
+    req.add_header('Authorization', f'Basic {auth}')
+    try:
+        resp = urllib.request.urlopen(req, timeout=10)
+        return True, None
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else str(e)
+        return False, f'HTTP {e.code}: {error_body[:200]}'
+    except Exception as e:
+        return False, str(e)
+
+
 def send_textblast(leads):
-    """Send TextBlast SMS to eligible reps for uncovered appointments."""
+    """Send TextBlast SMS to eligible reps. Returns dict with details."""
     from zoneinfo import ZoneInfo
-    from datetime import timedelta
 
     eastern = ZoneInfo('America/New_York')
     now = datetime.now(eastern)
-    eligible_reps = Rep.objects.filter(
+    eligible_reps = list(Rep.objects.filter(
         textblast_eligible=True, is_active=True,
-    ).exclude(name='TextBlast').exclude(phone_number='')
+    ).exclude(name='TextBlast').exclude(phone_number=''))
 
-    if not eligible_reps.exists() or not leads:
-        return 0
+    if not eligible_reps:
+        return {'sent': 0, 'errors': ['No eligible reps with TextBlast enabled and a phone number']}
+    if not leads:
+        return {'sent': 0, 'errors': ['No leads to blast']}
 
     # Build numbered list of appointments
     lines = ['Available appointments:']
@@ -998,14 +1026,18 @@ def send_textblast(leads):
     message = '\n'.join(lines)
 
     sent_count = 0
+    errors = []
     for rep in eligible_reps:
-        send_sms(rep.phone_number, message)
-        sent_count += 1
+        ok, err = send_sms_with_result(rep.phone_number, message)
+        if ok:
+            sent_count += 1
+        else:
+            errors.append(f'{rep.name} ({rep.phone_number}): {err}')
 
     # Mark leads as blasted
     lead_ids = [l.id for l in leads]
     Lead.objects.filter(id__in=lead_ids).update(textblast_sent_at=now)
-    return sent_count
+    return {'sent': sent_count, 'errors': errors, 'reps_tried': [f'{r.name}: {r.phone_number}' for r in eligible_reps]}
 
 
 @csrf_exempt
@@ -1053,12 +1085,16 @@ def textblast_send_api(request):
     if not textblast_leads:
         return JsonResponse({'error': 'No TextBlast appointments found for this date.'}, status=400)
 
-    reps_notified = send_textblast(textblast_leads)
-    return JsonResponse({
+    result = send_textblast(textblast_leads)
+    response = {
         'status': 'ok',
         'leads_blasted': len(textblast_leads),
-        'reps_notified': reps_notified,
-    })
+        'reps_notified': result['sent'],
+        'reps_tried': result.get('reps_tried', []),
+    }
+    if result.get('errors'):
+        response['sms_errors'] = result['errors']
+    return JsonResponse(response)
 
 
 @manager_required
