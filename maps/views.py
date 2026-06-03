@@ -999,20 +999,6 @@ def send_textblast(leads):
 
     sent_count = 0
     for rep in eligible_reps:
-        # Skip reps who are busy during any of these appointment windows
-        busy = False
-        for lead in leads:
-            window_start = lead.appointment_datetime - timedelta(hours=1)
-            window_end = lead.appointment_datetime + timedelta(hours=2)
-            if Lead.objects.filter(
-                rep=rep, cancelled=False,
-                appointment_datetime__gte=window_start,
-                appointment_datetime__lte=window_end,
-            ).exclude(rep__name='TextBlast').exists():
-                busy = True
-                break
-        if busy:
-            continue
         send_sms(rep.phone_number, message)
         sent_count += 1
 
