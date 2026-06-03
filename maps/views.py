@@ -189,10 +189,23 @@ def leads_api(request):
     return JsonResponse(data, safe=False)
 
 
+def _normalize_phone(number):
+    """Ensure phone number is in E.164 format (+1XXXXXXXXXX)."""
+    digits = re.sub(r'\D', '', number)
+    if len(digits) == 10:
+        return f'+1{digits}'
+    if len(digits) == 11 and digits.startswith('1'):
+        return f'+{digits}'
+    if number.startswith('+'):
+        return number
+    return f'+{digits}'
+
+
 def send_sms(to, body):
     """Send an SMS via Twilio REST API."""
     if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
         return
+    to = _normalize_phone(to)
     url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
     data = urllib.parse.urlencode({
         'To': to,
@@ -977,6 +990,7 @@ def send_sms_with_result(to, body):
         return False, 'Twilio credentials not configured'
     if not to:
         return False, 'No phone number'
+    to = _normalize_phone(to)
     url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
     data = urllib.parse.urlencode({
         'To': to,
