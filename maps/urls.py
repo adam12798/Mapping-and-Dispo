@@ -7,6 +7,7 @@ urlpatterns = [
     path('logout/', views.logout_view, name='logout'),
     path('', views.index, name='index'),
     path('voice/answer/', voice.voice_answer, name='voice_answer'),
+    path('voice/reminder-call/', voice.voice_reminder_call, name='voice_reminder_call'),
     path('voice/debug/', voice.voice_debug, name='voice_debug'),
     path('voice/logs/', voice.voice_logs, name='voice_logs'),
     path('api/twilio-check/', views.twilio_check, name='twilio_check'),

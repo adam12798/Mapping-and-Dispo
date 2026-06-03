@@ -5,19 +5,23 @@
 
 {% block content %}
     <div class="crm-container">
-        <div class="crm-header">
-            <h2>Representatives</h2>
-            <div>
-                <button id="bulk-delete-btn" class="delete-btn bulk-delete" style="display:none;" onclick="bulkDelete()">Delete Selected</button>
-                <button class="add-btn" onclick="showAddRow()">+ Add Rep</button>
+        <div class="crm-toolbar">
+            <div class="crm-header">
+                <h2>Representatives</h2>
+                <div>
+                    <button id="bulk-delete-btn" class="delete-btn bulk-delete" style="display:none;" onclick="bulkDelete()">Delete Selected</button>
+                    <button class="add-btn" onclick="showAddRow()">+ Add Rep</button>
+                </div>
             </div>
         </div>
 
+        <div class="crm-table-wrapper">
         <table class="crm-table">
             <thead>
                 <tr>
                     <th class="checkbox-col"><input type="checkbox" id="select-all"></th>
                     <th>Name</th>
+                    <th>TextBlast</th>
                     <th>Phone Number</th>
                     <th>Home Address</th>
                     <th>City</th>
@@ -33,6 +37,7 @@
                 <tr data-id="{{ rep.id }}">
                     <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
                     <td data-label="Name"><input type="text" class="crm-input" data-field="name" value="{{ rep.name }}"></td>
+                    <td data-label="TextBlast"><label class="tb-toggle"><input type="checkbox" data-field="textblast_eligible" {% if rep.textblast_eligible %}checked{% endif %} onchange="toggleTextblast(this)"><span class="tb-slider"></span></label></td>
                     <td data-label="Phone"><input type="text" class="crm-input" data-field="phone_number" value="{{ rep.phone_number }}"></td>
                     <td data-label="Address"><input type="text" class="crm-input" data-field="home_address" value="{{ rep.home_address }}"{% if not rep.latitude and rep.home_address %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this rep won't receive auto-assigned appointments"{% endif %}></td>
                     <td data-label="City"><input type="text" class="crm-input" data-field="city" value="{{ rep.city }}"></td>
@@ -65,6 +70,7 @@
                 <tr data-id="{{ rep.id }}" class="inactive-row">
                     <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
                     <td data-label="Name"><input type="text" class="crm-input" data-field="name" value="{{ rep.name }}"></td>
+                    <td data-label="TextBlast"><label class="tb-toggle"><input type="checkbox" data-field="textblast_eligible" {% if rep.textblast_eligible %}checked{% endif %} onchange="toggleTextblast(this)"><span class="tb-slider"></span></label></td>
                     <td data-label="Phone"><input type="text" class="crm-input" data-field="phone_number" value="{{ rep.phone_number }}"></td>
                     <td data-label="Address"><input type="text" class="crm-input" data-field="home_address" value="{{ rep.home_address }}"{% if not rep.latitude and rep.home_address %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this rep won't receive auto-assigned appointments"{% endif %}></td>
                     <td data-label="City"><input type="text" class="crm-input" data-field="city" value="{{ rep.city }}"></td>
@@ -95,6 +101,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
 {% endblock %}
 
@@ -110,6 +117,7 @@
             row.innerHTML =
                 '<td class="checkbox-col"></td>' +
                 '<td><input type="text" class="crm-input" id="new-name" placeholder="Name"></td>' +
+                '<td><label class="tb-toggle"><input type="checkbox" id="new-textblast"><span class="tb-slider"></span></label></td>' +
                 '<td><input type="text" class="crm-input" id="new-phone" placeholder="Phone"></td>' +
                 '<td><input type="text" class="crm-input" id="new-address" placeholder="Home Address"></td>' +
                 '<td><input type="text" class="crm-input" id="new-city" placeholder="City"></td>' +
@@ -145,6 +153,7 @@
             var ratingDiv = newRow.querySelector('.star-rating');
             data.rating = parseInt(ratingDiv.dataset.rating) || 0;
             data.color = document.getElementById('new-color').value;
+            data.textblast_eligible = document.getElementById('new-textblast').checked;
             if (!data.name) { alert('Name is required'); return; }
             fetch('/api/reps/', {
                 method: 'POST',
@@ -157,6 +166,12 @@
                   }
                   location.reload();
               });
+        }
+
+        function toggleTextblast(checkbox) {
+            var row = checkbox.closest('tr');
+            var repId = row.dataset.id;
+            saveField(repId, 'textblast_eligible', checkbox.checked, checkbox);
         }
 
         function toggleActive(select) {

@@ -5,9 +5,11 @@
 
 {% block content %}
     <div class="crm-container">
-        <div class="crm-header">
-            <h2>User Management</h2>
-            <button class="add-btn" onclick="showAddRow()">+ Add User</button>
+        <div class="crm-toolbar">
+            <div class="crm-header">
+                <h2>User Management</h2>
+                <button class="add-btn" onclick="showAddRow()">+ Add User</button>
+            </div>
         </div>
         <div id="users-grouped"></div>
     </div>
@@ -120,6 +122,9 @@
         .source-picker-dropdown label:hover { background: #e0fbfc; }
         .source-picker-dropdown input[type="checkbox"] { accent-color: #3d5a80; }
         #users-grouped { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        @media (max-width: 768px) {
+            #users-grouped { padding-bottom: 72px; }
+        }
     </style>
 {% endblock %}
 {% block scripts %}

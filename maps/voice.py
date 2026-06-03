@@ -183,3 +183,29 @@ def voice_answer(request):
 </Response>"""
 
     return HttpResponse(twiml, content_type='text/xml')
+
+
+@csrf_exempt
+def voice_reminder_call(request):
+    """Twilio webhook for outbound reminder calls — connects rep to Alfred with lead context."""
+    host = request.get_host()
+    forwarded_proto = request.headers.get('X-Forwarded-Proto', '')
+    protocol = 'wss' if (request.is_secure() or forwarded_proto == 'https') else 'ws'
+
+    # For outbound calls, the rep's number is in 'To'
+    caller = request.POST.get('To', '') or request.GET.get('To', '')
+    call_sid = request.POST.get('CallSid', '') or request.GET.get('CallSid', '')
+    lead_id = request.GET.get('lead_id', '')
+
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Connect>
+        <Stream url="{protocol}://{host}/media-stream">
+            <Parameter name="callerNumber" value="{caller}" />
+            <Parameter name="callSid" value="{call_sid}" />
+            <Parameter name="reminderLeadId" value="{lead_id}" />
+        </Stream>
+    </Connect>
+</Response>"""
+
+    return HttpResponse(twiml, content_type='text/xml')

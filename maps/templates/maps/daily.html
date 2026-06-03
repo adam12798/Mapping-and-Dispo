@@ -1020,7 +1020,8 @@
         function showToast(msg) {
             var toast = document.createElement('div');
             toast.textContent = msg;
-            toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#27ae60;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;opacity:1;transition:opacity 0.5s;';
+            var bottom = window.innerWidth <= 768 ? '80px' : '24px';
+            toast.style.cssText = 'position:fixed;bottom:'+bottom+';right:24px;background:#27ae60;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;opacity:1;transition:opacity 0.5s;';
             document.body.appendChild(toast);
             setTimeout(function() { toast.style.opacity = '0'; }, 1500);
             setTimeout(function() { toast.remove(); }, 2100);

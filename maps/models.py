@@ -53,6 +53,9 @@ class Lead(models.Model):
     appt_notes = models.TextField(blank=True)
     call_transcript = models.TextField(blank=True)
     cancelled = models.BooleanField(default=False)
+    dispo_reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    dispo_call_made_at = models.DateTimeField(null=True, blank=True)
+    textblast_sent_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.address} ({self.created_at:%m/%d/%Y})"
@@ -75,6 +78,7 @@ class Rep(models.Model):
     rating = models.IntegerField(default=0)
     color = models.CharField(max_length=7, default='#2980b9')
     is_active = models.BooleanField(default=True)
+    textblast_eligible = models.BooleanField(default=False)
 
     def __str__(self):
         return self.name

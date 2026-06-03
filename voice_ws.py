@@ -289,7 +289,7 @@ async def get_drive_time(lat1, lng1, lat2, lng2):
     return None
 
 
-async def get_rep_context(caller_number):
+async def get_rep_context(caller_number, reminder_lead_id=''):
     """Look up caller as rep or manager and return appropriate context."""
     import django
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
@@ -438,10 +438,25 @@ async def get_rep_context(caller_number):
             else:
                 lines.append(f"- {t.start_date:%a %m/%d}: {time_str}")
 
+    # If this is a reminder call, look up the specific lead
+    reminder_lead_info = ''
+    if reminder_lead_id and rep:
+        try:
+            lead_obj = await sync_to_async(Lead.objects.filter(id=int(reminder_lead_id), rep=rep).first)()
+            if lead_obj:
+                dt = lead_obj.appointment_datetime.astimezone(ZoneInfo('America/New_York'))
+                reminder_lead_info = (
+                    f'This is a follow-up call about the appointment with '
+                    f'{lead_obj.homeowner_name or "Unknown"} at {dt:%I:%M %p}.'
+                )
+        except (ValueError, Exception) as e:
+            logger.error(f'Failed to look up reminder lead {reminder_lead_id}: {e}')
+
     return {
         'rep': rep,
         'manager': manager,
         'prompt_context': '\n'.join(lines),
+        'reminder_lead_info': reminder_lead_info,
     }
 
 
@@ -726,6 +741,7 @@ async def media_stream(ws: WebSocket):
     stream_sid = None
     caller_number = ''
     call_sid = ''
+    reminder_lead_id = ''
     transcript_parts = []
     openai_ws = None
     session_ready = asyncio.Event()
@@ -746,7 +762,7 @@ async def media_stream(ws: WebSocket):
 
         async def forward_twilio_to_openai():
             """Forward audio from Twilio to OpenAI."""
-            nonlocal stream_sid, caller_number, call_sid, rep_context
+            nonlocal stream_sid, caller_number, call_sid, reminder_lead_id, rep_context
             try:
                 while True:
                     data = await ws.receive_text()
@@ -757,11 +773,12 @@ async def media_stream(ws: WebSocket):
                         custom = msg['start'].get('customParameters', {})
                         call_sid = custom.get('callSid', msg['start'].get('callSid', ''))
                         caller_number = custom.get('callerNumber', '')
-                        logger.info(f'Stream started: sid={stream_sid}, call={call_sid}, caller={caller_number}')
+                        reminder_lead_id = custom.get('reminderLeadId', '')
+                        logger.info(f'Stream started: sid={stream_sid}, call={call_sid}, caller={caller_number}, reminder={reminder_lead_id}')
 
                         # Look up caller (rep or manager) and their appointments
-                        rep_context = await get_rep_context(caller_number)
-                        logger.info(f'Caller context: rep={rep_context.get("rep")}, manager={rep_context.get("manager")}')
+                        rep_context = await get_rep_context(caller_number, reminder_lead_id=reminder_lead_id)
+                        logger.info(f'Caller context: rep={rep_context.get("rep")}, manager={rep_context.get("manager")}, reminder={reminder_lead_id}')
                         caller_identified.set()
 
                     elif msg['event'] == 'media':
@@ -873,7 +890,17 @@ async def media_stream(ws: WebSocket):
 
                             rep = rep_context.get('rep')
                             mgr = rep_context.get('manager')
-                            if rep:
+                            if rep and reminder_lead_id:
+                                # Outbound reminder call — greet about the specific appointment
+                                first_name = rep.name.split()[0]
+                                reminder_lead_info = rep_context.get('reminder_lead_info', '')
+                                greeting_text = (
+                                    f'You called {first_name} to follow up on an un-updated appointment. '
+                                    f'{reminder_lead_info} '
+                                    f'Say "Hey {first_name}, it\'s Alfred! Just checking in on your appointment '
+                                    f'— how did it go?" Keep it casual and brief.'
+                                )
+                            elif rep:
                                 first_name = rep.name.split()[0]
                                 greeting_text = f'The call just connected with {first_name}. Say "Hey {first_name}!" and wait for them to speak. Keep it very short.'
                             elif mgr:

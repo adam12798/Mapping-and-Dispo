@@ -698,6 +698,7 @@ def rep_create(request):
         longitude=lng,
         specialty=data.get('specialty', ''),
         color=color,
+        textblast_eligible=data.get('textblast_eligible', False),
     )
     response = {'status': 'ok', 'id': rep.id}
     if geocode_failed:
@@ -717,7 +718,7 @@ def rep_update(request, pk):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     rep = get_object_or_404(Rep, pk=pk)
     data = json.loads(request.body)
-    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty', 'rating', 'color', 'is_active']
+    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty', 'rating', 'color', 'is_active', 'textblast_eligible']
     for field in allowed_fields:
         if field in data:
             setattr(rep, field, data[field])
@@ -751,7 +752,9 @@ def reps_bulk_delete(request):
 
 @login_required
 def reps_api(request):
-    """Return all active reps as JSON."""
+    """Return all active reps as JSON. Ensures TextBlast rep exists for managers."""
+    if hasattr(request.user, 'profile') and request.user.profile.is_manager:
+        get_textblast_rep()
     reps = Rep.objects.filter(is_active=True).order_by('name')
     data = [
         {
@@ -958,6 +961,67 @@ def clear_assignments_api(request):
     return JsonResponse({'status': 'ok', 'cleared': count})
 
 
+def get_textblast_rep():
+    """Get or create the special TextBlast rep."""
+    rep, _ = Rep.objects.get_or_create(
+        name='TextBlast',
+        defaults={'is_active': True, 'color': '#ff6b6b'},
+    )
+    return rep
+
+
+def send_textblast(leads):
+    """Send TextBlast SMS to eligible reps for uncovered appointments."""
+    from zoneinfo import ZoneInfo
+    from datetime import timedelta
+
+    eastern = ZoneInfo('America/New_York')
+    now = datetime.now(eastern)
+    eligible_reps = Rep.objects.filter(
+        textblast_eligible=True, is_active=True,
+    ).exclude(name='TextBlast').exclude(phone_number='')
+
+    if not eligible_reps.exists() or not leads:
+        return 0
+
+    # Build numbered list of appointments
+    lines = ['Available appointments:']
+    for i, lead in enumerate(leads, 1):
+        dt = lead.appointment_datetime.astimezone(eastern)
+        appt_type = (lead.appointment_type or 'unknown').upper()
+        city = lead.city or ''
+        address = lead.address or ''
+        time_str = dt.strftime('%I:%M %p').lstrip('0')
+        lines.append(f'{i}. {address}, {city} - {time_str} - {appt_type}')
+    lines.append('')
+    lines.append('Reply with the # to claim or describe which one (e.g. "I can take the one in Waltham")')
+    message = '\n'.join(lines)
+
+    sent_count = 0
+    for rep in eligible_reps:
+        # Skip reps who are busy during any of these appointment windows
+        busy = False
+        for lead in leads:
+            window_start = lead.appointment_datetime - timedelta(hours=1)
+            window_end = lead.appointment_datetime + timedelta(hours=2)
+            if Lead.objects.filter(
+                rep=rep, cancelled=False,
+                appointment_datetime__gte=window_start,
+                appointment_datetime__lte=window_end,
+            ).exclude(rep__name='TextBlast').exists():
+                busy = True
+                break
+        if busy:
+            continue
+        send_sms(rep.phone_number, message)
+        sent_count += 1
+
+    # Mark leads as blasted
+    lead_ids = [l.id for l in leads]
+    Lead.objects.filter(id__in=lead_ids).update(textblast_sent_at=now)
+    return sent_count
+
+
 @csrf_exempt
 @require_POST
 @manager_required
@@ -973,7 +1037,22 @@ def confirm_assignments_api(request):
         Lead.objects.filter(id=int(lead_id_str)).update(rep_id=rep_id)
         count += 1
 
-    return JsonResponse({'status': 'ok', 'confirmed': count})
+    # Check for TextBlast assignments and send SMS blast
+    textblast_rep = Rep.objects.filter(name='TextBlast').first()
+    textblast_count = 0
+    if textblast_rep:
+        textblast_leads = list(
+            Lead.objects.filter(
+                rep=textblast_rep,
+                textblast_sent_at__isnull=True,
+                cancelled=False,
+                appointment_datetime__isnull=False,
+            ).order_by('appointment_datetime')
+        )
+        if textblast_leads:
+            textblast_count = send_textblast(textblast_leads)
+
+    return JsonResponse({'status': 'ok', 'confirmed': count, 'textblast_sent': textblast_count})
 
 
 @manager_required
@@ -1824,6 +1903,37 @@ def lead_messages_api(request, lead_id):
     })
 
 
+def _match_textblast_claim(body, textblast_leads):
+    """Match a rep's SMS reply to a TextBlast appointment.
+    Returns the matched Lead or None."""
+    text = body.strip()
+
+    # Try matching a plain number (e.g. "1", "2", "#3")
+    num_match = re.match(r'^#?\s*(\d+)$', text)
+    if num_match:
+        idx = int(num_match.group(1)) - 1
+        if 0 <= idx < len(textblast_leads):
+            return textblast_leads[idx]
+        return None
+
+    # Try matching by city name (e.g. "I can take the one in Waltham")
+    text_lower = text.lower()
+    for lead in textblast_leads:
+        if lead.city and lead.city.lower() in text_lower:
+            return lead
+
+    # Try matching by address fragment
+    for lead in textblast_leads:
+        if lead.address:
+            # Match street name (first significant word of address)
+            addr_words = [w.lower() for w in lead.address.split() if len(w) > 2 and not w.isdigit()]
+            for word in addr_words:
+                if word in text_lower:
+                    return lead
+
+    return None
+
+
 @csrf_exempt
 @require_POST
 def sms_webhook(request):
@@ -2004,8 +2114,50 @@ def sms_webhook(request):
             content_type='text/xml',
         )
 
-    # Check if sender is a rep — if so, treat as time off request
+    # Check if sender is a rep
     rep = Rep.objects.filter(phone_number__icontains=from_number[-10:]).first() if from_number else None
+
+    # Check for TextBlast claim reply
+    if rep and body:
+        textblast_rep = Rep.objects.filter(name='TextBlast').first()
+        if textblast_rep:
+            textblast_leads = list(
+                Lead.objects.filter(
+                    rep=textblast_rep,
+                    textblast_sent_at__isnull=False,
+                    cancelled=False,
+                    appointment_datetime__isnull=False,
+                ).order_by('appointment_datetime')
+            )
+            if textblast_leads:
+                claimed_lead = _match_textblast_claim(body, textblast_leads)
+                if claimed_lead:
+                    from zoneinfo import ZoneInfo
+                    eastern = ZoneInfo('America/New_York')
+                    # Assign to claiming rep
+                    claimed_lead.rep = rep
+                    claimed_lead.textblast_sent_at = None
+                    claimed_lead.save(update_fields=['rep', 'textblast_sent_at'])
+                    # Log as lead update
+                    from django.contrib.auth.models import User
+                    system_user = User.objects.filter(is_superuser=True).first()
+                    if system_user:
+                        LeadUpdate.objects.create(
+                            lead=claimed_lead,
+                            user=system_user,
+                            text=f'{rep.name} claimed this appointment via TextBlast',
+                        )
+                    dt = claimed_lead.appointment_datetime.astimezone(eastern)
+                    send_sms(rep.phone_number,
+                        f"You're assigned! {claimed_lead.address}, {claimed_lead.city} "
+                        f"at {dt.strftime('%I:%M %p').lstrip('0')} "
+                        f"({(claimed_lead.appointment_type or 'unknown').upper()})")
+                    return HttpResponse(
+                        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                        content_type='text/xml',
+                    )
+
+    # Check if sender is a rep — if so, treat as time off request
     if rep and body:
         time_off = parse_time_off_request(body, rep)
         if time_off:
