@@ -1037,22 +1037,42 @@ def confirm_assignments_api(request):
         Lead.objects.filter(id=int(lead_id_str)).update(rep_id=rep_id)
         count += 1
 
-    # Check for TextBlast assignments and send SMS blast
-    textblast_rep = Rep.objects.filter(name='TextBlast').first()
-    textblast_count = 0
-    if textblast_rep:
-        textblast_leads = list(
-            Lead.objects.filter(
-                rep=textblast_rep,
-                textblast_sent_at__isnull=True,
-                cancelled=False,
-                appointment_datetime__isnull=False,
-            ).order_by('appointment_datetime')
-        )
-        if textblast_leads:
-            textblast_count = send_textblast(textblast_leads)
+    return JsonResponse({'status': 'ok', 'confirmed': count})
 
-    return JsonResponse({'status': 'ok', 'confirmed': count, 'textblast_sent': textblast_count})
+
+@csrf_exempt
+@require_POST
+@manager_required
+def textblast_send_api(request):
+    """Send TextBlast SMS for all un-blasted appointments assigned to TextBlast rep."""
+    from zoneinfo import ZoneInfo
+
+    data = json.loads(request.body) if request.body else {}
+    date_str = data.get('date', '')
+
+    textblast_rep = Rep.objects.filter(name='TextBlast').first()
+    if not textblast_rep:
+        return JsonResponse({'error': 'No TextBlast rep found. Assign appointments to TextBlast first.'}, status=400)
+
+    qs = Lead.objects.filter(
+        rep=textblast_rep,
+        cancelled=False,
+        appointment_datetime__isnull=False,
+    )
+    # If a date is provided, filter to that date only
+    if date_str:
+        qs = qs.filter(appointment_datetime__date=date_str)
+
+    textblast_leads = list(qs.order_by('appointment_datetime'))
+    if not textblast_leads:
+        return JsonResponse({'error': 'No TextBlast appointments found for this date.'}, status=400)
+
+    reps_notified = send_textblast(textblast_leads)
+    return JsonResponse({
+        'status': 'ok',
+        'leads_blasted': len(textblast_leads),
+        'reps_notified': reps_notified,
+    })
 
 
 @manager_required

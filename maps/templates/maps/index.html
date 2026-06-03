@@ -33,6 +33,9 @@
                 <button class="confirm-btn" onclick="confirmAssignments()">Confirm</button>
                 <button class="redo-btn" onclick="redoAssignments()">Redo</button>
             </div>
+            <hr style="margin:8px 0;border:none;border-top:1px solid #ddd;">
+            <button id="textblast-btn" style="width:100%;font-size:12px;padding:8px 12px;background:#ee6c4d;color:#fff;border:none;border-radius:6px;font-family:'Montserrat',sans-serif;font-weight:600;cursor:pointer;" onclick="sendTextBlast()">Send TextBlast</button>
+            <div id="textblast-status" style="margin-top:4px;font-size:11px;color:#666;"></div>
         </div>
     </div>
 
@@ -1087,6 +1090,36 @@
             document.getElementById('assign-status').textContent = '';
             clearRoute();
             updateSidebar(null);
+        }
+
+        function sendTextBlast() {
+            var btn = document.getElementById('textblast-btn');
+            var status = document.getElementById('textblast-status');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            status.textContent = '';
+            var dateInput = document.getElementById('route-date');
+            var date = dateInput ? dateInput.value : '';
+            fetch('/api/textblast/send/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: date })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                btn.disabled = false;
+                btn.textContent = 'Send TextBlast';
+                if (data.error) {
+                    status.innerHTML = '<span style="color:#e74c3c;">' + data.error + '</span>';
+                } else {
+                    status.innerHTML = '<span style="color:#27ae60;">Sent to ' + data.reps_notified + ' reps (' + data.leads_blasted + ' appointments)</span>';
+                }
+            })
+            .catch(function() {
+                btn.disabled = false;
+                btn.textContent = 'Send TextBlast';
+                status.innerHTML = '<span style="color:#e74c3c;">Failed to send</span>';
+            });
         }
 
         function clearAssignments() {

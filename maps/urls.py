@@ -26,6 +26,7 @@ urlpatterns = [
     path('api/auto-assign/', views.auto_assign_api, name='auto_assign'),
     path('api/clear-assignments/', views.clear_assignments_api, name='clear_assignments'),
     path('api/confirm-assignments/', views.confirm_assignments_api, name='confirm_assignments'),
+    path('api/textblast/send/', views.textblast_send_api, name='textblast_send'),
     path('time-off/', views.time_off_view, name='time_off'),
     path('daily/', views.daily_view, name='daily'),
     path('api/managers/', views.manager_api, name='manager_api'),
