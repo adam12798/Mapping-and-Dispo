@@ -353,6 +353,7 @@ def lead_update(request, pk):
     if request.method != 'PUT':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     lead = get_object_or_404(Lead, pk=pk)
+    old_appt_dt = str(lead.appointment_datetime) if lead.appointment_datetime else ''
     data = json.loads(request.body)
     allowed_fields = [
         'homeowner_name', 'phone_number', 'address', 'city', 'state',
@@ -444,8 +445,9 @@ def lead_update(request, pk):
         except Exception as e:
             ghl_logger.error(f'GHL webhook failed for lead {pk}: {e}')
 
-    # Send webhook to Go High Level if appointment datetime was updated
-    if 'appointment_datetime' in data:
+    # Send webhook to Go High Level only if appointment datetime actually changed
+    new_appt_dt = str(lead.appointment_datetime) if lead.appointment_datetime else ''
+    if 'appointment_datetime' in data and new_appt_dt != old_appt_dt:
         _send_ghl_appt_webhook(lead, pk)
 
     response = {'status': 'ok'}
@@ -546,12 +548,6 @@ def leads_bulk_update(request):
                 ghl_logger.info(f'GHL webhook sent for lead {lead.id}: status {resp.status}')
             except Exception as e:
                 ghl_logger.error(f'GHL webhook failed for lead {lead.id}: {e}')
-
-    # Fire GHL appt webhook for each lead if appointment_datetime was updated
-    if 'appointment_datetime' in update_kwargs:
-        leads = Lead.objects.filter(id__in=ids)
-        for lead in leads:
-            _send_ghl_appt_webhook(lead)
 
     return JsonResponse({'status': 'ok', 'updated': len(ids)})
 
