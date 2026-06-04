@@ -42,15 +42,19 @@
 
         @media (max-width: 768px) {
             .daily-container .crm-table-wrapper { display: none !important; }
+            .daily-container.crm-container { height: calc(100vh - 100px); display: flex; flex-direction: column; }
             .daily-mobile-view {
-                display: block;
+                display: flex;
+                flex-direction: column;
                 flex: 1;
+                min-height: 0;
                 overflow: hidden;
             }
             .daily-mobile-scroll {
                 overflow-x: auto;
                 overflow-y: auto;
-                height: calc(100vh - 44px - 56px - 110px);
+                flex: 1;
+                min-height: 0;
                 -webkit-overflow-scrolling: touch;
             }
             .daily-mobile-table {
