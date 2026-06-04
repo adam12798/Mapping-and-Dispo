@@ -259,9 +259,15 @@ def is_in_massachusetts(lat, lng):
 def geocode(address):
     """Geocode an address using Nominatim (free, no API key).
 
-    Validates results are in Massachusetts. If not, retries with
-    ', Massachusetts' appended. Returns (None, None) if still outside MA.
+    Validates results are in Massachusetts. Uses multiple strategies:
+    1. Clean query with Massachusetts (strip MA abbreviation first)
+    2. Free-text with original address
+    3. City-only fallback (returns city center — better than nothing)
     """
+    import time as _time
+    import logging
+    geo_logger = logging.getLogger('geocode')
+
     def _nominatim_search(query):
         try:
             params = urllib.parse.urlencode({
@@ -280,42 +286,49 @@ def geocode(address):
             pass
         return None, None
 
+    def _extract_city(addr):
+        """Pull city name from an address string."""
+        parts = [p.strip() for p in addr.split(',')]
+        # Strip state/zip parts from the end
+        clean = []
+        for p in parts:
+            if re.match(r'^(MA|Massachusetts|US|USA|\d{5})$', p, re.IGNORECASE):
+                continue
+            clean.append(p)
+        # City is typically the second-to-last meaningful part, or last if only 2 parts
+        if len(clean) >= 2:
+            return clean[-1]
+        return None
+
+    # Strip "MA" / "Massachusetts" from the address so we can append cleanly
+    clean_addr = re.sub(r',?\s*(MA|Massachusetts|Mass)\b\.?\s*$', '', address, flags=re.IGNORECASE).strip()
+    clean_addr = clean_addr.rstrip(',').strip()
+
+    # Strategy 1: clean address + Massachusetts
+    ma_query = f'{clean_addr}, Massachusetts'
+    lat, lng = _nominatim_search(ma_query)
+    if lat is not None and is_in_massachusetts(lat, lng):
+        return lat, lng
+
+    _time.sleep(0.3)
+
+    # Strategy 2: original address as-is
     lat, lng = _nominatim_search(address)
+    if lat is not None and is_in_massachusetts(lat, lng):
+        return lat, lng
 
-    # If result is outside MA, retry with Massachusetts explicitly
-    if lat is not None and not is_in_massachusetts(lat, lng):
-        retry_address = f"{address}, Massachusetts"
-        lat2, lng2 = _nominatim_search(retry_address)
-        if lat2 is not None and is_in_massachusetts(lat2, lng2):
-            return lat2, lng2
+    _time.sleep(0.3)
 
-        # Last resort: try just the city/town from the address
-        # e.g. "848 main st, beverly, MA" → try "beverly, Massachusetts"
-        parts = address.split(',')
-        if len(parts) >= 2:
-            city_part = parts[-2].strip() if 'MA' in parts[-1].upper() else parts[-1].strip()
-            city_lat, city_lng = _nominatim_search(f"{city_part}, Massachusetts")
-            if city_lat is not None and is_in_massachusetts(city_lat, city_lng):
-                return city_lat, city_lng
+    # Strategy 3: city-only fallback (city center coordinates)
+    city = _extract_city(address) or _extract_city(clean_addr)
+    if city:
+        city_lat, city_lng = _nominatim_search(f'{city}, Massachusetts')
+        if city_lat is not None and is_in_massachusetts(city_lat, city_lng):
+            geo_logger.info(f'Geocode city fallback for "{address}" -> {city}, MA ({city_lat}, {city_lng})')
+            return city_lat, city_lng
 
-        return None, None
-
-    # No result at all — try with Massachusetts appended
-    if lat is None:
-        retry_address = f"{address}, Massachusetts"
-        lat2, lng2 = _nominatim_search(retry_address)
-        if lat2 is not None and is_in_massachusetts(lat2, lng2):
-            return lat2, lng2
-
-        # Last resort: try just the city/town from the address
-        parts = address.split(',')
-        if len(parts) >= 2:
-            city_part = parts[-2].strip() if 'MA' in parts[-1].upper() else parts[-1].strip()
-            city_lat, city_lng = _nominatim_search(f"{city_part}, Massachusetts")
-            if city_lat is not None and is_in_massachusetts(city_lat, city_lng):
-                return city_lat, city_lng
-
-    return lat, lng
+    geo_logger.warning(f'Geocode failed for "{address}"')
+    return None, None
 
 
 @login_required
