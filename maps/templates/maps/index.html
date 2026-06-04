@@ -478,6 +478,20 @@
         var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
         document.getElementById('route-date').value = todayStr;
 
+        // Recover map when tab regains focus (canvas renderer loses context in background)
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden) {
+                map.invalidateSize();
+                // Force canvas re-render by nudging zoom
+                var z = map.getZoom();
+                map.setZoom(z - 0.001, { animate: false });
+                setTimeout(function() { map.setZoom(z, { animate: false }); }, 50);
+            }
+        });
+        window.addEventListener('focus', function() {
+            map.invalidateSize();
+        });
+
         // Fetch leads after date is set, open sidebar
         fetchLeads();
         openSidebar();
