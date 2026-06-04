@@ -1915,16 +1915,20 @@ def lead_updates_api(request, lead_id):
         return JsonResponse({'error': 'Forbidden'}, status=403)
 
     if request.method == 'GET':
+        from zoneinfo import ZoneInfo
+        eastern = ZoneInfo('America/New_York')
         updates = lead.updates.select_related('user').order_by('created_at')
         data = [{
             'id': u.id,
             'username': u.user.username,
             'text': u.text,
-            'created_at': u.created_at.strftime('%m/%d/%Y %I:%M %p'),
+            'created_at': u.created_at.astimezone(eastern).strftime('%m/%d/%Y %I:%M %p'),
         } for u in updates]
         return JsonResponse(data, safe=False)
 
     if request.method == 'POST':
+        from zoneinfo import ZoneInfo
+        eastern = ZoneInfo('America/New_York')
         data = json.loads(request.body)
         text = data.get('text', '').strip()
         if not text:
@@ -1935,7 +1939,7 @@ def lead_updates_api(request, lead_id):
             'id': update.id,
             'username': request.user.username,
             'text': update.text,
-            'created_at': update.created_at.strftime('%m/%d/%Y %I:%M %p'),
+            'created_at': update.created_at.astimezone(eastern).strftime('%m/%d/%Y %I:%M %p'),
         })
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -1950,6 +1954,8 @@ def lead_messages_api(request, lead_id):
         return JsonResponse({'error': 'Forbidden'}, status=403)
 
     from collections import OrderedDict
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
     messages = lead.messages.order_by('created_at')
 
     threads = OrderedDict()
@@ -1959,7 +1965,7 @@ def lead_messages_api(request, lead_id):
         threads[msg.phone_number].append({
             'direction': msg.direction,
             'body': msg.body,
-            'created_at': msg.created_at.strftime('%m/%d/%Y %I:%M %p'),
+            'created_at': msg.created_at.astimezone(eastern).strftime('%m/%d/%Y %I:%M %p'),
         })
 
     # Fallback: show original raw_message if no stored messages yet
