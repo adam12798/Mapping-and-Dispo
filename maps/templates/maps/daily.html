@@ -1478,6 +1478,7 @@
 
             document.getElementById('detail-name').textContent = name;
             var dis = {% if is_manager %}''{% else %}' disabled'{% endif %};
+            var repCanEdit = {% if not is_manager %}true{% else %}false{% endif %};
             var html = '';
 
             // Phone
@@ -1516,16 +1517,16 @@
             html += '<select data-lead="' + leadId + '" data-field="rep_id" onchange="saveDetailField(this)"' + dis + '>' + gsh('rep_id') + '</select></div>';
 
             html += '<div class="detail-field"><div class="detail-field-label">Sit</div>';
-            html += '<select data-lead="' + leadId + '" data-field="sat" onchange="saveDetailField(this); updateSatColor(this);"' + dis + '>' + gsh('sat') + '</select></div>';
+            html += '<select data-lead="' + leadId + '" data-field="sat" onchange="saveDetailField(this); updateSatColor(this);">' + gsh('sat') + '</select></div>';
 
             html += '<div class="detail-field"><div class="detail-field-label">Disposition</div>';
-            html += '<select data-lead="' + leadId + '" data-field="disposition" onchange="saveDetailField(this); updateDispoColor(this);"' + dis + '>' + gsh('disposition') + '</select></div>';
+            html += '<select data-lead="' + leadId + '" data-field="disposition" onchange="saveDetailField(this); updateDispoColor(this);">' + gsh('disposition') + '</select></div>';
 
             html += '</div>';
 
             // Follow Up
             html += '<div class="detail-field"><div class="detail-field-label">Follow Up Date</div>';
-            html += '<input type="date" value="' + escapeDetailHtml(followUp) + '" data-lead="' + leadId + '" data-field="follow_up_date" onchange="saveDetailField(this)"' + dis + '></div>';
+            html += '<input type="date" value="' + escapeDetailHtml(followUp) + '" data-lead="' + leadId + '" data-field="follow_up_date" onchange="saveDetailField(this)"></div>';
 
             // Tags
             html += '<div class="detail-field"><div class="detail-field-label">Tags</div>';
@@ -1538,11 +1539,11 @@
 
             // Call Notes
             html += '<div class="detail-field"><div class="detail-field-label">Call Notes</div>';
-            html += '<input type="text" value="' + escapeDetailHtml(notes) + '" data-lead="' + leadId + '" data-field="call_notes" onchange="saveDetailField(this)"' + dis + ' placeholder="—"></div>';
+            html += '<input type="text" value="' + escapeDetailHtml(notes) + '" data-lead="' + leadId + '" data-field="call_notes" onchange="saveDetailField(this)" placeholder="—"></div>';
 
             // Appt Notes
             html += '<div class="detail-field"><div class="detail-field-label">Appt Notes</div>';
-            html += '<textarea data-lead="' + leadId + '" data-field="appt_notes" onchange="saveDetailField(this)"' + dis + ' placeholder="—">' + escapeDetailHtml(apptNotes) + '</textarea></div>';
+            html += '<textarea data-lead="' + leadId + '" data-field="appt_notes" onchange="saveDetailField(this)" placeholder="—">' + escapeDetailHtml(apptNotes) + '</textarea></div>';
 
             // Transcript
             html += '<div class="detail-field"><div class="detail-field-label">Transcript</div>';

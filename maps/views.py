@@ -365,8 +365,20 @@ def daily_view(request):
 def lead_update(request, pk):
     """Update or delete a lead's CRM fields."""
     is_mgr = getattr(request.user, 'profile', None) and request.user.profile.is_manager
+    REP_EDITABLE_FIELDS = {'disposition', 'sat', 'call_notes', 'appt_notes', 'follow_up_date'}
     if not is_mgr:
-        return JsonResponse({'error': 'Forbidden'}, status=403)
+        user_rep = get_user_rep(request.user)
+        if not user_rep:
+            return JsonResponse({'error': 'Forbidden'}, status=403)
+        lead = get_object_or_404(Lead, pk=pk)
+        if lead.rep != user_rep:
+            return JsonResponse({'error': 'Forbidden'}, status=403)
+        if request.method == 'DELETE':
+            return JsonResponse({'error': 'Forbidden'}, status=403)
+        data = json.loads(request.body)
+        non_allowed = set(data.keys()) - REP_EDITABLE_FIELDS
+        if non_allowed:
+            return JsonResponse({'error': 'Forbidden'}, status=403)
     if request.method == 'DELETE':
         lead = get_object_or_404(Lead, pk=pk)
         lead.delete()
