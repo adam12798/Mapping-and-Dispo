@@ -151,6 +151,14 @@ def index(request):
     return render(request, 'maps/index.html', {'active_tab': 'map'})
 
 
+def privacy_view(request):
+    return render(request, 'maps/privacy.html')
+
+
+def terms_view(request):
+    return render(request, 'maps/terms.html')
+
+
 @login_required
 def leads_api(request):
     """Return all leads as JSON for the map to plot."""
