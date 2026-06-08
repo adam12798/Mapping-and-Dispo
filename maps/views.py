@@ -1012,7 +1012,7 @@ def get_textblast_rep():
     return rep
 
 
-def send_sms_with_result(to, body):
+def send_sms_with_result(to, body, from_number=None):
     """Send SMS via Twilio and return (success, error_detail)."""
     import base64 as b64
     if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
@@ -1023,7 +1023,7 @@ def send_sms_with_result(to, body):
     url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
     data = urllib.parse.urlencode({
         'To': to,
-        'From': settings.TWILIO_PHONE_NUMBER,
+        'From': from_number or settings.TWILIO_PHONE_NUMBER,
         'Body': body,
     }).encode()
     req = urllib.request.Request(url, data=data)
@@ -1071,7 +1071,7 @@ def send_textblast(leads):
     sent_count = 0
     errors = []
     for rep in eligible_reps:
-        ok, err = send_sms_with_result(rep.phone_number, message)
+        ok, err = send_sms_with_result(rep.phone_number, message, from_number=settings.TWILIO_PHONE_NUMBER_2)
         if ok:
             sent_count += 1
         else:
