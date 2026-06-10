@@ -1,0 +1,105 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ tenant_theme.company_name }} | Login</title>
+    <link rel="icon" type="image/svg+xml" href="{% static 'maps/favicon.svg' %}">
+    <link href="https://fonts.googleapis.com/css2?family={{ tenant_theme.font_family|urlencode }}:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: '{{ tenant_theme.font_family }}', sans-serif; background: {{ tenant_theme.color_primary }}; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow-x: hidden; overflow-y: auto; }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse at 20% 50%, {{ tenant_theme.color_secondary }}40 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, {{ tenant_theme.color_text_muted }}26 0%, transparent 50%),
+                radial-gradient(ellipse at 60% 80%, {{ tenant_theme.color_accent }}1a 0%, transparent 50%);
+            animation: bgShift 8s ease-in-out infinite alternate;
+            z-index: 0;
+        }
+        @keyframes bgShift {
+            0% { transform: scale(1) translate(0, 0); }
+            100% { transform: scale(1.1) translate(-2%, 3%); }
+        }
+
+        .login-card {
+            position: relative; z-index: 1;
+            background: rgba(255,255,255,0.97);
+            border-radius: 16px;
+            padding: 48px 40px 40px;
+            width: 380px;
+            box-shadow: 0 16px 48px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .brand { text-align: center; margin-bottom: 32px; }
+        .brand-logo { max-height: 60px; margin-bottom: 12px; }
+        .brand-name {
+            font-size: 36px;
+            font-weight: 900;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            background: linear-gradient(135deg, {{ tenant_theme.color_primary }} 0%, {{ tenant_theme.color_secondary }} 50%, {{ tenant_theme.color_accent }} 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1;
+        }
+        .brand-line {
+            width: 40px;
+            height: 3px;
+            background: linear-gradient(90deg, {{ tenant_theme.color_accent }}, {{ tenant_theme.color_secondary }});
+            margin: 10px auto;
+            border-radius: 2px;
+        }
+
+        .login-card label { display: block; font-size: 11px; font-weight: 700; color: {{ tenant_theme.color_secondary }}; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .login-card input {
+            width: 100%; padding: 11px 14px; margin-bottom: 18px;
+            border: 1.5px solid #e0e0e0; border-radius: 8px;
+            font-family: inherit; font-size: 14px; outline: none;
+            background: #f8fcfd;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .login-card input:focus { border-color: {{ tenant_theme.color_secondary }}; box-shadow: 0 0 0 3px {{ tenant_theme.color_secondary }}1a; background: #fff; }
+        .login-card button {
+            width: 100%; padding: 13px;
+            background: linear-gradient(135deg, {{ tenant_theme.color_accent }}, {{ tenant_theme.color_accent }}dd);
+            color: #fff; border: none; border-radius: 8px;
+            font-family: inherit; font-size: 15px; font-weight: 700;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+            box-shadow: 0 4px 12px {{ tenant_theme.color_accent }}4d;
+        }
+        .login-card button:hover { transform: translateY(-1px); box-shadow: 0 6px 20px {{ tenant_theme.color_accent }}66; }
+        .login-card button:active { transform: translateY(0); }
+        .error { color: #e74c3c; text-align: center; margin-bottom: 14px; font-size: 13px; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="brand">
+            {% if tenant_theme.logo_url %}
+            <img src="{{ tenant_theme.logo_url }}" alt="{{ tenant_theme.company_name }}" class="brand-logo">
+            {% endif %}
+            <div class="brand-name">{{ tenant_theme.company_name }}</div>
+            <div class="brand-line"></div>
+        </div>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="POST">
+            {% csrf_token %}
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" autofocus required>
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+            <button type="submit">Sign In</button>
+        </form>
+    </div>
+</body>
+</html>

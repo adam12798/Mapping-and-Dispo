@@ -142,6 +142,7 @@ class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='rep')
     rep = models.OneToOneField(Rep, null=True, blank=True, on_delete=models.SET_NULL, related_name='user_profile')
+    tenant = models.ForeignKey('APITenant', null=True, blank=True, on_delete=models.SET_NULL, related_name='users')
     lead_sources = models.TextField(blank=True)
     hourly_availability = models.BooleanField(default=False)
 
@@ -255,6 +256,7 @@ class GHLWebhookLog(models.Model):
 
 class APITenant(models.Model):
     name = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=100, unique=True, blank=True)
     api_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     is_active = models.BooleanField(default=True)
     rate_limit = models.IntegerField(default=1000, help_text='Requests per hour')
@@ -263,11 +265,43 @@ class APITenant(models.Model):
     last_used_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
 
+    # Theming
+    company_name = models.CharField(max_length=200, blank=True)
+    logo_url = models.URLField(max_length=500, blank=True)
+    color_primary = models.CharField(max_length=7, default='#293241')
+    color_secondary = models.CharField(max_length=7, default='#3d5a80')
+    color_accent = models.CharField(max_length=7, default='#ee6c4d')
+    color_bg = models.CharField(max_length=7, default='#293241')
+    color_text = models.CharField(max_length=7, default='#e0fbfc')
+    color_text_muted = models.CharField(max_length=7, default='#98c1d9')
+    font_family = models.CharField(max_length=200, default='Montserrat')
+
     def __str__(self):
         status = 'active' if self.is_active else 'inactive'
         return f"{self.name} ({status})"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            from django.utils.text import slugify
+            self.slug = slugify(self.name)
+        if not self.company_name:
+            self.company_name = self.name
+        super().save(*args, **kwargs)
 
     def get_allowed_origins(self):
         if not self.allowed_origins:
             return []
         return [o.strip() for o in self.allowed_origins.split(',') if o.strip()]
+
+    def get_theme(self):
+        return {
+            'company_name': self.company_name or self.name,
+            'logo_url': self.logo_url,
+            'color_primary': self.color_primary,
+            'color_secondary': self.color_secondary,
+            'color_accent': self.color_accent,
+            'color_bg': self.color_bg,
+            'color_text': self.color_text,
+            'color_text_muted': self.color_text_muted,
+            'font_family': self.font_family,
+        }

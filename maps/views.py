@@ -3119,12 +3119,15 @@ def tenants_api(request):
         name = data.get('name', '').strip()
         if not name:
             return JsonResponse({'error': 'name is required'}, status=400)
-        tenant = APITenant.objects.create(
-            name=name,
-            notes=data.get('notes', ''),
-            allowed_origins=data.get('allowed_origins', ''),
-            rate_limit=data.get('rate_limit', 1000),
-        )
+        kwargs = {
+            'name': name,
+            'notes': data.get('notes', ''),
+            'allowed_origins': data.get('allowed_origins', ''),
+            'rate_limit': data.get('rate_limit', 1000),
+        }
+        if data.get('slug'):
+            kwargs['slug'] = data['slug'].strip()
+        tenant = APITenant.objects.create(**kwargs)
         return JsonResponse({
             'status': 'ok',
             'id': tenant.id,
@@ -3139,19 +3142,157 @@ def tenant_update_api(request, pk):
     tenant = get_object_or_404(APITenant, pk=pk)
     if request.method == 'PUT':
         data = json.loads(request.body)
-        if 'name' in data:
-            tenant.name = data['name']
-        if 'notes' in data:
-            tenant.notes = data['notes']
-        if 'allowed_origins' in data:
-            tenant.allowed_origins = data['allowed_origins']
-        if 'rate_limit' in data:
-            tenant.rate_limit = data['rate_limit']
-        if 'is_active' in data:
-            tenant.is_active = data['is_active']
+        simple_fields = [
+            'name', 'notes', 'allowed_origins', 'rate_limit', 'is_active',
+            'slug', 'company_name', 'logo_url',
+            'color_primary', 'color_secondary', 'color_accent',
+            'color_bg', 'color_text', 'color_text_muted', 'font_family',
+        ]
+        for field in simple_fields:
+            if field in data:
+                setattr(tenant, field, data[field])
         tenant.save()
         return JsonResponse({'status': 'ok'})
     if request.method == 'DELETE':
         tenant.delete()
         return JsonResponse({'status': 'ok'})
     return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+# ===== Tenant-Facing Views (Branded) =====
+
+def _get_tenant_or_404(slug):
+    return get_object_or_404(APITenant, slug=slug, is_active=True)
+
+
+def _tenant_context(tenant, active_tab='map', extra=None):
+    ctx = {
+        'tenant': tenant,
+        'tenant_theme': tenant.get_theme(),
+        'active_tab': active_tab,
+    }
+    if extra:
+        ctx.update(extra)
+    return ctx
+
+
+def tenant_login_required(view_func):
+    @wraps(view_func)
+    def wrapper(request, tenant_slug, *args, **kwargs):
+        tenant = _get_tenant_or_404(tenant_slug)
+        if not request.user.is_authenticated:
+            return redirect(f'/t/{tenant_slug}/login/?next={request.path}')
+        profile = getattr(request.user, 'profile', None)
+        if profile and profile.tenant_id != tenant.id:
+            return redirect(f'/t/{tenant_slug}/login/')
+        request.tenant = tenant
+        return view_func(request, tenant_slug, *args, **kwargs)
+    return wrapper
+
+
+def tenant_manager_required(view_func):
+    @wraps(view_func)
+    def wrapper(request, tenant_slug, *args, **kwargs):
+        tenant = _get_tenant_or_404(tenant_slug)
+        if not request.user.is_authenticated:
+            return redirect(f'/t/{tenant_slug}/login/?next={request.path}')
+        profile = getattr(request.user, 'profile', None)
+        if not profile or not profile.is_manager or profile.tenant_id != tenant.id:
+            return JsonResponse({'error': 'Forbidden'}, status=403)
+        request.tenant = tenant
+        return view_func(request, tenant_slug, *args, **kwargs)
+    return wrapper
+
+
+def tenant_login_view(request, tenant_slug):
+    tenant = _get_tenant_or_404(tenant_slug)
+    ctx = _tenant_context(tenant, 'login')
+    if request.method == 'POST':
+        username = request.POST.get('username', '')
+        password = request.POST.get('password', '')
+        user = authenticate(request, username=username, password=password)
+        if user:
+            profile = getattr(user, 'profile', None)
+            if profile and profile.tenant_id == tenant.id:
+                login(request, user)
+                next_url = request.GET.get('next', f'/t/{tenant_slug}/')
+                return redirect(next_url)
+            else:
+                ctx['error'] = 'Account not associated with this organization'
+        else:
+            ctx['error'] = 'Invalid username or password'
+    return render(request, 'maps/tenant_login.html', ctx)
+
+
+def tenant_logout_view(request, tenant_slug):
+    logout(request)
+    return redirect(f'/t/{tenant_slug}/login/')
+
+
+@tenant_login_required
+def tenant_map_view(request, tenant_slug):
+    tenant = request.tenant
+    profile = getattr(request.user, 'profile', None)
+    is_mgr = profile and profile.is_manager
+    user_rep = profile.rep if profile and profile.role == 'rep' else None
+    ctx = _tenant_context(tenant, 'map', {
+        'is_manager': is_mgr,
+        'user_rep': user_rep,
+    })
+    return render(request, 'maps/index.html', ctx)
+
+
+@tenant_login_required
+def tenant_crm_view(request, tenant_slug):
+    tenant = request.tenant
+    profile = getattr(request.user, 'profile', None)
+    is_mgr = profile and profile.is_manager
+    ctx = _tenant_context(tenant, 'crm', {
+        'is_manager': is_mgr,
+    })
+    return render(request, 'maps/crm.html', ctx)
+
+
+@tenant_login_required
+def tenant_daily_view(request, tenant_slug):
+    tenant = request.tenant
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+    from django.utils import timezone as tz
+    today = tz.now().astimezone(eastern).date()
+    profile = getattr(request.user, 'profile', None)
+    is_mgr = profile and profile.is_manager
+    user_rep = get_user_rep(request.user)
+    ctx = _tenant_context(tenant, 'daily', {
+        'today': today.isoformat(),
+        'is_manager': is_mgr,
+        'user_rep_id': user_rep.id if user_rep else 'null',
+    })
+    return render(request, 'maps/daily.html', ctx)
+
+
+@tenant_manager_required
+def tenant_dashboard_view(request, tenant_slug):
+    tenant = request.tenant
+    ctx = _tenant_context(tenant, 'dashboard', {'is_manager': True})
+    return render(request, 'maps/dashboard.html', ctx)
+
+
+@tenant_manager_required
+def tenant_reps_view(request, tenant_slug):
+    tenant = request.tenant
+    active_reps = Rep.objects.filter(is_active=True).order_by('-rating', 'name')
+    inactive_reps = Rep.objects.filter(is_active=False).order_by('-rating', 'name')
+    ctx = _tenant_context(tenant, 'reps', {
+        'active_reps': active_reps,
+        'inactive_reps': inactive_reps,
+        'is_manager': True,
+    })
+    return render(request, 'maps/reps.html', ctx)
+
+
+@tenant_manager_required
+def tenant_time_off_view(request, tenant_slug):
+    tenant = request.tenant
+    ctx = _tenant_context(tenant, 'time_off', {'is_manager': True})
+    return render(request, 'maps/time_off.html', ctx)

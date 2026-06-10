@@ -69,4 +69,13 @@ urlpatterns = [
     path('tenants/', views.tenants_view, name='tenants'),
     path('api/tenants/', views.tenants_api, name='tenants_api'),
     path('api/tenants/<int:pk>/', views.tenant_update_api, name='tenant_update_api'),
+    # Tenant-facing branded pages
+    path('t/<slug:tenant_slug>/login/', views.tenant_login_view, name='tenant_login'),
+    path('t/<slug:tenant_slug>/logout/', views.tenant_logout_view, name='tenant_logout'),
+    path('t/<slug:tenant_slug>/', views.tenant_map_view, name='tenant_map'),
+    path('t/<slug:tenant_slug>/crm/', views.tenant_crm_view, name='tenant_crm'),
+    path('t/<slug:tenant_slug>/daily/', views.tenant_daily_view, name='tenant_daily'),
+    path('t/<slug:tenant_slug>/dashboard/', views.tenant_dashboard_view, name='tenant_dashboard'),
+    path('t/<slug:tenant_slug>/reps/', views.tenant_reps_view, name='tenant_reps'),
+    path('t/<slug:tenant_slug>/time-off/', views.tenant_time_off_view, name='tenant_time_off'),
 ]
