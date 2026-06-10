@@ -23,10 +23,20 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # Clean up any leftover indexes/columns from a previously failed run
+        migrations.RunSQL(
+            "DROP INDEX IF EXISTS maps_apitenant_slug_da3ef2f4_like;",
+            migrations.RunSQL.noop,
+        ),
+        migrations.RunSQL(
+            "ALTER TABLE maps_apitenant DROP COLUMN IF EXISTS slug;",
+            migrations.RunSQL.noop,
+        ),
+        # Add slug as plain CharField first (no _like index)
         migrations.AddField(
             model_name='apitenant',
             name='slug',
-            field=models.SlugField(blank=True, default='', max_length=100),
+            field=models.CharField(blank=True, default='', max_length=100),
             preserve_default=False,
         ),
         migrations.AddField(
@@ -79,7 +89,9 @@ class Migration(migrations.Migration):
             name='tenant',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='users', to='maps.apitenant'),
         ),
+        # Populate slugs for existing rows before adding unique constraint
         migrations.RunPython(populate_slugs, migrations.RunPython.noop),
+        # Now convert to SlugField with unique (creates _like index only once)
         migrations.AlterField(
             model_name='apitenant',
             name='slug',
