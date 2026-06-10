@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.auth.models import User
 from django.db import models
 
@@ -223,3 +225,49 @@ class RepCountOverride(models.Model):
 
     def __str__(self):
         return f"{self.date} {self.get_time_block_display()}: {self.count} reps"
+
+
+class GHLWebhookLog(models.Model):
+    WEBHOOK_TYPE_CHOICES = [
+        ('disposition', 'Disposition'),
+        ('appointment', 'Appointment'),
+        ('test', 'Test'),
+    ]
+    webhook_type = models.CharField(max_length=20, choices=WEBHOOK_TYPE_CHOICES)
+    lead = models.ForeignKey('Lead', null=True, blank=True, on_delete=models.SET_NULL)
+    lead_name = models.CharField(max_length=200, blank=True)
+    source = models.CharField(max_length=50, blank=True)
+    url = models.URLField(max_length=500)
+    payload = models.TextField(blank=True)
+    response_status = models.IntegerField(null=True, blank=True)
+    response_body = models.TextField(blank=True)
+    success = models.BooleanField(default=False)
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        status = 'OK' if self.success else 'FAIL'
+        return f"GHL {self.webhook_type} [{status}] {self.lead_name} ({self.created_at:%m/%d %I:%M %p})"
+
+
+class APITenant(models.Model):
+    name = models.CharField(max_length=200)
+    api_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    is_active = models.BooleanField(default=True)
+    rate_limit = models.IntegerField(default=1000, help_text='Requests per hour')
+    allowed_origins = models.TextField(blank=True, help_text='Comma-separated allowed CORS origins')
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    def __str__(self):
+        status = 'active' if self.is_active else 'inactive'
+        return f"{self.name} ({status})"
+
+    def get_allowed_origins(self):
+        if not self.allowed_origins:
+            return []
+        return [o.strip() for o in self.allowed_origins.split(',') if o.strip()]

@@ -43,12 +43,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'corsheaders',
     'maps',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -142,6 +144,12 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 CSRF_TRUSTED_ORIGINS = ['https://*.ngrok-free.dev', 'https://*.up.railway.app']
+
+# CORS — v1 API endpoints only, origins controlled per-tenant
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_URLS_REGEX = r'^/api/v1/.*$'
+CORS_ALLOW_HEADERS = ['authorization', 'content-type', 'accept']
+CORS_ALLOWED_ORIGIN_REGEXES = [r'.*']
 
 # Auth
 LOGIN_URL = '/login/'

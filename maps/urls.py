@@ -38,6 +38,8 @@ urlpatterns = [
     path('dashboard/', views.dashboard_view, name='dashboard'),
     path('api/dashboard/', views.dashboard_api, name='dashboard_api'),
     path('api/dashboard/chart/', views.dashboard_chart_api, name='dashboard_chart_api'),
+    path('ghl-debug/', views.ghl_debug_view, name='ghl_debug'),
+    path('api/ghl-test/', views.ghl_test_api, name='ghl_test'),
     path('calls/', views.calls_view, name='calls'),
     path('users/', views.users_view, name='users'),
     path('api/users/', views.users_api, name='users_api'),
@@ -56,4 +58,15 @@ urlpatterns = [
     path('api/provider/slot/', views.provider_slot_api, name='provider_slot_api'),
     path('provider/crm/', views.provider_crm_view, name='provider_crm'),
     path('api/provider/crm/', views.provider_crm_api, name='provider_crm_api'),
+    # API v1 (external, API key auth)
+    path('api/v1/leads/', views.v1_leads_list, name='v1_leads_list'),
+    path('api/v1/leads/create/', views.v1_lead_create, name='v1_lead_create'),
+    path('api/v1/leads/<int:pk>/', views.v1_lead_detail, name='v1_lead_detail'),
+    path('api/v1/reps/', views.v1_reps_list, name='v1_reps_list'),
+    path('api/v1/stats/', views.v1_stats, name='v1_stats'),
+    path('api/v1/time-off/', views.v1_time_off, name='v1_time_off'),
+    # Tenant management (manager-only)
+    path('tenants/', views.tenants_view, name='tenants'),
+    path('api/tenants/', views.tenants_api, name='tenants_api'),
+    path('api/tenants/<int:pk>/', views.tenant_update_api, name='tenant_update_api'),
 ]

@@ -1,0 +1,208 @@
+{% extends "maps/base.html" %}
+{% block title %}API Tenants{% endblock %}
+
+{% block content %}
+<div style="padding:20px 24px 100px;max-width:900px;margin:0 auto;font-family:'Montserrat',sans-serif;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+        <h1 style="color:var(--color-white);font-size:22px;margin:0;">API Tenants</h1>
+        <button onclick="showCreateModal()" style="background:var(--color-coral);color:#fff;border:none;padding:10px 20px;border-radius:var(--radius-md);cursor:pointer;font-family:inherit;font-weight:600;font-size:14px;">+ New Tenant</button>
+    </div>
+
+    <div id="tenants-list">
+    {% for t in tenants %}
+    <div class="tenant-card" data-id="{{ t.id }}" id="tenant-{{ t.id }}">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div>
+                <span style="font-weight:600;font-size:16px;color:var(--color-white);">{{ t.name }}</span>
+                <span class="tenant-status {% if t.is_active %}active{% else %}inactive{% endif %}" id="status-{{ t.id }}">
+                    {% if t.is_active %}Active{% else %}Inactive{% endif %}
+                </span>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button onclick="toggleTenant({{ t.id }}, {% if t.is_active %}false{% else %}true{% endif %})" class="tenant-btn {% if t.is_active %}deactivate{% else %}activate{% endif %}" id="toggle-btn-{{ t.id }}">
+                    {% if t.is_active %}Deactivate{% else %}Activate{% endif %}
+                </button>
+                <button onclick="deleteTenant({{ t.id }})" class="tenant-btn delete">Delete</button>
+            </div>
+        </div>
+        <div style="margin-top:12px;">
+            <label style="color:var(--color-light-blue);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">API Key</label>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+                <code style="background:var(--color-navy);color:var(--color-ice);padding:8px 12px;border-radius:var(--radius-sm);font-size:13px;flex:1;overflow-x:auto;white-space:nowrap;" id="key-{{ t.id }}">{{ t.api_key }}</code>
+                <button onclick="copyKey('{{ t.api_key }}')" style="background:var(--color-blue);color:#fff;border:none;padding:6px 12px;border-radius:var(--radius-sm);cursor:pointer;font-size:12px;font-family:inherit;white-space:nowrap;">Copy</button>
+            </div>
+        </div>
+        {% if t.notes %}
+        <div style="margin-top:8px;color:#8899aa;font-size:13px;">{{ t.notes }}</div>
+        {% endif %}
+        <div style="margin-top:8px;display:flex;gap:16px;color:#667;font-size:12px;">
+            <span>Created: {{ t.created_at|date:"M d, Y" }}</span>
+            <span>Last used: {% if t.last_used_at %}{{ t.last_used_at|date:"M d, Y g:i A" }}{% else %}Never{% endif %}</span>
+            <span>Rate limit: {{ t.rate_limit }}/hr</span>
+        </div>
+    </div>
+    {% empty %}
+    <div style="text-align:center;color:#667;padding:40px;">No API tenants yet. Create one to get started.</div>
+    {% endfor %}
+    </div>
+</div>
+
+<!-- Create modal -->
+<div id="create-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:2100;display:none;align-items:center;justify-content:center;">
+    <div style="background:var(--color-blue);border-radius:var(--radius-lg);padding:24px;width:90%;max-width:440px;font-family:'Montserrat',sans-serif;">
+        <h2 style="color:var(--color-white);font-size:18px;margin:0 0 16px;">New API Tenant</h2>
+        <div style="margin-bottom:12px;">
+            <label style="color:var(--color-light-blue);font-size:12px;font-weight:600;">Company Name</label>
+            <input id="new-name" type="text" placeholder="Acme Solar" style="width:100%;padding:10px;border:1px solid rgba(255,255,255,0.2);border-radius:var(--radius-sm);background:var(--color-navy);color:var(--color-white);font-size:14px;font-family:inherit;margin-top:4px;box-sizing:border-box;">
+        </div>
+        <div style="margin-bottom:12px;">
+            <label style="color:var(--color-light-blue);font-size:12px;font-weight:600;">Notes</label>
+            <textarea id="new-notes" rows="2" placeholder="Optional notes..." style="width:100%;padding:10px;border:1px solid rgba(255,255,255,0.2);border-radius:var(--radius-sm);background:var(--color-navy);color:var(--color-white);font-size:14px;font-family:inherit;margin-top:4px;box-sizing:border-box;resize:vertical;"></textarea>
+        </div>
+        <div style="margin-bottom:16px;">
+            <label style="color:var(--color-light-blue);font-size:12px;font-weight:600;">Allowed Origins</label>
+            <input id="new-origins" type="text" placeholder="https://their-app.com" style="width:100%;padding:10px;border:1px solid rgba(255,255,255,0.2);border-radius:var(--radius-sm);background:var(--color-navy);color:var(--color-white);font-size:14px;font-family:inherit;margin-top:4px;box-sizing:border-box;">
+            <div style="color:#8899aa;font-size:11px;margin-top:4px;">Comma-separated CORS origins</div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button onclick="hideCreateModal()" style="background:transparent;color:var(--color-light-blue);border:1px solid var(--color-light-blue);padding:8px 16px;border-radius:var(--radius-sm);cursor:pointer;font-family:inherit;font-size:13px;">Cancel</button>
+            <button onclick="createTenant()" style="background:var(--color-coral);color:#fff;border:none;padding:8px 16px;border-radius:var(--radius-sm);cursor:pointer;font-family:inherit;font-weight:600;font-size:13px;">Create</button>
+        </div>
+    </div>
+</div>
+
+<!-- Key reveal modal -->
+<div id="key-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:2200;align-items:center;justify-content:center;">
+    <div style="background:var(--color-blue);border-radius:var(--radius-lg);padding:24px;width:90%;max-width:500px;font-family:'Montserrat',sans-serif;">
+        <h2 style="color:var(--color-white);font-size:18px;margin:0 0 8px;">Tenant Created</h2>
+        <p style="color:var(--color-light-blue);font-size:13px;margin:0 0 16px;">Copy this API key now. It's stored in the database but this is the easiest time to grab it.</p>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <code id="revealed-key" style="background:var(--color-navy);color:#27ae60;padding:12px;border-radius:var(--radius-sm);font-size:14px;flex:1;overflow-x:auto;white-space:nowrap;"></code>
+            <button onclick="copyKey(document.getElementById('revealed-key').textContent)" style="background:var(--color-coral);color:#fff;border:none;padding:8px 14px;border-radius:var(--radius-sm);cursor:pointer;font-family:inherit;font-weight:600;font-size:13px;">Copy</button>
+        </div>
+        <div style="text-align:right;margin-top:16px;">
+            <button onclick="document.getElementById('key-modal').style.display='none'" style="background:transparent;color:var(--color-light-blue);border:1px solid var(--color-light-blue);padding:8px 16px;border-radius:var(--radius-sm);cursor:pointer;font-family:inherit;font-size:13px;">Done</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.tenant-card {
+    background: var(--color-blue);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    margin-bottom: 12px;
+}
+.tenant-status {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 8px;
+}
+.tenant-status.active { background: rgba(39,174,96,0.2); color: #27ae60; }
+.tenant-status.inactive { background: rgba(231,76,60,0.2); color: #e74c3c; }
+.tenant-btn {
+    border: none;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-family: 'Montserrat', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+}
+.tenant-btn.deactivate { background: rgba(231,76,60,0.15); color: #e74c3c; }
+.tenant-btn.activate { background: rgba(39,174,96,0.15); color: #27ae60; }
+.tenant-btn.delete { background: rgba(149,165,166,0.15); color: #95a5a6; }
+.tenant-btn:hover { opacity: 0.8; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showCreateModal() {
+    var m = document.getElementById('create-modal');
+    m.style.display = 'flex';
+}
+function hideCreateModal() {
+    document.getElementById('create-modal').style.display = 'none';
+}
+
+function createTenant() {
+    var name = document.getElementById('new-name').value.trim();
+    if (!name) { alert('Name is required'); return; }
+    fetch('/api/tenants/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCsrf()},
+        body: JSON.stringify({
+            name: name,
+            notes: document.getElementById('new-notes').value.trim(),
+            allowed_origins: document.getElementById('new-origins').value.trim(),
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) { alert(data.error); return; }
+        hideCreateModal();
+        document.getElementById('revealed-key').textContent = data.api_key;
+        document.getElementById('key-modal').style.display = 'flex';
+        setTimeout(() => location.reload(), 0);
+    });
+}
+
+function toggleTenant(id, newState) {
+    fetch('/api/tenants/' + id + '/', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCsrf()},
+        body: JSON.stringify({is_active: newState})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) { alert(data.error); return; }
+        var statusEl = document.getElementById('status-' + id);
+        var btnEl = document.getElementById('toggle-btn-' + id);
+        if (newState) {
+            statusEl.className = 'tenant-status active';
+            statusEl.textContent = 'Active';
+            btnEl.className = 'tenant-btn deactivate';
+            btnEl.textContent = 'Deactivate';
+            btnEl.onclick = function() { toggleTenant(id, false); };
+        } else {
+            statusEl.className = 'tenant-status inactive';
+            statusEl.textContent = 'Inactive';
+            btnEl.className = 'tenant-btn activate';
+            btnEl.textContent = 'Activate';
+            btnEl.onclick = function() { toggleTenant(id, true); };
+        }
+    });
+}
+
+function deleteTenant(id) {
+    if (!confirm('Delete this tenant? Their API access will stop immediately.')) return;
+    fetch('/api/tenants/' + id + '/', {
+        method: 'DELETE',
+        headers: {'X-CSRFToken': getCsrf()}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) { alert(data.error); return; }
+        document.getElementById('tenant-' + id).remove();
+    });
+}
+
+function copyKey(key) {
+    navigator.clipboard.writeText(key).then(() => {
+        var el = event.target;
+        var orig = el.textContent;
+        el.textContent = 'Copied!';
+        setTimeout(() => el.textContent = orig, 1500);
+    });
+}
+
+function getCsrf() {
+    var c = document.cookie.split(';').find(c => c.trim().startsWith('csrftoken='));
+    return c ? c.split('=')[1] : '';
+}
+</script>
+{% endblock %}

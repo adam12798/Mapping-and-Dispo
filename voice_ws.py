@@ -30,6 +30,43 @@ def _format_dispo_for_ghl(dispo):
     return '_'.join(word.capitalize() for word in dispo.split('_'))
 
 
+async def _send_ghl_dispo_webhook_async(lead, lead_id, disposition, source='alfred'):
+    import aiohttp
+    from asgiref.sync import sync_to_async
+    from maps.models import GHLWebhookLog
+
+    payload = {
+        'phone': lead.phone_number,
+        'name': lead.homeowner_name,
+        'disposition': _format_dispo_for_ghl(disposition),
+        'call_transcript': lead.call_transcript or '',
+    }
+    log_entry = GHLWebhookLog(
+        webhook_type='disposition',
+        lead=lead,
+        lead_name=lead.homeowner_name,
+        source=source,
+        url=GHL_WEBHOOK_URL,
+        payload=json.dumps(payload),
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                GHL_WEBHOOK_URL,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                body = await resp.text()
+                log_entry.response_status = resp.status
+                log_entry.response_body = body[:2000]
+                log_entry.success = 200 <= resp.status < 300
+                logger.info(f'GHL webhook sent for lead {lead_id}: {resp.status}')
+    except Exception as e:
+        log_entry.error_message = str(e)
+        logger.error(f'GHL webhook failed for lead {lead_id}: {e}')
+    await sync_to_async(log_entry.save)()
+
+
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime'
 
@@ -543,26 +580,9 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
         if updated:
             logger.info(f'Updated lead {lead_id} ({lead.homeowner_name}) disposition to {disposition}, notes: {call_notes}')
 
-            # Send webhook to Go High Level
-            try:
-                import aiohttp
-                lead = await sync_to_async(Lead.objects.filter(id=lead_id).first)()
-                if lead:
-                    ghl_payload = {
-                        'phone': lead.phone_number,
-                        'name': lead.homeowner_name,
-                        'disposition': _format_dispo_for_ghl(disposition),
-                        'call_transcript': lead.call_transcript or '',
-                    }
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            GHL_WEBHOOK_URL,
-                            json=ghl_payload,
-                            timeout=aiohttp.ClientTimeout(total=10),
-                        ) as resp:
-                            logger.info(f'GHL webhook sent for lead {lead_id}: {resp.status}')
-            except Exception as e:
-                logger.error(f'GHL webhook failed for lead {lead_id}: {e}')
+            lead = await sync_to_async(Lead.objects.filter(id=lead_id).first)()
+            if lead:
+                await _send_ghl_dispo_webhook_async(lead, lead_id, disposition, source='alfred')
 
             return {'success': True, 'message': f'Disposition updated for {lead.homeowner_name}'}
         else:
@@ -648,25 +668,8 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
         await sync_to_async(lead.save)()
         logger.info(f'Manager updated lead {lead_id} ({lead.homeowner_name}): {", ".join(changes)}')
 
-        # Fire GHL webhook if disposition changed
         if fn_args.get('disposition'):
-            try:
-                import aiohttp
-                ghl_payload = {
-                    'phone': lead.phone_number,
-                    'name': lead.homeowner_name,
-                    'disposition': _format_dispo_for_ghl(lead.disposition),
-                    'call_transcript': lead.call_transcript or '',
-                }
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        GHL_WEBHOOK_URL,
-                        json=ghl_payload,
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        logger.info(f'GHL webhook sent for lead {lead_id}: {resp.status}')
-            except Exception as e:
-                logger.error(f'GHL webhook failed for lead {lead_id}: {e}')
+            await _send_ghl_dispo_webhook_async(lead, lead_id, lead.disposition, source='alfred_manager')
 
         return {'success': True, 'message': f"Updated {lead.homeowner_name}: {', '.join(changes)}"}
 

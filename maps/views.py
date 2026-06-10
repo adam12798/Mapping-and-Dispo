@@ -21,7 +21,7 @@ from django.conf import settings
 from django.db.models import Q
 
 from .assignment import auto_assign_leads
-from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride
+from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant
 
 
 GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd'
@@ -52,29 +52,83 @@ def _format_appt_dt_for_ghl(dt):
         return str(dt)
 
 
+import logging as _logging
+import time as _time
+
+_ghl_logger = _logging.getLogger('ghl_webhook')
 _ghl_appt_sent = {}
 
+
+def _send_ghl_dispo_webhook(lead, source=''):
+    payload = {
+        'phone': lead.phone_number,
+        'name': lead.homeowner_name,
+        'disposition': _format_dispo_for_ghl(lead.disposition),
+        'call_transcript': lead.call_transcript or '',
+    }
+    log_entry = GHLWebhookLog(
+        webhook_type='disposition',
+        lead=lead,
+        lead_name=lead.homeowner_name,
+        source=source,
+        url=GHL_WEBHOOK_URL,
+        payload=json.dumps(payload),
+    )
+    try:
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            GHL_WEBHOOK_URL,
+            data=data,
+            headers={'Content-Type': 'application/json'},
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        body = resp.read().decode('utf-8', errors='replace')
+        log_entry.response_status = resp.status
+        log_entry.response_body = body[:2000]
+        log_entry.success = 200 <= resp.status < 300
+        _ghl_logger.info(f'GHL dispo webhook sent for lead {lead.id}: status {resp.status}')
+    except Exception as e:
+        log_entry.error_message = str(e)
+        _ghl_logger.error(f'GHL dispo webhook failed for lead {lead.id}: {e}')
+    log_entry.save()
+    return log_entry
+
+
 def _send_ghl_appt_webhook(lead, lead_id=None):
-    import logging, time
-    ghl_logger = logging.getLogger('ghl_webhook')
     lid = lead_id or lead.id
-    now = time.time()
+    now = _time.time()
     if _ghl_appt_sent.get(lid, 0) > now - 30:
-        ghl_logger.info(f'GHL appt webhook skipped for lead {lid}: sent within last 30s')
+        _ghl_logger.info(f'GHL appt webhook skipped for lead {lid}: sent within last 30s')
         return
     _ghl_appt_sent[lid] = now
+    params = urllib.parse.urlencode({
+        'phone': lead.phone_number,
+        'appointment_type': 'Tommy' if lead.source and lead.source.strip().lower() == "tommy's team" else (lead.appointment_type or ''),
+        'appointment_datetime': _format_appt_dt_for_ghl(lead.appointment_datetime),
+    })
+    url = GHL_APPT_WEBHOOK_URL + '?' + params
+    payload_str = json.dumps({'phone': lead.phone_number, 'appointment_type': lead.appointment_type, 'appointment_datetime': str(lead.appointment_datetime)})
+    log_entry = GHLWebhookLog(
+        webhook_type='appointment',
+        lead=lead,
+        lead_name=lead.homeowner_name,
+        source='crm',
+        url=url,
+        payload=payload_str,
+    )
     try:
-        params = urllib.parse.urlencode({
-            'phone': lead.phone_number,
-            'appointment_type': 'Tommy' if lead.source and lead.source.strip().lower() == "tommy's team" else (lead.appointment_type or ''),
-            'appointment_datetime': _format_appt_dt_for_ghl(lead.appointment_datetime),
-        })
-        url = GHL_APPT_WEBHOOK_URL + '?' + params
         ghl_req = urllib.request.Request(url, method='GET')
         resp = urllib.request.urlopen(ghl_req, timeout=10)
-        ghl_logger.info(f'GHL appt webhook sent for lead {lead_id or lead.id}: status {resp.status}')
+        body = resp.read().decode('utf-8', errors='replace')
+        log_entry.response_status = resp.status
+        log_entry.response_body = body[:2000]
+        log_entry.success = 200 <= resp.status < 300
+        _ghl_logger.info(f'GHL appt webhook sent for lead {lid}: status {resp.status}')
     except Exception as e:
-        ghl_logger.error(f'GHL appt webhook failed for lead {lead_id or lead.id}: {e}')
+        log_entry.error_message = str(e)
+        _ghl_logger.error(f'GHL appt webhook failed for lead {lid}: {e}')
+    log_entry.save()
+    return log_entry
 
 
 def manager_required(view_func):
@@ -457,26 +511,8 @@ def lead_update(request, pk):
     if changes:
         LeadUpdate.objects.create(lead=lead, user=request.user, text='\n'.join(changes))
 
-    # Send webhook to Go High Level if disposition was updated
     if 'disposition' in data:
-        import logging
-        ghl_logger = logging.getLogger('ghl_webhook')
-        try:
-            ghl_payload = json.dumps({
-                'phone': lead.phone_number,
-                'name': lead.homeowner_name,
-                'disposition': _format_dispo_for_ghl(lead.disposition),
-                'call_transcript': lead.call_transcript or '',
-            }).encode()
-            ghl_req = urllib.request.Request(
-                GHL_WEBHOOK_URL,
-                data=ghl_payload,
-                headers={'Content-Type': 'application/json'},
-            )
-            resp = urllib.request.urlopen(ghl_req, timeout=10)
-            ghl_logger.info(f'GHL webhook sent for lead {pk}: status {resp.status}')
-        except Exception as e:
-            ghl_logger.error(f'GHL webhook failed for lead {pk}: {e}')
+        _send_ghl_dispo_webhook(lead, source='crm')
 
     # Send webhook to Go High Level only if appointment datetime actually changed
     new_appt_dt = str(lead.appointment_datetime) if lead.appointment_datetime else ''
@@ -559,28 +595,9 @@ def leads_bulk_update(request):
 
     Lead.objects.filter(id__in=ids).update(**update_kwargs)
 
-    # Fire GHL webhook for each lead if disposition was updated
     if 'disposition' in update_kwargs:
-        import logging
-        ghl_logger = logging.getLogger('ghl_webhook')
-        leads = Lead.objects.filter(id__in=ids)
-        for lead in leads:
-            try:
-                ghl_payload = json.dumps({
-                    'phone': lead.phone_number,
-                    'name': lead.homeowner_name,
-                    'disposition': _format_dispo_for_ghl(lead.disposition),
-                    'call_transcript': lead.call_transcript or '',
-                }).encode()
-                ghl_req = urllib.request.Request(
-                    GHL_WEBHOOK_URL,
-                    data=ghl_payload,
-                    headers={'Content-Type': 'application/json'},
-                )
-                resp = urllib.request.urlopen(ghl_req, timeout=10)
-                ghl_logger.info(f'GHL webhook sent for lead {lead.id}: status {resp.status}')
-            except Exception as e:
-                ghl_logger.error(f'GHL webhook failed for lead {lead.id}: {e}')
+        for lead in Lead.objects.filter(id__in=ids):
+            _send_ghl_dispo_webhook(lead, source='bulk')
 
     return JsonResponse({'status': 'ok', 'updated': len(ids)})
 
@@ -1679,26 +1696,8 @@ def apply_manager_sms_update(lead, parsed):
     if changes:
         lead.save()
 
-        # Fire GHL webhook if disposition changed
         if action in ('cancel', 'disposition'):
-            import logging
-            ghl_logger = logging.getLogger('ghl_webhook')
-            try:
-                ghl_payload = json.dumps({
-                    'phone': lead.phone_number,
-                    'name': lead.homeowner_name,
-                    'disposition': _format_dispo_for_ghl(lead.disposition),
-                    'call_transcript': lead.call_transcript or '',
-                }).encode()
-                ghl_req = urllib.request.Request(
-                    GHL_WEBHOOK_URL,
-                    data=ghl_payload,
-                    headers={'Content-Type': 'application/json'},
-                )
-                resp = urllib.request.urlopen(ghl_req, timeout=10)
-                ghl_logger.info(f'GHL webhook sent for lead {lead.id}: status {resp.status}')
-            except Exception as e:
-                ghl_logger.error(f'GHL webhook failed for lead {lead.id}: {e}')
+            _send_ghl_dispo_webhook(lead, source='sms')
 
     return changes
 
@@ -1800,6 +1799,95 @@ def parse_time_off_request(body, rep):
         requests.append((target_date, start_t, end_t, reason))
 
     return requests if requests else None
+
+
+@manager_required
+def ghl_debug_view(request):
+    type_filter = request.GET.get('type', '')
+    success_filter = request.GET.get('success', '')
+    logs = GHLWebhookLog.objects.order_by('-created_at')
+    if type_filter:
+        logs = logs.filter(webhook_type=type_filter)
+    if success_filter == '1':
+        logs = logs.filter(success=True)
+    elif success_filter == '0':
+        logs = logs.filter(success=False)
+    total = GHLWebhookLog.objects.count()
+    success_count = GHLWebhookLog.objects.filter(success=True).count()
+    fail_count = GHLWebhookLog.objects.filter(success=False).count()
+    logs = logs[:100]
+    return render(request, 'maps/ghl_debug.html', {
+        'logs': logs,
+        'total': total,
+        'success_count': success_count,
+        'fail_count': fail_count,
+        'active_tab': 'ghl_debug',
+        'type_filter': type_filter,
+        'success_filter': success_filter,
+        'ghl_dispo_url': GHL_WEBHOOK_URL,
+        'ghl_appt_url': GHL_APPT_WEBHOOK_URL,
+    })
+
+
+@csrf_exempt
+@manager_required
+def ghl_test_api(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    webhook_type = request.POST.get('type', 'disposition')
+    log_entry = GHLWebhookLog(
+        webhook_type='test',
+        lead_name='Test Webhook',
+        source='test',
+    )
+    if webhook_type == 'appointment':
+        params = urllib.parse.urlencode({
+            'phone': '+10000000000',
+            'appointment_type': 'Solar',
+            'appointment_datetime': '01-01-2000 12:00 PM',
+        })
+        url = GHL_APPT_WEBHOOK_URL + '?' + params
+        log_entry.url = url
+        log_entry.payload = json.dumps({'phone': '+10000000000', 'appointment_type': 'Solar', 'appointment_datetime': '01-01-2000 12:00 PM'})
+        try:
+            req = urllib.request.Request(url, method='GET')
+            resp = urllib.request.urlopen(req, timeout=10)
+            body = resp.read().decode('utf-8', errors='replace')
+            log_entry.response_status = resp.status
+            log_entry.response_body = body[:2000]
+            log_entry.success = 200 <= resp.status < 300
+        except Exception as e:
+            log_entry.error_message = str(e)
+    else:
+        payload = {
+            'phone': '+10000000000',
+            'name': 'Test Webhook',
+            'disposition': 'Sale',
+            'call_transcript': 'This is a test webhook from Sutton GHL diagnostics.',
+        }
+        log_entry.url = GHL_WEBHOOK_URL
+        log_entry.payload = json.dumps(payload)
+        try:
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(
+                GHL_WEBHOOK_URL,
+                data=data,
+                headers={'Content-Type': 'application/json'},
+            )
+            resp = urllib.request.urlopen(req, timeout=10)
+            body = resp.read().decode('utf-8', errors='replace')
+            log_entry.response_status = resp.status
+            log_entry.response_body = body[:2000]
+            log_entry.success = 200 <= resp.status < 300
+        except Exception as e:
+            log_entry.error_message = str(e)
+    log_entry.save()
+    return JsonResponse({
+        'success': log_entry.success,
+        'status': log_entry.response_status,
+        'response_body': log_entry.response_body[:500],
+        'error': log_entry.error_message,
+    })
 
 
 @manager_required
@@ -2716,3 +2804,354 @@ def provider_slot_api(request):
             'appointment_type': lead.appointment_type,
         })
     return JsonResponse({'appointments': items})
+
+
+# ===== API Tenant System =====
+
+def api_key_required(view_func):
+    @wraps(view_func)
+    @csrf_exempt
+    def wrapper(request, *args, **kwargs):
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if not auth_header.startswith('Bearer '):
+            return JsonResponse({'error': 'Authentication required'}, status=401)
+        key = auth_header[7:].strip()
+        try:
+            tenant = APITenant.objects.get(api_key=key)
+        except (APITenant.DoesNotExist, ValueError):
+            return JsonResponse({'error': 'Authentication required'}, status=401)
+        if not tenant.is_active:
+            return JsonResponse({'error': 'Authentication required'}, status=401)
+        from django.utils import timezone as tz
+        tenant.last_used_at = tz.now()
+        tenant.save(update_fields=['last_used_at'])
+        request.api_tenant = tenant
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+
+def _paginate(queryset, request, default_per_page=50):
+    try:
+        page = max(1, int(request.GET.get('page', 1)))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        per_page = min(100, max(1, int(request.GET.get('per_page', default_per_page))))
+    except (ValueError, TypeError):
+        per_page = default_per_page
+    total = queryset.count()
+    start = (page - 1) * per_page
+    items = queryset[start:start + per_page]
+    return items, {
+        'page': page,
+        'per_page': per_page,
+        'total': total,
+        'total_pages': (total + per_page - 1) // per_page,
+    }
+
+
+# --- V1 API: Leads ---
+
+@api_key_required
+def v1_leads_list(request):
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+
+    qs = Lead.objects.select_related('rep').order_by('-created_at')
+
+    date = request.GET.get('date')
+    if date:
+        qs = qs.filter(appointment_datetime__date=date)
+    start = request.GET.get('start')
+    if start:
+        qs = qs.filter(appointment_datetime__date__gte=start)
+    end = request.GET.get('end')
+    if end:
+        qs = qs.filter(appointment_datetime__date__lte=end)
+    rep_id = request.GET.get('rep_id')
+    if rep_id:
+        qs = qs.filter(rep_id=rep_id)
+    disposition = request.GET.get('disposition')
+    if disposition:
+        qs = qs.filter(disposition=disposition)
+    since = request.GET.get('since')
+    if since:
+        try:
+            since_dt = dateparser.parse(since)
+            qs = qs.filter(created_at__gte=since_dt)
+        except (ValueError, TypeError):
+            pass
+
+    leads, pagination = _paginate(qs, request)
+    data = []
+    for lead in leads:
+        local_dt = lead.appointment_datetime.astimezone(eastern) if lead.appointment_datetime else None
+        data.append({
+            'id': lead.id,
+            'homeowner_name': lead.homeowner_name,
+            'phone_number': lead.phone_number,
+            'address': lead.address,
+            'city': lead.city,
+            'state': lead.state,
+            'latitude': lead.latitude,
+            'longitude': lead.longitude,
+            'source': lead.source,
+            'tags': lead.tags,
+            'appointment_type': lead.appointment_type,
+            'appointment_format': lead.appointment_format,
+            'appointment_datetime': local_dt.isoformat() if local_dt else None,
+            'rep_id': lead.rep_id,
+            'rep_name': lead.rep.name if lead.rep else None,
+            'disposition': lead.disposition,
+            'sat': lead.sat,
+            'follow_up_date': lead.follow_up_date.isoformat() if lead.follow_up_date else None,
+            'call_notes': lead.call_notes,
+            'appt_notes': lead.appt_notes,
+            'cancelled': lead.cancelled,
+            'created_at': lead.created_at.astimezone(eastern).isoformat(),
+        })
+    return JsonResponse({'leads': data, 'pagination': pagination})
+
+
+@api_key_required
+def v1_lead_detail(request, pk):
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+
+    if request.method == 'GET':
+        lead = get_object_or_404(Lead, pk=pk)
+        local_dt = lead.appointment_datetime.astimezone(eastern) if lead.appointment_datetime else None
+        data = {
+            'id': lead.id,
+            'homeowner_name': lead.homeowner_name,
+            'phone_number': lead.phone_number,
+            'address': lead.address,
+            'city': lead.city,
+            'state': lead.state,
+            'latitude': lead.latitude,
+            'longitude': lead.longitude,
+            'source': lead.source,
+            'tags': lead.tags,
+            'appointment_type': lead.appointment_type,
+            'appointment_format': lead.appointment_format,
+            'appointment_datetime': local_dt.isoformat() if local_dt else None,
+            'rep_id': lead.rep_id,
+            'rep_name': lead.rep.name if lead.rep else None,
+            'disposition': lead.disposition,
+            'sat': lead.sat,
+            'follow_up_date': lead.follow_up_date.isoformat() if lead.follow_up_date else None,
+            'call_notes': lead.call_notes,
+            'appt_notes': lead.appt_notes,
+            'call_transcript': lead.call_transcript,
+            'cancelled': lead.cancelled,
+            'created_at': lead.created_at.astimezone(eastern).isoformat(),
+        }
+        return JsonResponse({'lead': data})
+
+    if request.method == 'PUT':
+        lead = get_object_or_404(Lead, pk=pk)
+        data = json.loads(request.body)
+        allowed = [
+            'homeowner_name', 'phone_number', 'address', 'city', 'state',
+            'source', 'tags', 'appointment_type', 'appointment_format',
+            'appointment_datetime', 'disposition', 'sat', 'follow_up_date',
+            'call_notes', 'appt_notes', 'call_transcript', 'cancelled',
+        ]
+        for field in allowed:
+            if field in data:
+                value = data[field]
+                if field in ('appointment_datetime', 'follow_up_date') and value == '':
+                    value = None
+                if field == 'sat':
+                    value = {'true': True, 'false': False}.get(str(value).lower().strip()) if value != '' else None
+                setattr(lead, field, value)
+        if 'rep_id' in data:
+            lead.rep_id = int(data['rep_id']) if data['rep_id'] else None
+        if 'address' in data or 'city' in data:
+            geocode_address = lead.address
+            if lead.city:
+                geocode_address = f"{lead.address}, {lead.city}, MA"
+            lead.latitude, lead.longitude = geocode(geocode_address) if lead.address else (None, None)
+        lead.save()
+        return JsonResponse({'status': 'ok', 'id': lead.id})
+
+    if request.method == 'DELETE':
+        lead = get_object_or_404(Lead, pk=pk)
+        lead.delete()
+        return JsonResponse({'status': 'ok'})
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@api_key_required
+def v1_lead_create(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    if not data.get('address'):
+        return JsonResponse({'error': 'address is required'}, status=400)
+    lead = Lead(
+        homeowner_name=data.get('homeowner_name', ''),
+        phone_number=data.get('phone_number', ''),
+        address=data['address'],
+        city=data.get('city', ''),
+        state=data.get('state', 'MA'),
+        source=data.get('source', ''),
+        tags=data.get('tags', ''),
+        appointment_type=data.get('appointment_type', ''),
+        appointment_format=data.get('appointment_format', ''),
+        appointment_datetime=data.get('appointment_datetime'),
+        disposition=data.get('disposition', ''),
+        call_notes=data.get('call_notes', ''),
+        appt_notes=data.get('appt_notes', ''),
+    )
+    if data.get('rep_id'):
+        lead.rep_id = int(data['rep_id'])
+    geocode_address = lead.address
+    if lead.city:
+        geocode_address = f"{lead.address}, {lead.city}, MA"
+    lead.latitude, lead.longitude = geocode(geocode_address)
+    lead.save()
+    return JsonResponse({'status': 'ok', 'id': lead.id}, status=201)
+
+
+# --- V1 API: Reps ---
+
+@api_key_required
+def v1_reps_list(request):
+    reps = Rep.objects.filter(is_active=True).order_by('name')
+    data = [{
+        'id': rep.id,
+        'name': rep.name,
+        'phone_number': rep.phone_number,
+        'home_address': rep.home_address,
+        'city': rep.city,
+        'latitude': rep.latitude,
+        'longitude': rep.longitude,
+        'specialty': rep.specialty,
+        'rating': rep.rating,
+        'color': rep.color,
+        'is_active': rep.is_active,
+    } for rep in reps]
+    return JsonResponse({'reps': data})
+
+
+# --- V1 API: Dashboard / Stats ---
+
+@api_key_required
+def v1_stats(request):
+    from django.db.models import Count
+    qs = Lead.objects.select_related('rep')
+    start = request.GET.get('start')
+    if start:
+        qs = qs.filter(appointment_datetime__date__gte=start)
+    end = request.GET.get('end')
+    if end:
+        qs = qs.filter(appointment_datetime__date__lte=end)
+    rep_id = request.GET.get('rep_id')
+    if rep_id:
+        qs = qs.filter(rep_id=rep_id)
+
+    total = qs.count()
+    sales = qs.filter(disposition='sale').count()
+    by_dispo = list(qs.values('disposition').annotate(count=Count('id')).order_by('-count'))
+    by_rep = list(qs.filter(rep__isnull=False).values('rep__name', 'rep__color').annotate(
+        total=Count('id'), sales=Count('id', filter=Q(disposition='sale'))
+    ).order_by('-total'))
+
+    return JsonResponse({
+        'summary': {
+            'total': total,
+            'total_sales': sales,
+            'conversion_rate': round(sales / total * 100, 1) if total else 0,
+        },
+        'by_disposition': [{'disposition': r['disposition'] or 'none', 'count': r['count']} for r in by_dispo],
+        'by_rep': [{
+            'name': r['rep__name'],
+            'color': r['rep__color'],
+            'total': r['total'],
+            'sales': r['sales'],
+            'conversion_rate': round(r['sales'] / r['total'] * 100, 1) if r['total'] else 0,
+        } for r in by_rep],
+    })
+
+
+# --- V1 API: Time Off ---
+
+@api_key_required
+def v1_time_off(request):
+    date_str = request.GET.get('date')
+    if not date_str:
+        return JsonResponse({'error': 'date query param required (YYYY-MM-DD)'}, status=400)
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'error': 'Invalid date format'}, status=400)
+    reqs = TimeOffRequest.objects.filter(
+        start_date__lte=target_date,
+        status='approved',
+    ).filter(
+        Q(end_date__gte=target_date) | Q(end_date__isnull=True)
+    ).select_related('rep')
+    data = [{
+        'rep_name': r.rep.name,
+        'all_day': r.start_time is None,
+        'start_time': r.start_time.strftime('%H:%M') if r.start_time else None,
+        'end_time': r.end_time.strftime('%H:%M') if r.end_time else None,
+        'reason': r.reason,
+    } for r in reqs]
+    return JsonResponse({'time_off': data})
+
+
+# ===== Tenant Management (Manager-only) =====
+
+@manager_required
+def tenants_view(request):
+    tenants = APITenant.objects.order_by('-created_at')
+    return render(request, 'maps/tenants.html', {'tenants': tenants, 'active_tab': 'tenants'})
+
+
+@csrf_exempt
+@manager_required
+def tenants_api(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        name = data.get('name', '').strip()
+        if not name:
+            return JsonResponse({'error': 'name is required'}, status=400)
+        tenant = APITenant.objects.create(
+            name=name,
+            notes=data.get('notes', ''),
+            allowed_origins=data.get('allowed_origins', ''),
+            rate_limit=data.get('rate_limit', 1000),
+        )
+        return JsonResponse({
+            'status': 'ok',
+            'id': tenant.id,
+            'api_key': str(tenant.api_key),
+        }, status=201)
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+@manager_required
+def tenant_update_api(request, pk):
+    tenant = get_object_or_404(APITenant, pk=pk)
+    if request.method == 'PUT':
+        data = json.loads(request.body)
+        if 'name' in data:
+            tenant.name = data['name']
+        if 'notes' in data:
+            tenant.notes = data['notes']
+        if 'allowed_origins' in data:
+            tenant.allowed_origins = data['allowed_origins']
+        if 'rate_limit' in data:
+            tenant.rate_limit = data['rate_limit']
+        if 'is_active' in data:
+            tenant.is_active = data['is_active']
+        tenant.save()
+        return JsonResponse({'status': 'ok'})
+    if request.method == 'DELETE':
+        tenant.delete()
+        return JsonResponse({'status': 'ok'})
+    return JsonResponse({'error': 'Method not allowed'}, status=405)

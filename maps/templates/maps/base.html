@@ -35,7 +35,7 @@
             <a href="{% url 'logout' %}" class="nav-tab" style="font-size:13px;color:#ee6c4d;">Logout</a>
             {% if is_manager %}
             <div class="hamburger-wrap">
-                <button class="hamburger-btn {% if active_tab == 'rep_count' or active_tab == 'reps' or active_tab == 'time_off' or active_tab == 'calls' or active_tab == 'users' %}active{% endif %}" onclick="toggleHamburger(event)">
+                <button class="hamburger-btn {% if active_tab == 'rep_count' or active_tab == 'reps' or active_tab == 'time_off' or active_tab == 'calls' or active_tab == 'ghl_debug' or active_tab == 'users' %}active{% endif %}" onclick="toggleHamburger(event)">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 </button>
                 <div class="hamburger-menu" id="hamburger-menu">
@@ -43,7 +43,9 @@
                     <a href="{% url 'reps' %}" class="{% if active_tab == 'reps' %}active{% endif %}">Reps</a>
                     <a href="{% url 'time_off' %}" class="{% if active_tab == 'time_off' %}active{% endif %}">Time Off</a>
                     <a href="{% url 'calls' %}" class="{% if active_tab == 'calls' %}active{% endif %}">Calls</a>
+                    <a href="{% url 'ghl_debug' %}" class="{% if active_tab == 'ghl_debug' %}active{% endif %}">GHL Debug</a>
                     <a href="{% url 'users' %}" class="{% if active_tab == 'users' %}active{% endif %}">Users</a>
+                    <a href="{% url 'tenants' %}" class="{% if active_tab == 'tenants' %}active{% endif %}">API Tenants</a>
                 </div>
             </div>
             {% endif %}
@@ -102,6 +104,10 @@
             <a href="/users/" class="{% if active_tab == 'users' %}active{% endif %}">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
                 Users
+            </a>
+            <a href="/tenants/" class="{% if active_tab == 'tenants' %}active{% endif %}">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                API Tenants
             </a>
         </div>
         {% endif %}
