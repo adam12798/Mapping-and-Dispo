@@ -1,5 +1,19 @@
 from django.db import migrations, models
+from django.utils.text import slugify
 import django.db.models.deletion
+
+
+def populate_slugs(apps, schema_editor):
+    APITenant = apps.get_model('maps', 'APITenant')
+    for tenant in APITenant.objects.all():
+        base = slugify(tenant.name) or f'tenant-{tenant.pk}'
+        slug = base
+        counter = 2
+        while APITenant.objects.filter(slug=slug).exclude(pk=tenant.pk).exists():
+            slug = f'{base}-{counter}'
+            counter += 1
+        tenant.slug = slug
+        tenant.save(update_fields=['slug'])
 
 
 class Migration(migrations.Migration):
@@ -12,7 +26,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='apitenant',
             name='slug',
-            field=models.SlugField(blank=True, default='', max_length=100, unique=False),
+            field=models.SlugField(blank=True, default='', max_length=100),
             preserve_default=False,
         ),
         migrations.AddField(
@@ -65,6 +79,7 @@ class Migration(migrations.Migration):
             name='tenant',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='users', to='maps.apitenant'),
         ),
+        migrations.RunPython(populate_slugs, migrations.RunPython.noop),
         migrations.AlterField(
             model_name='apitenant',
             name='slug',
