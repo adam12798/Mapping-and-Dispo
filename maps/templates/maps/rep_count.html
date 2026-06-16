@@ -1,0 +1,433 @@
+{% extends "maps/base.html" %}
+{% load static %}
+
+{% block title %}Rep Count{% endblock %}
+
+{% block head_extra %}
+    <style>
+        .rc-container {
+            padding: 0;
+            max-width: 100%;
+            background: #fff;
+            min-height: calc(100vh - 44px);
+        }
+        .rc-toolbar {
+            padding: 16px 24px 12px;
+            border-bottom: 2px solid #98c1d9;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .rc-toolbar h2 {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 20px;
+            color: #293241;
+            margin: 0;
+        }
+        .week-nav {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Montserrat', sans-serif;
+        }
+        .week-nav button {
+            background: #3d5a80;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .week-nav button:hover { background: #293241; }
+        .week-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #293241;
+            min-width: 200px;
+            text-align: center;
+        }
+        .default-toggle-btn {
+            margin-left: auto;
+            background: #3d5a80;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 16px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .default-toggle-btn:hover { background: #293241; }
+        .default-panel {
+            margin: 0 24px;
+            border: 1px solid #98c1d9;
+            border-radius: 8px;
+            overflow: hidden;
+            font-family: 'Montserrat', sans-serif;
+        }
+        .default-panel-header {
+            background: #3d5a80;
+            color: #fff;
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .default-panel-header button {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .default-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0;
+        }
+        .default-block {
+            padding: 16px;
+            text-align: center;
+            border-right: 1px solid #e0fbfc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        .default-block:last-child { border-right: none; }
+        .default-block-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #3d5a80;
+        }
+        .default-block input {
+            width: 52px;
+            padding: 6px;
+            border: 1px solid #98c1d9;
+            border-radius: 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            text-align: center;
+            color: #293241;
+        }
+        .default-block input:focus { outline: none; border-color: #3d5a80; box-shadow: 0 0 0 3px rgba(61,90,128,0.25); }
+        .rc-grid-wrap {
+            padding: 24px;
+            overflow-x: auto;
+        }
+        .rc-grid {
+            display: grid;
+            grid-template-columns: 90px repeat(7, 1fr);
+            border: 1px solid #98c1d9;
+            border-radius: 8px;
+            overflow: hidden;
+            font-family: 'Montserrat', sans-serif;
+            min-width: 650px;
+        }
+        .rc-header {
+            background: #293241;
+            color: #e0fbfc;
+            padding: 10px 6px;
+            font-size: 11px;
+            font-weight: 700;
+            text-align: center;
+            text-transform: uppercase;
+        }
+        .rc-header:first-child { text-align: left; padding-left: 10px; }
+        .rc-header.today-col { background: #3d5a80; }
+        .rc-block-label {
+            background: #f8fdfe;
+            padding: 12px 10px;
+            font-weight: 600;
+            font-size: 12px;
+            color: #293241;
+            border-bottom: 1px solid #e0fbfc;
+            border-right: 1px solid #e0fbfc;
+            display: flex;
+            align-items: center;
+        }
+        .rc-cell {
+            padding: 12px;
+            border-bottom: 1px solid #e0fbfc;
+            border-right: 1px solid #e0fbfc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.2s;
+        }
+        .rc-cell.open { background: rgba(39,174,96,0.08); }
+        .rc-cell.full { background: rgba(243,156,18,0.12); }
+        .rc-cell.over { background: rgba(231,76,60,0.1); }
+        .rc-stepper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0;
+        }
+        .rc-stepper-btn {
+            width: 32px;
+            height: 20px;
+            border: 1px solid #98c1d9;
+            background: #f8fdfe;
+            color: #3d5a80;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            transition: background 0.15s;
+        }
+        .rc-stepper-btn:hover { background: #3d5a80; color: #fff; }
+        .rc-stepper-btn.plus { border-radius: 6px 6px 0 0; }
+        .rc-stepper-btn.minus { border-radius: 0 0 6px 6px; }
+        .rc-stepper-val {
+            width: 32px;
+            height: 28px;
+            border-left: 1px solid #98c1d9;
+            border-right: 1px solid #98c1d9;
+            background: #fff;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            text-align: center;
+            color: #293241;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .rc-booking {
+            font-size: 11px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .rc-booking .booked-count { color: #3d5a80; }
+        .rc-booking .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .rc-booking .status-dot.green { background: #27ae60; }
+        .rc-booking .status-dot.yellow { background: #f39c12; }
+        .rc-booking .status-dot.red { background: #e74c3c; }
+
+        @media (max-width: 768px) {
+            .rc-container { padding-bottom: 64px; }
+            .rc-toolbar { padding: 12px; flex-direction: column; align-items: flex-start; }
+            .default-control { margin-left: 0; }
+            .rc-grid-wrap { padding: 12px; }
+            .rc-grid { grid-template-columns: 70px repeat(7, 1fr); min-width: 500px; }
+            .rc-header { font-size: 9px; padding: 8px 4px; }
+            .rc-block-label { padding: 8px 6px; font-size: 11px; }
+            .rc-cell { padding: 8px; }
+            .rc-stepper-btn { width: 26px; height: 18px; font-size: 12px; }
+            .rc-stepper-val { width: 26px; height: 24px; font-size: 14px; }
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="rc-container">
+        <div class="rc-toolbar">
+            <h2>Rep Count</h2>
+            <div class="week-nav">
+                <button onclick="cycleWeek(-1)">&lsaquo;</button>
+                <span class="week-label" id="week-label"></span>
+                <button onclick="cycleWeek(1)">&rsaquo;</button>
+            </div>
+            <button class="default-toggle-btn" id="default-toggle" onclick="toggleDefaultPanel()">Update Default</button>
+        </div>
+        <div class="default-panel" id="default-panel" style="display:none;">
+            <div class="default-panel-header">
+                <span>Default Rep Count Per Block</span>
+                <button onclick="toggleDefaultPanel()">&times;</button>
+            </div>
+            <div class="default-grid" id="default-grid"></div>
+        </div>
+        <div class="rc-grid-wrap">
+            <div class="rc-grid" id="rc-grid"></div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        var BLOCKS = [
+            {key: 'morning', label: '9-12 PM'},
+            {key: 'midday', label: '12-3 PM'},
+            {key: 'afternoon', label: '3-6 PM'},
+            {key: 'evening', label: '6-9 PM'}
+        ];
+        var DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        var MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        var weekStart = getMonday(new Date());
+        var defaults = { morning: 3, midday: 3, afternoon: 3, evening: 3 };
+        var overrides = {};
+        var bookings = {};
+
+        function getMonday(d) {
+            var day = d.getDay();
+            var diff = d.getDate() - day + (day === 0 ? -6 : 1);
+            return new Date(d.getFullYear(), d.getMonth(), diff);
+        }
+
+        function dateStr(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
+        function todayStr() {
+            var t = new Date();
+            return dateStr(t);
+        }
+
+        function updateWeekLabel() {
+            var end = new Date(weekStart);
+            end.setDate(end.getDate() + 6);
+            document.getElementById('week-label').textContent =
+                MONTH_NAMES[weekStart.getMonth()] + ' ' + weekStart.getDate() + ' — ' +
+                MONTH_NAMES[end.getMonth()] + ' ' + end.getDate() + ', ' + end.getFullYear();
+        }
+
+        function cycleWeek(offset) {
+            weekStart.setDate(weekStart.getDate() + offset * 7);
+            loadWeek();
+        }
+
+        function loadWeek() {
+            updateWeekLabel();
+            var ws = dateStr(weekStart);
+
+            Promise.all([
+                fetch('/api/rep-count/default/').then(function(r) { return r.json(); }),
+                fetch('/api/rep-count/overrides/?week_start=' + ws).then(function(r) { return r.json(); }),
+                fetch('/api/rep-count/bookings/?week_start=' + ws).then(function(r) { return r.json(); })
+            ]).then(function(results) {
+                defaults = results[0].defaults;
+
+                overrides = {};
+                results[1].overrides.forEach(function(o) {
+                    overrides[o.date + '_' + o.time_block] = o.count;
+                });
+
+                bookings = {};
+                results[2].bookings.forEach(function(b) {
+                    bookings[b.date + '_' + b.time_block] = b.booked;
+                });
+
+                renderGrid();
+                renderDefaultPanel();
+            });
+        }
+
+        function renderGrid() {
+            var grid = document.getElementById('rc-grid');
+            var today = todayStr();
+            var html = '';
+
+            // Header row: empty corner + 7 day columns
+            html += '<div class="rc-header"></div>';
+            for (var i = 0; i < 7; i++) {
+                var d = new Date(weekStart);
+                d.setDate(d.getDate() + i);
+                var ds = dateStr(d);
+                html += '<div class="rc-header' + (ds === today ? ' today-col' : '') + '">' +
+                    DAY_NAMES[d.getDay()] + '<br>' + MONTH_NAMES[d.getMonth()] + ' ' + d.getDate() + '</div>';
+            }
+
+            // One row per time block
+            BLOCKS.forEach(function(b) {
+                html += '<div class="rc-block-label">' + b.label + '</div>';
+                for (var i = 0; i < 7; i++) {
+                    var d = new Date(weekStart);
+                    d.setDate(d.getDate() + i);
+                    var ds = dateStr(d);
+                    var key = ds + '_' + b.key;
+                    var rc = (key in overrides) ? overrides[key] : (defaults[b.key] || 3);
+                    var booked = bookings[key] || 0;
+                    var statusClass = booked < rc ? 'open' : (booked === rc ? 'full' : 'over');
+                    var dotClass = booked < rc ? 'green' : (booked === rc ? 'yellow' : 'red');
+
+                    html += '<div class="rc-cell ' + statusClass + '" data-date="' + ds + '" data-block="' + b.key + '">';
+                    html += '<div class="rc-stepper">';
+                    html += '<button class="rc-stepper-btn plus" onclick="stepOverride(\'' + ds + '\', \'' + b.key + '\', 1)">+</button>';
+                    html += '<div class="rc-stepper-val">' + rc + '</div>';
+                    html += '<button class="rc-stepper-btn minus" onclick="stepOverride(\'' + ds + '\', \'' + b.key + '\', -1)">&minus;</button>';
+                    html += '</div>';
+                    html += '<div class="rc-booking"><span class="status-dot ' + dotClass + '"></span><span class="booked-count">' + booked + ' booked</span></div>';
+                    html += '</div>';
+                }
+            });
+
+            grid.innerHTML = html;
+        }
+
+        function stepOverride(date, block, delta) {
+            var key = date + '_' + block;
+            var current = (key in overrides) ? overrides[key] : (defaults[block] || 3);
+            var newVal = Math.max(0, Math.min(20, current + delta));
+            if (newVal !== current) saveOverride(date, block, newVal);
+        }
+
+        function saveOverride(date, block, count) {
+            overrides[date + '_' + block] = count;
+            renderGrid();
+            fetch('/api/rep-count/overrides/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: date, time_block: block, count: count })
+            });
+        }
+
+        function toggleDefaultPanel() {
+            var panel = document.getElementById('default-panel');
+            if (panel.style.display === 'none') {
+                panel.style.display = '';
+                renderDefaultPanel();
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
+        function renderDefaultPanel() {
+            var html = '';
+            BLOCKS.forEach(function(b) {
+                var val = defaults[b.key] || 3;
+                html += '<div class="default-block">';
+                html += '<span class="default-block-label">' + b.label + '</span>';
+                html += '<input type="number" min="0" max="20" value="' + val + '" onchange="saveDefault(\'' + b.key + '\', parseInt(this.value))">';
+                html += '</div>';
+            });
+            document.getElementById('default-grid').innerHTML = html;
+        }
+
+        function saveDefault(blockKey, count) {
+            defaults[blockKey] = count;
+            renderGrid();
+            fetch('/api/rep-count/default/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ time_block: blockKey, count: count })
+            });
+        }
+
+        loadWeek();
+    </script>
+{% endblock %}

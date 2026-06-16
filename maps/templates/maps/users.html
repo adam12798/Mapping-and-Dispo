@@ -1,0 +1,403 @@
+{% extends "maps/base.html" %}
+{% load static %}
+
+{% block title %}Users{% endblock %}
+
+{% block content %}
+    <div class="crm-container">
+        <div class="crm-toolbar">
+            <div class="crm-header">
+                <h2>User Management</h2>
+                <button class="add-btn" onclick="showAddRow()">+ Add User</button>
+            </div>
+        </div>
+        <div id="users-grouped"></div>
+    </div>
+{% endblock %}
+
+{% block head_extra %}
+    <style>
+        .role-group {
+            margin-bottom: 4px;
+        }
+        .role-group-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 24px;
+            background: #293241;
+            color: #e0fbfc;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .role-group-header:hover { background: #3d5a80; }
+        .role-group-header .chevron {
+            display: inline-block;
+            transition: transform 0.2s;
+            font-size: 12px;
+        }
+        .role-group-header.collapsed .chevron { transform: rotate(-90deg); }
+        .role-group-header .role-count {
+            background: rgba(255,255,255,0.15);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .role-group-body {
+            overflow: hidden;
+            transition: max-height 0.25s ease;
+        }
+        .role-group-body.collapsed {
+            max-height: 0 !important;
+        }
+        .role-group .crm-table {
+            margin-bottom: 0;
+        }
+        .role-group .crm-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .source-picker {
+            position: relative;
+            display: inline-block;
+            min-width: 180px;
+        }
+        .source-picker-toggle {
+            width: 100%;
+            padding: 6px 28px 6px 10px;
+            border: 1px solid #98c1d9;
+            border-radius: 4px;
+            background: #fff;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            color: #293241;
+            cursor: pointer;
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            appearance: none;
+        }
+        .source-picker-toggle::after {
+            content: '▾';
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 12px;
+            color: #3d5a80;
+            pointer-events: none;
+        }
+        .source-picker-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #fff;
+            border: 1px solid #98c1d9;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+            z-index: 20;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .source-picker-dropdown.open { display: block; }
+        .source-picker-dropdown label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 12px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 13px;
+            color: #293241;
+            cursor: pointer;
+        }
+        .source-picker-dropdown label:hover { background: #e0fbfc; }
+        .source-picker-dropdown input[type="checkbox"] { accent-color: #3d5a80; }
+        #users-grouped { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        @media (max-width: 768px) {
+            #users-grouped { padding-bottom: 72px; }
+        }
+    </style>
+{% endblock %}
+{% block scripts %}
+    <script>
+        var allReps = {{ reps_json|safe }};
+        var allSources = {{ sources_json|safe }};
+        var currentUserId = {{ request.user.id }};
+
+        function parseUserSources(str) {
+            if (!str) return [];
+            return str.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+        }
+
+        function sourcesMatch(a, b) {
+            return a.toLowerCase() === b.toLowerCase();
+        }
+
+        function isSourceSelected(userSources, src) {
+            for (var i = 0; i < userSources.length; i++) {
+                if (sourcesMatch(userSources[i], src)) return true;
+            }
+            return false;
+        }
+
+        function buildSourcePicker(id, selectedCsv, onChangeCallback) {
+            var selected = parseUserSources(selectedCsv);
+            var html = '<div class="source-picker" id="sp-' + id + '">';
+            var label = selected.length ? selected.join(', ') : '— Select Sources —';
+            html += '<button type="button" class="source-picker-toggle" onclick="toggleSourcePicker(\'' + id + '\')">' + escHtml(label) + '</button>';
+            html += '<div class="source-picker-dropdown" id="spd-' + id + '">';
+            allSources.forEach(function(src) {
+                var checked = isSourceSelected(selected, src) ? ' checked' : '';
+                html += '<label><input type="checkbox" value="' + escHtml(src) + '"' + checked + ' onchange="onSourceCheck(\'' + id + '\', ' + onChangeCallback + ')"> ' + escHtml(src) + '</label>';
+            });
+            html += '</div></div>';
+            return html;
+        }
+
+        function toggleSourcePicker(id) {
+            var dd = document.getElementById('spd-' + id);
+            var wasOpen = dd.classList.contains('open');
+            document.querySelectorAll('.source-picker-dropdown.open').forEach(function(el) { el.classList.remove('open'); });
+            if (!wasOpen) dd.classList.add('open');
+        }
+
+        function onSourceCheck(id, userId) {
+            var dd = document.getElementById('spd-' + id);
+            var checks = dd.querySelectorAll('input[type="checkbox"]');
+            var vals = [];
+            checks.forEach(function(c) { if (c.checked) vals.push(c.value); });
+            var csv = vals.join(', ');
+            var toggle = dd.parentElement.querySelector('.source-picker-toggle');
+            toggle.textContent = csv || '— Select Sources —';
+            if (userId) {
+                updateUser(userId, { lead_sources: csv });
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.source-picker')) {
+                document.querySelectorAll('.source-picker-dropdown.open').forEach(function(el) { el.classList.remove('open'); });
+            }
+        });
+
+        var roleGroups = [
+            { key: 'manager', label: 'Managers', cols: ['Username', 'Linked Rep', 'Active', 'Reset Password', ''] },
+            { key: 'rep', label: 'Reps', cols: ['Username', 'Linked Rep', 'Active', 'Reset Password', ''] },
+            { key: 'provider', label: 'Source Providers', cols: ['Username', 'Lead Sources', 'Active', 'Reset Password', ''] }
+        ];
+        var groupCollapsed = {};
+
+        function toggleGroup(key) {
+            groupCollapsed[key] = !groupCollapsed[key];
+            var header = document.getElementById('group-header-' + key);
+            var body = document.getElementById('group-body-' + key);
+            if (groupCollapsed[key]) {
+                header.classList.add('collapsed');
+                body.classList.add('collapsed');
+            } else {
+                header.classList.remove('collapsed');
+                body.classList.remove('collapsed');
+                body.style.maxHeight = body.scrollHeight + 'px';
+            }
+        }
+
+        function changeRole(userId, newRole) {
+            updateUser(userId, { role: newRole });
+            loadUsers();
+        }
+
+        function buildUserRow(u) {
+            var html = '<tr data-id="' + u.id + '">';
+            html += '<td><span class="user-field">' + escHtml(u.username) + '</span>';
+            if (u.id !== currentUserId) {
+                html += ' <select class="crm-select" style="width:auto;font-size:11px;padding:2px 6px;margin-left:6px;" onchange="changeRole(' + u.id + ', this.value)">';
+                html += '<option value="manager"' + (u.role === 'manager' ? ' selected' : '') + '>Manager</option>';
+                html += '<option value="rep"' + (u.role === 'rep' ? ' selected' : '') + '>Rep</option>';
+                html += '<option value="provider"' + (u.role === 'provider' ? ' selected' : '') + '>Provider</option>';
+                html += '</select>';
+            }
+            html += '</td>';
+            html += '<td>';
+            if (u.role === 'provider') {
+                html += '<div class="lead-sources-input">';
+                html += buildSourcePicker('u' + u.id, u.lead_sources || '', u.id);
+                html += '</div>';
+                html += '<label style="display:flex;align-items:center;gap:4px;font-size:11px;font-family:Montserrat,sans-serif;color:#3d5a80;margin-top:4px;cursor:pointer;">';
+                html += '<input type="checkbox"' + (u.hourly_availability ? ' checked' : '') + ' onchange="updateUser(' + u.id + ', {hourly_availability: this.checked})">';
+                html += 'Hourly view</label>';
+            } else {
+                html += '<select class="crm-select" data-field="rep_id" onchange="updateUser(' + u.id + ', {rep_id: this.value || null})">';
+                html += '<option value="">— None —</option>';
+                allReps.forEach(function(r) {
+                    html += '<option value="' + r.id + '"' + (u.rep_id == r.id ? ' selected' : '') + '>' + escHtml(r.name) + '</option>';
+                });
+                html += '</select>';
+            }
+            html += '</td>';
+            html += '<td><select class="crm-select" data-field="is_active" onchange="updateUser(' + u.id + ', {is_active: this.value === \'true\'})">';
+            html += '<option value="true"' + (u.is_active ? ' selected' : '') + '>Active</option>';
+            html += '<option value="false"' + (!u.is_active ? ' selected' : '') + '>Inactive</option>';
+            html += '</select></td>';
+            html += '<td><div style="display:flex;gap:4px;"><input type="password" class="crm-input" placeholder="New password" style="width:140px;" id="pw-' + u.id + '"><button class="add-btn" style="padding:4px 10px;font-size:12px;" onclick="resetPassword(' + u.id + ')">Set</button></div></td>';
+            html += '<td class="action-col">';
+            if (u.id !== currentUserId) {
+                html += '<button class="delete-row-btn" onclick="deleteUser(' + u.id + ', \'' + escHtml(u.username) + '\')" title="Delete user"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+            }
+            html += '</td>';
+            html += '</tr>';
+            return html;
+        }
+
+        function loadUsers() {
+            fetch('/api/users/').then(function(r) { return r.json(); }).then(function(users) {
+                var grouped = { manager: [], rep: [], provider: [] };
+                users.forEach(function(u) {
+                    if (grouped[u.role]) grouped[u.role].push(u);
+                    else grouped.rep.push(u);
+                });
+                // Sort each group alphabetically by username
+                Object.keys(grouped).forEach(function(k) {
+                    grouped[k].sort(function(a, b) { return a.username.toLowerCase().localeCompare(b.username.toLowerCase()); });
+                });
+
+                var container = document.getElementById('users-grouped');
+                var html = '';
+                roleGroups.forEach(function(g) {
+                    var list = grouped[g.key] || [];
+                    var isCollapsed = groupCollapsed[g.key] || false;
+                    html += '<div class="role-group">';
+                    html += '<div class="role-group-header' + (isCollapsed ? ' collapsed' : '') + '" id="group-header-' + g.key + '" onclick="toggleGroup(\'' + g.key + '\')">';
+                    html += '<span class="chevron">&#9660;</span> ' + g.label + ' <span class="role-count">' + list.length + '</span>';
+                    html += '</div>';
+                    html += '<div class="role-group-body' + (isCollapsed ? ' collapsed' : '') + '" id="group-body-' + g.key + '">';
+                    html += '<table class="crm-table"><thead><tr>';
+                    g.cols.forEach(function(c) {
+                        html += c ? '<th>' + c + '</th>' : '<th class="action-col"></th>';
+                    });
+                    html += '</tr></thead><tbody>';
+                    if (list.length === 0) {
+                        html += '<tr><td colspan="' + g.cols.length + '" style="text-align:center;color:#98c1d9;padding:16px;">No ' + g.label.toLowerCase() + '</td></tr>';
+                    } else {
+                        list.forEach(function(u) { html += buildUserRow(u); });
+                    }
+                    html += '</tbody></table></div></div>';
+                });
+                container.innerHTML = html;
+                // Set max-height for open groups
+                roleGroups.forEach(function(g) {
+                    if (!groupCollapsed[g.key]) {
+                        var body = document.getElementById('group-body-' + g.key);
+                        if (body) body.style.maxHeight = body.scrollHeight + 'px';
+                    }
+                });
+            });
+        }
+
+        function escHtml(s) {
+            var d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function showAddRow() {
+            if (document.getElementById('add-user-row')) return;
+            var html = '<tr id="add-user-row">';
+            html += '<td><input type="text" class="crm-input" id="new-username" placeholder="Username"></td>';
+            html += '<td>';
+            html += '<select class="crm-select" id="new-role" onchange="toggleNewLeadSources(this)" style="margin-bottom:4px;"><option value="manager">Manager</option><option value="rep" selected>Rep</option><option value="provider">Provider</option></select>';
+            html += '<select class="crm-select" id="new-rep"><option value="">— Linked Rep —</option>';
+            allReps.forEach(function(r) {
+                html += '<option value="' + r.id + '">' + escHtml(r.name) + '</option>';
+            });
+            html += '</select>';
+            html += '<div id="new-lead-sources-wrap" style="display:none;margin-top:4px;">';
+            html += buildSourcePicker('new', '', 'null');
+            html += '</div>';
+            html += '</td>';
+            html += '<td colspan="2"><input type="password" class="crm-input" id="new-password" placeholder="Password"></td>';
+            html += '<td class="action-col"><button class="add-btn" style="padding:4px 10px;font-size:12px;" onclick="createUser()">Save</button></td>';
+            html += '</tr>';
+            // Insert into the first visible group's table
+            var firstBody = document.querySelector('.role-group tbody');
+            if (firstBody) {
+                firstBody.insertAdjacentHTML('afterbegin', html);
+            }
+            document.getElementById('new-username').focus();
+        }
+
+        function getPickerValue(id) {
+            var dd = document.getElementById('spd-' + id);
+            if (!dd) return '';
+            var checks = dd.querySelectorAll('input[type="checkbox"]');
+            var vals = [];
+            checks.forEach(function(c) { if (c.checked) vals.push(c.value); });
+            return vals.join(', ');
+        }
+
+        function createUser() {
+            var username = document.getElementById('new-username').value.trim();
+            var password = document.getElementById('new-password').value;
+            var role = document.getElementById('new-role').value;
+            var repId = document.getElementById('new-rep').value;
+            var leadSources = getPickerValue('new');
+            if (!username || !password) { alert('Username and password required'); return; }
+            fetch('/api/users/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username, password: password, role: role, rep_id: repId || null, lead_sources: leadSources })
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.error) { alert(data.error); return; }
+                loadUsers();
+            });
+        }
+
+        function updateUser(id, fields) {
+            fetch('/api/users/' + id + '/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(fields)
+            });
+        }
+
+        function resetPassword(id) {
+            var pw = document.getElementById('pw-' + id).value;
+            if (!pw) { alert('Enter a new password'); return; }
+            fetch('/api/users/' + id + '/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pw })
+            }).then(function() {
+                document.getElementById('pw-' + id).value = '';
+                alert('Password updated');
+            });
+        }
+
+        function deleteUser(id, name) {
+            if (!confirm('Delete user "' + name + '"?')) return;
+            fetch('/api/users/' + id + '/', { method: 'DELETE' }).then(function() { loadUsers(); });
+        }
+
+        function toggleNewLeadSources(sel) {
+            var repSel = document.getElementById('new-rep');
+            var srcWrap = document.getElementById('new-lead-sources-wrap');
+            if (sel.value === 'provider') {
+                if (repSel) repSel.style.display = 'none';
+                if (srcWrap) srcWrap.style.display = '';
+            } else {
+                if (repSel) repSel.style.display = '';
+                if (srcWrap) srcWrap.style.display = 'none';
+            }
+        }
+
+        loadUsers();
+    </script>
+{% endblock %}

@@ -1,0 +1,1178 @@
+{% extends "maps/base.html" %}
+{% load static %}
+
+{% block title %}Map{% endblock %}
+
+{% block head_extra %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+{% endblock %}
+
+{% block content %}
+    <div class="map-wrapper">
+    <div id="map"></div>
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header" onclick="toggleSidebar()">Appointments</div>
+        <div id="sidebar-content"><div class="sidebar-empty">Select a date to see appointments</div></div>
+    </div>
+    <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()">&#9664;</button>
+    </div>
+    <div class="route-panel collapsed" id="route-panel" {% if not is_manager %}style="display:none;"{% endif %}>
+        <h4 onclick="toggleRoutePanel()">Route Planner <span class="route-panel-arrow" id="route-panel-arrow">&#9654;</span></h4>
+        <div class="route-panel-body" id="route-panel-body">
+            <input type="date" id="route-date" />
+            <div style="display:flex;gap:6px;margin-top:2px;">
+                <button onclick="showRoute()">Show Route</button>
+                <button class="tomorrow-btn" onclick="setTomorrow()">Tomorrow</button>
+            </div>
+            <button class="tomorrow-btn" style="margin-top:4px;width:100%;" onclick="clearRoute()">Clear Route</button>
+            <hr style="margin:8px 0;border:none;border-top:1px solid #ddd;">
+            <button class="add-btn" style="width:100%;font-size:12px;padding:6px 12px;" onclick="autoAssign()">Auto-Assign</button>
+            <button class="tomorrow-btn" style="margin-top:4px;width:100%;" onclick="clearAssignments()">Clear Assignments</button>
+            <div id="assign-status" style="margin-top:6px;font-size:11px;color:#666;"></div>
+            <div class="confirm-bar" id="confirm-bar">
+                <button class="confirm-btn" onclick="confirmAssignments()">Confirm</button>
+                <button class="redo-btn" onclick="redoAssignments()">Redo</button>
+            </div>
+            <hr style="margin:8px 0;border:none;border-top:1px solid #ddd;">
+            <button id="textblast-btn" style="width:100%;font-size:12px;padding:8px 12px;background:#e74c3c;color:#fff;border:none;border-radius:6px;font-family:'Montserrat',sans-serif;font-weight:600;cursor:pointer;" onclick="sendTextBlast()">Send TextBlast</button>
+            <div id="textblast-status" style="margin-top:4px;font-size:11px;color:#666;"></div>
+        </div>
+    </div>
+
+{% endblock %}
+
+{% block scripts %}
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+    L.Map.mergeOptions({smoothWheelZoom:true,smoothSensitivity:1});
+    L.Map.SmoothWheelZoom=L.Handler.extend({addHooks:function(){L.DomEvent.on(this._map._container,'wheel',this._onWheelScroll,this)},removeHooks:function(){L.DomEvent.off(this._map._container,'wheel',this._onWheelScroll,this)},_onWheelScroll:function(e){if(!this._isWheeling){this._onWheelStart(e)}this._onWheeling(e)},_onWheelStart:function(e){var map=this._map;this._isWheeling=true;this._wheelMousePosition=map.mouseEventToContainerPoint(e);this._centerPoint=map.getSize()._divideBy(2);this._startLatLng=map.containerPointToLatLng(this._centerPoint);this._wheelMouseLatLng=map.containerPointToLatLng(this._wheelMousePosition);this._startZoom=map.getZoom();this._moved=false;this._zooming=true;map._stop();if(map._panAnim)map._panAnim.stop();this._goalZoom=map.getZoom();this._prevCenter=map.getCenter();this._prevZoom=map.getZoom();this._zoomAnimationId=requestAnimationFrame(this._updateWheelZoom.bind(this))},_onWheeling:function(e){var map=this._map;this._goalZoom=this._goalZoom+L.DomEvent.getWheelDelta(e)*0.003*map.options.smoothSensitivity;if(this._goalZoom<map.getMinZoom()||this._goalZoom>map.getMaxZoom()){this._goalZoom=map._limitZoom(this._goalZoom)}this._wheelMousePosition=this._map.mouseEventToContainerPoint(e);this._wheelMouseLatLng=map.containerPointToLatLng(this._wheelMousePosition);clearTimeout(this._timeoutId);this._timeoutId=setTimeout(this._onWheelEnd.bind(this),200);L.DomEvent.preventDefault(e);L.DomEvent.stopPropagation(e)},_onWheelEnd:function(){this._isWheeling=false;cancelAnimationFrame(this._zoomAnimationId);this._map._moveEnd(true)},_updateWheelZoom:function(){var map=this._map;if(!map.getCenter().equals(this._prevCenter)||map.getZoom()!=this._prevZoom)return;this._zoom=map.getZoom()+(this._goalZoom-map.getZoom())*0.3;this._zoom=Math.floor(this._zoom*100)/100;var delta=this._wheelMousePosition.subtract(this._centerPoint);if(delta.x===0&&delta.y===0)return;if(map.options.smoothWheelZoom==='center'){this._center=this._startLatLng}else{this._center=map.unproject(map.project(this._wheelMouseLatLng,this._zoom).subtract(delta),this._zoom)}if(!this._moved){map._moveStart(true,false);this._moved=true}map._move(this._center,this._zoom);this._prevCenter=map.getCenter();this._prevZoom=map.getZoom();this._zoomAnimationId=requestAnimationFrame(this._updateWheelZoom.bind(this))}});
+    L.Map.addInitHook('addHandler','smoothWheelZoom',L.Map.SmoothWheelZoom);
+    </script>
+    <script>
+        var IS_MANAGER = {% if is_manager %}true{% else %}false{% endif %};
+        var map = L.map('map', {
+            center: [42.2, -71.8],
+            zoom: 9.5,
+            zoomControl: false,
+            minZoom: 8,
+            maxZoom: 16,
+            zoomSnap: 0,
+            scrollWheelZoom: false,
+            smoothWheelZoom: true,
+            smoothSensitivity: 1.5
+        });
+
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // Use Canvas renderer for smooth zoom/pan — no SVG redraw flicker
+        var canvasRenderer = L.canvas({ padding: 1.5 });
+
+        // Provider color map
+        var providerColors = {
+            'Eversource': '#9adeca',
+            'Eversource West': '#9adeca',
+            'National Grid': '#948ef5',
+            'Unitil': '#f9dc75',
+            'Municipal': '#f2a3bb'
+        };
+
+        // Town-to-provider mapping (all 351 MA municipalities)
+        // Municipal/Unitil listed last so they override Eversource/NG for dual-territory towns
+        var townProviders = {
+            // === EVERSOURCE EAST ===
+            'Acton': 'Eversource', 'Acushnet': 'Eversource', 'Aquinnah': 'Eversource',
+            'Arlington': 'Eversource', 'Ashland': 'Eversource',
+            'Barnstable': 'Eversource', 'Bedford': 'Eversource', 'Bellingham': 'Eversource',
+            'Belmont': 'Eversource', 'Boston': 'Eversource', 'Bourne': 'Eversource',
+            'Brewster': 'Eversource', 'Brookline': 'Eversource',
+            'Burlington': 'Eversource', 'Cambridge': 'Eversource', 'Canton': 'Eversource',
+            'Carlisle': 'Eversource', 'Carver': 'Eversource', 'Chatham': 'Eversource',
+            'Chelsea': 'Eversource', 'Chilmark': 'Eversource', 'Concord': 'Eversource',
+            'Dartmouth': 'Eversource', 'Dedham': 'Eversource', 'Dennis': 'Eversource',
+            'Dover': 'Eversource', 'Duxbury': 'Eversource',
+            'Eastham': 'Eversource', 'Edgartown': 'Eversource',
+            'Fairhaven': 'Eversource', 'Falmouth': 'Eversource',
+            'Framingham': 'Eversource', 'Freetown': 'Eversource',
+            'Harwich': 'Eversource', 'Holliston': 'Eversource', 'Hopkinton': 'Eversource',
+            'Kingston': 'Eversource', 'Lakeville': 'Eversource',
+            'Lexington': 'Eversource', 'Lincoln': 'Eversource',
+            'Marion': 'Eversource', 'Marshfield': 'Eversource',
+            'Mashpee': 'Eversource', 'Mattapoisett': 'Eversource', 'Maynard': 'Eversource',
+            'Medfield': 'Eversource', 'Medway': 'Eversource',
+            'Middleborough': 'Eversource', 'Millis': 'Eversource', 'Milton': 'Eversource',
+            'Natick': 'Eversource', 'Needham': 'Eversource', 'New Bedford': 'Eversource',
+            'Newton': 'Eversource', 'Norfolk': 'Eversource',
+            'Oak Bluffs': 'Eversource', 'Orleans': 'Eversource',
+            'Pembroke': 'Eversource', 'Plymouth': 'Eversource', 'Plympton': 'Eversource',
+            'Provincetown': 'Eversource', 'Quincy': 'Eversource',
+            'Rochester': 'Eversource',
+            'Sandwich': 'Eversource', 'Scituate': 'Eversource',
+            'Sharon': 'Eversource', 'Sherborn': 'Eversource',
+            'Somerville': 'Eversource',
+            'Stoneham': 'Eversource',
+            'Stow': 'Eversource', 'Sudbury': 'Eversource',
+            'Tisbury': 'Eversource', 'Truro': 'Eversource',
+            'Wakefield': 'Eversource', 'Walpole': 'Eversource', 'Waltham': 'Eversource',
+            'Wareham': 'Eversource', 'Watertown': 'Eversource', 'Wayland': 'Eversource',
+            'Wellesley': 'Eversource', 'Wellfleet': 'Eversource',
+            'West Tisbury': 'Eversource',
+            'Weston': 'Eversource', 'Westport': 'Eversource', 'Westwood': 'Eversource',
+            'Winchester': 'Eversource', 'Woburn': 'Eversource', 'Yarmouth': 'Eversource',
+
+            // === EVERSOURCE WEST (west of Worcester) ===
+            'Agawam': 'Eversource West', 'Amherst': 'Eversource West',
+            'Ashfield': 'Eversource West', 'Becket': 'Eversource West',
+ 'Bernardston': 'Eversource West',
+            'Blandford': 'Eversource West',             'Buckland': 'Eversource West',
+            'Cheshire': 'Eversource West', 'Chester': 'Eversource West',
+            'Chesterfield': 'Eversource West', 'Chicopee': 'Eversource West',
+            'Colrain': 'Eversource West', 'Conway': 'Eversource West',
+            'Cummington': 'Eversource West', 'Dalton': 'Eversource West',
+            'Deerfield': 'Eversource West',
+            'East Longmeadow': 'Eversource West', 'Easthampton': 'Eversource West',
+            'Erving': 'Eversource West',
+            'Gill': 'Eversource West',
+            'Granby': 'Eversource West', 'Granville': 'Eversource West',
+            'Greenfield': 'Eversource West',
+            'Hadley': 'Eversource West',
+            'Hancock': 'Eversource West', 'Hatfield': 'Eversource West',
+            'Hinsdale': 'Eversource West',
+            'Huntington': 'Eversource West',
+            'Lanesborough': 'Eversource West', 'Lee': 'Eversource West',
+            'Leverett': 'Eversource West',
+            'Leyden': 'Eversource West', 'Longmeadow': 'Eversource West',
+            'Ludlow': 'Eversource West',
+            'Middlefield': 'Eversource West',
+            'Montague': 'Eversource West', 'Montgomery': 'Eversource West',
+            'New Ashford': 'Eversource West',
+            'Northfield': 'Eversource West',
+            'Otis': 'Eversource West',
+            'Pelham': 'Eversource West', 'Peru': 'Eversource West',
+            'Pittsfield': 'Eversource West', 'Plainfield': 'Eversource West',
+            'Richmond': 'Eversource West', 'Russell': 'Eversource West',
+            'Sandisfield': 'Eversource West', 'Savoy': 'Eversource West',
+            'Shelburne': 'Eversource West',
+            'Southampton': 'Eversource West', 'Southwick': 'Eversource West',
+            'Springfield': 'Eversource West', 'Sunderland': 'Eversource West',
+            'Tolland': 'Eversource West', 'Tyringham': 'Eversource West',
+                        'Washington': 'Eversource West', 'West Springfield': 'Eversource West',
+            'Westfield': 'Eversource West', 'Westhampton': 'Eversource West',
+            'Whately': 'Eversource West',
+            'Windsor': 'Eversource West',
+            'Worthington': 'Eversource West',
+
+            // === NATIONAL GRID (everything else) ===
+            'Abington': 'National Grid', 'Adams': 'National Grid', 'Alford': 'National Grid',
+            'Amesbury': 'National Grid', 'Andover': 'National Grid',
+            'Athol': 'National Grid', 'Attleboro': 'National Grid', 'Auburn': 'National Grid',
+            'Avon': 'National Grid', 'Ayer': 'National Grid',
+            'Barre': 'National Grid', 'Berlin': 'National Grid',
+            'Beverly': 'National Grid', 'Billerica': 'National Grid',
+            'Blackstone': 'National Grid', 'Bolton': 'National Grid', 'Boxford': 'National Grid',
+            'Bridgewater': 'National Grid', 'Brockton': 'National Grid',
+            'Brookfield': 'National Grid',
+            'Charlemont': 'National Grid', 'Charlton': 'National Grid',
+            'Chelmsford': 'National Grid', 'Clarksburg': 'National Grid',
+            'Clinton': 'National Grid', 'Cohasset': 'National Grid',
+            'Douglas': 'National Grid', 'Dracut': 'National Grid', 'Dudley': 'National Grid',
+            'Dunstable': 'National Grid',
+            'East Bridgewater': 'National Grid', 'East Brookfield': 'National Grid',
+            'Egremont': 'National Grid', 'Essex': 'National Grid', 'Everett': 'National Grid',
+            'Fall River': 'National Grid', 'Florida': 'National Grid',
+            'Foxborough': 'National Grid',
+            'Gardner': 'National Grid', 'Gloucester': 'National Grid', 'Grafton': 'National Grid',
+            'Great Barrington': 'National Grid',
+            'Halifax': 'National Grid', 'Hamilton': 'National Grid',
+            'Hanover': 'National Grid', 'Hanson': 'National Grid',
+            'Hardwick': 'National Grid', 'Harvard': 'National Grid',
+            'Haverhill': 'National Grid', 'Hawley': 'National Grid', 'Heath': 'National Grid',
+            'Holbrook': 'National Grid', 'Hopedale': 'National Grid',
+            'Hubbardston': 'National Grid',
+            'Lancaster': 'National Grid', 'Lawrence': 'National Grid',
+            'Leicester': 'National Grid', 'Leominster': 'National Grid',
+            'Lowell': 'National Grid', 'Lynn': 'National Grid',
+            'Malden': 'National Grid', 'Manchester': 'National Grid',
+            'Marlborough': 'National Grid', 'Melrose': 'National Grid',
+            'Mendon': 'National Grid', 'Methuen': 'National Grid',
+            'Milford': 'National Grid', 'Millbury': 'National Grid', 'Millville': 'National Grid',
+            'Monroe': 'National Grid', 'Monterey': 'National Grid',
+            'Mount Washington': 'National Grid',
+            'Nahant': 'National Grid', 'Nantucket': 'National Grid',
+            'New Braintree': 'National Grid', 'New Marlborough': 'National Grid',
+            'New Salem': 'National Grid', 'Newbury': 'National Grid',
+            'Newburyport': 'National Grid',
+            'North Adams': 'National Grid', 'North Andover': 'National Grid',
+            'North Brookfield': 'National Grid', 'Northborough': 'National Grid',
+            'Northbridge': 'National Grid', 'Norton': 'National Grid',
+            'Norwell': 'National Grid',
+            'Oakham': 'National Grid', 'Orange': 'National Grid',
+            'Oxford': 'National Grid', 'Pepperell': 'National Grid',
+            'Petersham': 'National Grid', 'Phillipston': 'National Grid',
+            'Plainville': 'National Grid',
+            'Randolph': 'National Grid', 'Rehoboth': 'National Grid', 'Revere': 'National Grid',
+            'Rockland': 'National Grid', 'Rockport': 'National Grid',
+            'Rowe': 'National Grid', 'Royalston': 'National Grid', 'Rutland': 'National Grid',
+            'Salem': 'National Grid', 'Salisbury': 'National Grid',
+            'Saugus': 'National Grid', 'Seekonk': 'National Grid',
+            'Sheffield': 'National Grid', 'Shirley': 'National Grid',
+            'Somerset': 'National Grid', 'Southbridge': 'National Grid',
+            'Spencer': 'National Grid', 'Stockbridge': 'National Grid',
+            'Sturbridge': 'National Grid', 'Sutton': 'National Grid',
+            'Swampscott': 'National Grid', 'Swansea': 'National Grid',
+            'Tewksbury': 'National Grid', 'Topsfield': 'National Grid',
+            'Tyngsborough': 'National Grid',
+            'Upton': 'National Grid', 'Uxbridge': 'National Grid',
+            'Warren': 'National Grid', 'Warwick': 'National Grid',
+            'Webster': 'National Grid', 'Wendell': 'National Grid', 'Wenham': 'National Grid',
+            'West Bridgewater': 'National Grid', 'West Brookfield': 'National Grid',
+            'West Newbury': 'National Grid', 'West Stockbridge': 'National Grid',
+            'Westborough': 'National Grid', 'Westford': 'National Grid',
+            'Westminster': 'National Grid', 'Weymouth': 'National Grid',
+            'Whitman': 'National Grid', 'Williamstown': 'National Grid',
+            'Winchendon': 'National Grid', 'Winthrop': 'National Grid',
+            'Worcester': 'National Grid', 'Wrentham': 'National Grid',
+            'Belchertown': 'National Grid', 'Monson': 'National Grid', 'Hampden': 'National Grid',
+            'Goshen': 'National Grid', 'Lenox': 'National Grid', 'Northampton': 'National Grid',
+            'Easton': 'National Grid', 'Franklin': 'National Grid', 'Medford': 'National Grid',
+            'Shutesbury': 'National Grid', 'Southborough': 'National Grid', 'Stoughton': 'National Grid',
+            'Wilbraham': 'National Grid', 'Williamsburg': 'National Grid',
+            'Ware': 'National Grid', 'Brimfield': 'National Grid', 'Wales': 'National Grid',
+            'Holland': 'National Grid', 'Palmer': 'National Grid',
+
+            // === UNITIL ===
+            'Ashby': 'Unitil', 'Fitchburg': 'Unitil', 'Lunenburg': 'Unitil', 'Townsend': 'Unitil',
+
+            // === MUNICIPAL ELECTRIC (overrides above) ===
+            'Ashburnham': 'Municipal', 'Belmont': 'Municipal', 'Berkley': 'Municipal',
+            'Boxborough': 'Municipal', 'Boylston': 'Municipal', 'Braintree': 'Municipal',
+            'Chester': 'Municipal', 'Chicopee': 'Municipal', 'Concord': 'Municipal',
+            'Danvers': 'Municipal', 'Dighton': 'Municipal', 'Georgetown': 'Municipal',
+            'Gosnold': 'Municipal', 'Groton': 'Municipal', 'Groveland': 'Municipal',
+            'Hingham': 'Municipal', 'Holden': 'Municipal', 'Holyoke': 'Municipal',
+            'Hudson': 'Municipal', 'Hull': 'Municipal', 'Ipswich': 'Municipal',
+            'Lakeville': 'Municipal', 'Littleton': 'Municipal', 'Lynnfield': 'Municipal',
+            'Mansfield': 'Municipal', 'Marblehead': 'Municipal', 'Merrimac': 'Municipal',
+            'Middleborough': 'Municipal', 'Middleton': 'Municipal',
+            'North Attleborough': 'Municipal', 'North Reading': 'Municipal',
+            'Norwood': 'Municipal', 'Paxton': 'Municipal', 'Peabody': 'Municipal',
+            'Princeton': 'Municipal', 'Raynham': 'Municipal', 'Reading': 'Municipal',
+            'Rowley': 'Municipal', 'Russell': 'Municipal', 'Shrewsbury': 'Municipal',
+            'South Hadley': 'Municipal', 'Sterling': 'Municipal', 'Stow': 'Municipal',
+            'Taunton': 'Municipal', 'Templeton': 'Municipal', 'Wakefield': 'Municipal',
+            'Wellesley': 'Municipal', 'West Boylston': 'Municipal', 'Westfield': 'Municipal',
+            'Wilmington': 'Municipal'
+        };
+
+        // Fetch MA town boundaries GeoJSON
+        fetch('https://raw.githubusercontent.com/nblmc/massachusetts-municipal-boundaries/main/data-cooked/mass-municipalities.geojson')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                // Add town polygons colored by provider
+                L.geoJSON(data, {
+                    renderer: canvasRenderer,
+                    style: function(feature) {
+                        var name = feature.properties.census_name || '';
+                        var normalized = name.replace(/ Town$/, '').replace(/^Manchester-by-the-Sea$/, 'Manchester');
+                        var provider = townProviders[normalized] || townProviders[name];
+                        var color = provider ? providerColors[provider] : '#e0e0e0';
+                        return {
+                            fillColor: color,
+                            fillOpacity: 0.7,
+                            color: '#555',
+                            weight: 1,
+                            opacity: 0.5
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        var name = feature.properties.census_name || 'Unknown';
+                        var normalized = name.replace(/ Town$/, '').replace(/^Manchester-by-the-Sea$/, 'Manchester');
+                        // Check if this is a major city (has a pin)
+                        var majorCities = ['Boston', 'Worcester', 'Springfield', 'Lowell', 'Cambridge',
+                            'New Bedford', 'Brockton', 'Quincy', 'Lynn', 'Fall River', 'Pittsfield',
+                            'Framingham', 'Haverhill', 'Plymouth', 'Barnstable', 'Northampton'];
+                        if (majorCities.indexOf(normalized) !== -1) {
+                            layer.options.interactive = false;
+                        } else {
+                            var provider = townProviders[normalized] || townProviders[name] || 'Unknown';
+                            layer.bindTooltip(name + '<br><em>' + provider + '</em>', {
+                                sticky: true,
+                                className: 'town-tooltip'
+                            });
+                        }
+                    }
+                }).addTo(map);
+
+                // Build mask from town polygons (much more accurate than state outline)
+                var outer = [[-90, -180], [-90, 180], [90, 180], [90, -180], [-90, -180]];
+                var allHoles = [];
+
+                data.features.forEach(function(feature) {
+                    var geom = feature.geometry;
+                    var coords = geom.coordinates;
+                    if (geom.type === 'Polygon') {
+                        coords.forEach(function(ring) {
+                            allHoles.push(ring.map(function(c) { return [c[1], c[0]]; }));
+                        });
+                    } else if (geom.type === 'MultiPolygon') {
+                        coords.forEach(function(poly) {
+                            poly.forEach(function(ring) {
+                                allHoles.push(ring.map(function(c) { return [c[1], c[0]]; }));
+                            });
+                        });
+                    }
+                });
+
+                // Single mask polygon with all town shapes as holes
+                L.polygon([outer].concat(allHoles), {
+                    renderer: canvasRenderer,
+                    color: '#333',
+                    weight: 1,
+                    fillColor: '#ffffff',
+                    fillOpacity: 1,
+                    interactive: false
+                }).addTo(map);
+
+                addCities();
+            })
+            .catch(function() {
+                addCities();
+            });
+
+        function addCities() {
+            var cities = [
+                ['Boston', 42.3601, -71.0589, true],
+                ['Worcester', 42.2626, -71.8023, true],
+                ['Springfield', 42.1015, -72.5898, true],
+                ['Lowell', 42.6334, -71.3162, false],
+                ['Cambridge', 42.3736, -71.1097, false],
+                ['New Bedford', 41.6362, -70.9342, false],
+                ['Brockton', 42.0834, -71.0184, false],
+                ['Quincy', 42.2529, -71.0023, false],
+                ['Lynn', 42.4668, -70.9495, false],
+                ['Fall River', 41.7015, -71.1550, false],
+                ['Pittsfield', 42.4501, -73.2454, false],
+                ['Framingham', 42.2793, -71.4162, false],
+                ['Haverhill', 42.7762, -71.0773, false],
+                ['Plymouth', 41.9584, -70.6673, false],
+                ['Barnstable', 41.7003, -70.3002, false],
+                ['Northampton', 42.3251, -72.6412, false]
+            ];
+
+            cities.forEach(function(city) {
+                var name = city[0], lat = city[1], lng = city[2], isMajor = city[3];
+
+                var dotIcon = L.divIcon({
+                    className: 'city-dot' + (isMajor ? ' major' : ''),
+                    iconSize: isMajor ? [12, 12] : [8, 8],
+                    iconAnchor: isMajor ? [6, 6] : [4, 4]
+                });
+
+                L.marker([lat, lng], { icon: dotIcon })
+                    .bindTooltip(name, {
+                        permanent: false,
+                        direction: 'right',
+                        offset: [8, 0],
+                        className: 'city-label'
+                    })
+                    .addTo(map);
+            });
+        }
+
+        // Lead pin colors by appointment type
+        var leadTypeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+        var leadsLayer = L.layerGroup().addTo(map);
+        var leadMarkers = {};
+        var allLeads = [];
+        var allReps = [];
+
+        // Fetch reps for assignment dropdowns
+        fetch('/api/reps/list/')
+            .then(function(r) { return r.json(); })
+            .then(function(reps) { allReps = reps; });
+
+        // Fetch all leads once, then filter by date
+        function fetchLeads() {
+            fetch('/api/leads/')
+                .then(function(r) { return r.json(); })
+                .then(function(leads) {
+                    allLeads = leads;
+                    filterLeadsByDate();
+                    updateSidebar(null);
+                });
+        }
+
+        function makePinIcon(color, num) {
+            var label = num ? num : '';
+            return L.divIcon({
+                className: 'lead-pin',
+                html: '<div style="width:26px;height:26px;background:' + color + ';border:2px solid #fff;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;font-family:Montserrat,sans-serif;line-height:1;">' + label + '</div>',
+                iconSize: [26, 26],
+                iconAnchor: [13, 13]
+            });
+        }
+
+        function updatePinNumbers(assignData) {
+            // Clear all numbers first
+            Object.keys(leadMarkers).forEach(function(id) {
+                var m = leadMarkers[id];
+                m._apptNum = '';
+                m.setIcon(makePinIcon(m._leadColor, ''));
+            });
+            if (!assignData || !assignData.assignments) return;
+            assignData.assignments.forEach(function(group) {
+                var sortedStops = group.stops.slice().sort(function(a, b) {
+                    function parseT(str) {
+                        if (!str) return 99999;
+                        var m = str.match(/(\d+):(\d+)\s*(AM|PM)/i);
+                        if (!m) return 99999;
+                        var h = parseInt(m[1]), min = parseInt(m[2]), p = m[3].toUpperCase();
+                        if (p === 'PM' && h !== 12) h += 12;
+                        if (p === 'AM' && h === 12) h = 0;
+                        return h * 60 + min;
+                    }
+                    return parseT(a.time || a.estimated_arrival) - parseT(b.time || b.estimated_arrival);
+                });
+                sortedStops.forEach(function(stop, idx) {
+                    var m = leadMarkers[stop.lead_id];
+                    if (m) {
+                        m._apptNum = idx + 1;
+                        m.setIcon(makePinIcon(m._leadColor, idx + 1));
+                    }
+                });
+            });
+        }
+
+        function filterLeadsByDate() {
+            leadsLayer.clearLayers();
+            leadMarkers = {};
+            var dateVal = document.getElementById('route-date').value;
+            var dayLeads = allLeads.filter(function(lead) {
+                if (!lead.appointment_datetime) return false;
+                var parts = lead.appointment_datetime.split(' ');
+                var dateParts = parts[0].split('/');
+                var leadDate = dateParts[2] + '-' + dateParts[0].padStart(2, '0') + '-' + dateParts[1].padStart(2, '0');
+                return leadDate === dateVal;
+            });
+            dayLeads.forEach(function(lead) {
+                if (lead.cancelled) return;
+                var color = (!lead.appointment_type || !lead.appointment_format) ? '#ff69b4' : (leadTypeColors[lead.appointment_type] || '#ff69b4');
+                var marker = L.marker([lead.lat, lead.lng], {
+                    icon: makePinIcon(color, '')
+                }).bindPopup(
+                    '<strong>' + lead.address + '</strong><br>' +
+                    (lead.homeowner_name ? lead.homeowner_name + '<br>' : '') +
+                    '<em>' + lead.appointment_datetime + '</em>'
+                ).addTo(leadsLayer);
+                marker._leadColor = color;
+                marker._apptNum = '';
+                leadMarkers[lead.id] = marker;
+            });
+            // Always keep sidebar in sync with current date
+            if (!pendingAssignments) {
+                updateSidebar(null);
+            }
+        }
+
+        // Default date to today
+        var today = new Date();
+        var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+        document.getElementById('route-date').value = todayStr;
+
+        // Recover map when tab regains focus (canvas renderer loses context in background)
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden) {
+                map.invalidateSize();
+                // Force canvas re-render by nudging zoom
+                var z = map.getZoom();
+                map.setZoom(z - 0.001, { animate: false });
+                setTimeout(function() { map.setZoom(z, { animate: false }); }, 50);
+            }
+        });
+        window.addEventListener('focus', function() {
+            map.invalidateSize();
+        });
+
+        // Fetch leads after date is set, open sidebar
+        fetchLeads();
+        openSidebar();
+
+        // Re-filter pins when date changes
+        document.getElementById('route-date').addEventListener('change', function() {
+            filterLeadsByDate();
+            if (!pendingAssignments) {
+                routeLayer.clearLayers();
+            }
+            updateSidebar(pendingAssignments);
+        });
+
+        function setTomorrow() {
+            var tmrw = new Date();
+            tmrw.setDate(tmrw.getDate() + 1);
+            var tmrwStr = tmrw.getFullYear() + '-' + String(tmrw.getMonth() + 1).padStart(2, '0') + '-' + String(tmrw.getDate()).padStart(2, '0');
+            document.getElementById('route-date').value = tmrwStr;
+            filterLeadsByDate();
+            routeLayer.clearLayers();
+        }
+
+        // Route overlay
+        var routeLayer = L.layerGroup().addTo(map);
+
+        function showRoute() {
+            // If we have pending (unconfirmed) assignments, show those instead
+            if (pendingAssignments) {
+                renderPreviewRoutes(pendingAssignments);
+                return;
+            }
+            var dateVal = document.getElementById('route-date').value;
+            if (!dateVal) { alert('Pick a date'); return; }
+
+            routeLayer.clearLayers();
+
+            fetch('/api/route/?date=' + dateVal)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    // Multi-rep mode (assignments exist)
+                    if (data.routes) {
+                        if (data.routes.length === 0) {
+                            alert('No assigned appointments on this date');
+                            return;
+                        }
+                        var allPoints = [];
+                        data.routes.forEach(function(route) {
+                            var repColor = route.rep.color || '#2980b9';
+                            var points = [];
+
+                            // Rep home star
+                            if (route.rep.lat && route.rep.lng) {
+                                var homeIcon = L.divIcon({
+                                    className: 'route-marker',
+                                    html: '<div style="background:' + repColor + ';width:28px;height:28px;border-radius:50%;border:3px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;box-shadow:0 0 6px rgba(0,0,0,0.4);">&#9733;</div>',
+                                    iconSize: [24, 24],
+                                    iconAnchor: [12, 12]
+                                });
+                                L.marker([route.rep.lat, route.rep.lng], { icon: homeIcon })
+                                    .bindPopup('<strong>' + route.rep.name + ' (Home)</strong><br>' + route.rep.home_address)
+                                    .addTo(routeLayer);
+                                points.push([route.rep.lat, route.rep.lng]);
+                            }
+
+                            var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+                            route.stops.forEach(function(stop, i) {
+                                var pinColor = typeColors[stop.type] || repColor;
+                                var stopIcon = L.divIcon({
+                                    className: 'route-marker',
+                                    html: '<div style="background:' + pinColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">' + (i + 1) + '</div>',
+                                    iconSize: [24, 24],
+                                    iconAnchor: [12, 12]
+                                });
+                                var typeLabel = stop.type ? stop.type.charAt(0).toUpperCase() + stop.type.slice(1) : '';
+                                L.marker([stop.lat, stop.lng], { icon: stopIcon })
+                                    .bindPopup(
+                                        '<strong>' + route.rep.name + ' #' + (i + 1) + ': ' + stop.name + '</strong><br>' +
+                                        stop.address + (stop.city ? ', ' + stop.city : '') + '<br>' +
+                                        (typeLabel ? '<em>' + typeLabel + '</em> &mdash; ' : '') +
+                                        '<em>' + stop.time + '</em>'
+                                    )
+                                    .addTo(routeLayer);
+                                points.push([stop.lat, stop.lng]);
+                            });
+
+                            if (points.length >= 2) {
+                                L.polyline(points, {
+                                    color: repColor, weight: 4, opacity: 0.8, dashArray: '10, 8'
+                                }).addTo(routeLayer);
+                            }
+                            allPoints = allPoints.concat(points);
+                        });
+
+                        if (allPoints.length >= 2) {
+                            map.fitBounds(L.latLngBounds(allPoints), { padding: [50, 50] });
+                        }
+                        return;
+                    }
+
+                    // Single-rep fallback (no assignments)
+                    if (!data.stops || data.stops.length === 0) {
+                        alert('No appointments on this date');
+                        return;
+                    }
+
+                    var repColor = (data.rep && data.rep.color) ? data.rep.color : '#2980b9';
+                    var points = [];
+
+                    if (data.rep && data.rep.lat && data.rep.lng) {
+                        var homeIcon = L.divIcon({
+                            className: 'route-marker',
+                            html: '<div style="background:' + repColor + ';width:28px;height:28px;border-radius:50%;border:3px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;box-shadow:0 0 6px rgba(0,0,0,0.4);">&#9733;</div>',
+                            iconSize: [24, 24],
+                            iconAnchor: [12, 12]
+                        });
+                        L.marker([data.rep.lat, data.rep.lng], { icon: homeIcon })
+                            .bindPopup('<strong>' + data.rep.name + ' (Home)</strong><br>' + data.rep.home_address)
+                            .addTo(routeLayer);
+                        points.push([data.rep.lat, data.rep.lng]);
+                    }
+
+                    var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+                    data.stops.forEach(function(stop, i) {
+                        var pinColor = typeColors[stop.type] || repColor;
+                        var stopIcon = L.divIcon({
+                            className: 'route-marker',
+                            html: '<div style="background:' + pinColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">' + (i + 1) + '</div>',
+                            iconSize: [24, 24],
+                            iconAnchor: [12, 12]
+                        });
+                        var typeLabel = stop.type ? stop.type.charAt(0).toUpperCase() + stop.type.slice(1) : '';
+                        L.marker([stop.lat, stop.lng], { icon: stopIcon })
+                            .bindPopup(
+                                '<strong>' + (i + 1) + '. ' + stop.name + '</strong><br>' +
+                                stop.address + (stop.city ? ', ' + stop.city : '') + '<br>' +
+                                (typeLabel ? '<em>' + typeLabel + '</em> &mdash; ' : '') +
+                                '<em>' + stop.time + '</em>'
+                            )
+                            .addTo(routeLayer);
+                        points.push([stop.lat, stop.lng]);
+                    });
+
+                    if (points.length >= 2) {
+                        L.polyline(points, {
+                            color: repColor, weight: 4, opacity: 0.8, dashArray: '10, 8'
+                        }).addTo(routeLayer);
+                        map.fitBounds(L.latLngBounds(points), { padding: [50, 50] });
+                    }
+                });
+        }
+
+        // Route panel toggle
+        function toggleRoutePanel() {
+            var panel = document.getElementById('route-panel');
+            var arrow = document.getElementById('route-panel-arrow');
+            panel.classList.toggle('collapsed');
+            arrow.innerHTML = panel.classList.contains('collapsed') ? '&#9654;' : '&#9660;';
+        }
+
+        // Sidebar
+        var pendingAssignments = null; // holds proposed assignments before confirm
+
+        function toggleSidebar() {
+            var sidebar = document.getElementById('sidebar');
+            var toggle = document.getElementById('sidebar-toggle');
+            var isOpen = sidebar.classList.contains('open');
+            if (isOpen) {
+                sidebar.classList.remove('open');
+                toggle.innerHTML = '&#9664;';
+            } else {
+                sidebar.classList.add('open');
+                toggle.innerHTML = '&#9654;';
+            }
+        }
+
+        function openSidebar() {
+            var sidebar = document.getElementById('sidebar');
+            if (!sidebar.classList.contains('open')) toggleSidebar();
+        }
+
+        var typeColorMap = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+
+        function updateSidebar(assignData) {
+            updatePinNumbers(assignData);
+            var container = document.getElementById('sidebar-content');
+            var html = '';
+
+            if (assignData && assignData.assignments && assignData.assignments.length > 0) {
+                assignData.assignments.forEach(function(group) {
+                    var rep = group.rep;
+                    function parseTime12h(str) {
+                        if (!str) return 99999;
+                        var m = str.match(/(\d+):(\d+)\s*(AM|PM)/i);
+                        if (!m) return 99999;
+                        var h = parseInt(m[1]), min = parseInt(m[2]), period = m[3].toUpperCase();
+                        if (period === 'PM' && h !== 12) h += 12;
+                        if (period === 'AM' && h === 12) h = 0;
+                        return h * 60 + min;
+                    }
+                    var sortedStops = group.stops.slice().sort(function(a, b) {
+                        return parseTime12h(a.time || a.estimated_arrival) - parseTime12h(b.time || b.estimated_arrival);
+                    });
+                    html += '<div class="sidebar-group">';
+                    html += '<div class="sidebar-group-title"><span class="rep-dot" style="background:' + (rep.color || '#2980b9') + '"></span>' + rep.name + ' (' + sortedStops.length + ')</div>';
+                    sortedStops.forEach(function(stop) {
+                        var badgeColor = typeColorMap[stop.type] || '#999';
+                        var displayName = (stop.name || 'Unknown') + (stop.city ? ', ' + stop.city : '');
+                        var pinNum = leadMarkers[stop.lead_id] ? leadMarkers[stop.lead_id]._apptNum : '';
+                        html += '<div class="sidebar-row" data-lead-id="' + stop.lead_id + '" style="border-left-color:' + (rep.color || '#2980b9') + '" onclick="panTo(' + stop.lat + ',' + stop.lng + ')">';
+                        html += '<div class="appt-name">' + (pinNum ? '<span class="sidebar-pin-num" style="background:' + badgeColor + '">' + pinNum + '</span>' : '') + displayName + '</div>';
+                        html += '<div class="appt-details">';
+                        if (stop.phone) html += '<span>' + stop.phone + '</span>';
+                        if (stop.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + stop.type + '</span>';
+                        if (stop.time) html += '<span>' + stop.time + '</span>';
+                        else if (stop.estimated_arrival) html += '<span>' + stop.estimated_arrival + '</span>';
+                        html += '<select class="sidebar-assign-select" onchange="previewReassign(' + stop.lead_id + ', ' + rep.id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
+                        html += '<option value="">Unassigned</option>';
+                        allReps.forEach(function(r) {
+                            html += '<option value="' + r.id + '"' + (r.id == rep.id ? ' selected' : '') + '>' + r.name + '</option>';
+                        });
+                        html += '</select>';
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                });
+
+                if (assignData.unassigned && assignData.unassigned.length > 0) {
+                    html += '<div class="sidebar-group">';
+                    html += '<div class="sidebar-group-title"><span class="rep-dot" style="background:#ccc"></span>Unassigned (' + assignData.unassigned.length + ')</div>';
+                    assignData.unassigned.forEach(function(lead) {
+                        var badgeColor = typeColorMap[lead.type] || '#999';
+                        var displayName = (lead.name || 'Unknown') + (lead.city ? ', ' + lead.city : '');
+                        var pinNum = leadMarkers[lead.lead_id] ? leadMarkers[lead.lead_id]._apptNum : '';
+                        html += '<div class="sidebar-row" data-lead-id="' + lead.lead_id + '" style="border-left-color:#ccc">';
+                        html += '<div class="appt-name">' + (pinNum ? '<span class="sidebar-pin-num" style="background:' + badgeColor + '">' + pinNum + '</span>' : '') + displayName + '</div>';
+                        html += '<div class="appt-details">';
+                        if (lead.phone) html += '<span>' + lead.phone + '</span>';
+                        if (lead.type) html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + lead.type + '</span>';
+                        if (lead.time) html += '<span>' + lead.time + '</span>';
+                        html += '<select class="sidebar-assign-select" onchange="previewAssignRep(' + lead.lead_id + ', this.value); event.stopPropagation();" onclick="event.stopPropagation();">';
+                        html += '<option value="" selected>Unassigned</option>';
+                        allReps.forEach(function(rep) {
+                            html += '<option value="' + rep.id + '">' + rep.name + '</option>';
+                        });
+                        html += '</select>';
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+            } else {
+                // Show leads from allLeads for this date
+                var dateVal = document.getElementById('route-date').value;
+                var dayLeads = allLeads.filter(function(lead) {
+                    if (!lead.appointment_datetime) return false;
+                    var parts = lead.appointment_datetime.split(' ');
+                    var dateParts = parts[0].split('/');
+                    var leadDate = dateParts[2] + '-' + dateParts[0].padStart(2, '0') + '-' + dateParts[1].padStart(2, '0');
+                    return leadDate === dateVal;
+                });
+
+                // Sort by time portion (extract HH:MM AM/PM and compare)
+                dayLeads.sort(function(a, b) {
+                    var dtA = a.appointment_datetime || '';
+                    var dtB = b.appointment_datetime || '';
+                    // Format is "MM/DD/YYYY HH:MM AM/PM" — parse to Date for proper sort
+                    var dA = dtA ? new Date(dtA) : new Date(0);
+                    var dB = dtB ? new Date(dtB) : new Date(0);
+                    return dA - dB;
+                });
+
+                if (dayLeads.length === 0) {
+                    html = '<div class="sidebar-empty">No appointments on this date</div>';
+                } else {
+                    html += '<div class="sidebar-group">';
+                    html += '<div class="sidebar-group-title">All Appointments (' + dayLeads.length + ')</div>';
+                    dayLeads.forEach(function(lead, idx) {
+                        var badgeColor = (!lead.appointment_type || !lead.appointment_format) ? '#ff69b4' : (typeColorMap[lead.appointment_type] || '#ff69b4');
+                        var displayName = (lead.homeowner_name || lead.address) + (lead.city ? ', ' + lead.city : '');
+                        var timeStr = '';
+                        if (lead.appointment_datetime) {
+                            var parts = lead.appointment_datetime.split(' ');
+                            if (parts.length >= 3) timeStr = parts[1] + ' ' + parts[2];
+                        }
+                        var rowStyle = lead.cancelled ? 'opacity:0.5;' : '';
+                        html += '<div class="sidebar-row" data-lead-id="' + lead.id + '"' + (lead.cancelled ? '' : ' onclick="panTo(' + lead.lat + ',' + lead.lng + ')"') + ' style="' + rowStyle + '">';
+                        html += '<div class="appt-name">' + displayName;
+                        if (lead.cancelled) html += ' <span style="background:#e74c3c;color:#fff;font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;margin-left:6px;letter-spacing:0.5px;">CANCELLED</span>';
+                        html += '</div>';
+                        html += '<div class="appt-details">';
+                        if (lead.phone_number) html += '<span>' + lead.phone_number + '</span>';
+                        var badgeLabel = lead.appointment_type || 'unknown';
+                        html += '<span class="appt-type-badge" style="background:' + badgeColor + '">' + badgeLabel + '</span>';
+                        if (timeStr) html += '<span>' + timeStr + '</span>';
+                        if (!lead.cancelled) {
+                            html += '<select class="sidebar-assign-select" onchange="handleSidebarSelect(' + lead.id + ', this); event.stopPropagation();" onclick="event.stopPropagation();">';
+                            html += '<option value=""' + (!lead.rep_id ? ' selected' : '') + '>Unassigned</option>';
+                            allReps.forEach(function(rep) {
+                                html += '<option value="' + rep.id + '"' + (lead.rep_id == rep.id ? ' selected' : '') + '>' + rep.name + '</option>';
+                            });
+                            html += '<option value="__no_coverage__" style="color:#c0392b;font-weight:600;">No Coverage</option>';
+                            html += '</select>';
+                        }
+                        html += '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+            }
+
+            container.innerHTML = html;
+
+            // Fetch time off for this date and append to sidebar
+            var dateVal = document.getElementById('route-date').value;
+            if (dateVal) {
+                fetch('/api/time-off/by-date/?date=' + dateVal)
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.time_off && data.time_off.length > 0) {
+                            var offHtml = '<div class="sidebar-group" style="margin-top:12px;">';
+                            offHtml += '<div class="sidebar-group-title" style="color:#e74c3c;"><span class="rep-dot" style="background:#e74c3c"></span>Reps Off (' + data.time_off.length + ')</div>';
+                            data.time_off.forEach(function(to) {
+                                var timeStr = to.all_day ? 'All Day' : to.start_time + ' — ' + to.end_time;
+                                offHtml += '<div class="sidebar-row" style="border-left-color:#e74c3c; opacity:0.8;">';
+                                offHtml += '<div class="appt-name">' + to.rep_name + '</div>';
+                                offHtml += '<div class="appt-details">';
+                                offHtml += '<span>' + timeStr + '</span>';
+                                if (to.reason) offHtml += '<span style="font-style:italic; color:#999;">' + to.reason + '</span>';
+                                offHtml += '</div></div>';
+                            });
+                            offHtml += '</div>';
+                            container.innerHTML += offHtml;
+                        }
+                    });
+            }
+        }
+
+        function highlightPin(leadId) {
+            var marker = leadMarkers[leadId];
+            if (!marker) return;
+            marker.setIcon(makePinIcon('#00e5ff', marker._apptNum));
+            var el = marker.getElement();
+            if (el) el.style.zIndex = '10000';
+        }
+        function unhighlightPin(leadId) {
+            var marker = leadMarkers[leadId];
+            if (!marker) return;
+            marker.setIcon(makePinIcon(marker._leadColor, marker._apptNum));
+            var el = marker.getElement();
+            if (el) el.style.zIndex = '';
+        }
+
+        var currentHighlight = null;
+        document.getElementById('sidebar-content').addEventListener('mouseover', function(e) {
+            var row = e.target.closest('.sidebar-row[data-lead-id]');
+            var leadId = row ? row.dataset.leadId : null;
+            if (leadId === currentHighlight) return;
+            if (currentHighlight) unhighlightPin(currentHighlight);
+            currentHighlight = leadId;
+            if (leadId) highlightPin(leadId);
+        });
+        document.getElementById('sidebar-content').addEventListener('mouseleave', function() {
+            if (currentHighlight) { unhighlightPin(currentHighlight); currentHighlight = null; }
+        });
+
+        function panTo(lat, lng) {
+            map.setView([lat, lng], 13);
+        }
+
+        function previewReassign(leadId, fromRepId, toRepId) {
+            if (!pendingAssignments) return;
+            // Remove lead from current rep's group
+            var lead = null;
+            pendingAssignments.assignments.forEach(function(group) {
+                if (group.rep.id == fromRepId) {
+                    group.stops = group.stops.filter(function(s) {
+                        if (s.lead_id === leadId) { lead = s; return false; }
+                        return true;
+                    });
+                }
+            });
+            // Remove empty groups
+            pendingAssignments.assignments = pendingAssignments.assignments.filter(function(g) {
+                return g.stops.length > 0;
+            });
+            if (!lead) return;
+            if (!toRepId) {
+                // Move to unassigned
+                if (!pendingAssignments.unassigned) pendingAssignments.unassigned = [];
+                pendingAssignments.unassigned.push(lead);
+            } else {
+                // Move to target rep
+                var found = false;
+                pendingAssignments.assignments.forEach(function(group) {
+                    if (group.rep.id == toRepId) {
+                        group.stops.push(lead);
+                        found = true;
+                    }
+                });
+                if (!found) {
+                    var repInfo = allReps.find(function(r) { return r.id == toRepId; });
+                    if (repInfo) {
+                        pendingAssignments.assignments.push({
+                            rep: { id: repInfo.id, name: repInfo.name, color: repInfo.color, lat: repInfo.lat, lng: repInfo.lng, home_address: repInfo.home_address },
+                            stops: [lead]
+                        });
+                    }
+                }
+            }
+            updateSidebar(pendingAssignments);
+        }
+
+        function previewAssignRep(leadId, repId) {
+            if (!pendingAssignments || !repId) return;
+            // Move lead from unassigned into the matching rep's assignment group
+            var lead = null;
+            pendingAssignments.unassigned = pendingAssignments.unassigned.filter(function(l) {
+                if (l.lead_id === leadId) { lead = l; return false; }
+                return true;
+            });
+            if (lead) {
+                var found = false;
+                pendingAssignments.assignments.forEach(function(group) {
+                    if (group.rep.id == repId) {
+                        group.stops.push(lead);
+                        found = true;
+                    }
+                });
+                if (!found) {
+                    // Rep not in assignments yet — find rep info and create group
+                    var repInfo = allReps.find(function(r) { return r.id == repId; });
+                    if (repInfo) {
+                        pendingAssignments.assignments.push({
+                            rep: { id: repInfo.id, name: repInfo.name, color: repInfo.color, lat: repInfo.lat, lng: repInfo.lng, home_address: repInfo.home_address },
+                            stops: [lead]
+                        });
+                    }
+                }
+                // Re-render sidebar with updated data
+                updateSidebar(pendingAssignments);
+            }
+        }
+
+        function assignRep(leadId, repId) {
+            fetch('/api/leads/' + leadId + '/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rep_id: repId })
+            }).then(function() {
+                allLeads.forEach(function(lead) {
+                    if (lead.id === leadId) {
+                        lead.rep_id = repId ? parseInt(repId) : null;
+                        var rep = allReps.find(function(r) { return r.id == repId; });
+                        lead.rep_name = rep ? rep.name : '';
+                    }
+                });
+            });
+        }
+
+        function handleSidebarSelect(leadId, selectEl) {
+            var val = selectEl.value;
+            if (val === '__no_coverage__') {
+                fetch('/api/leads/' + leadId + '/', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ disposition: 'no_coverage' })
+                }).then(function() {
+                    allLeads.forEach(function(lead) {
+                        if (lead.id === leadId) lead.disposition = 'no_coverage';
+                    });
+                    filterLeadsByDate();
+                    updateSidebar(null);
+                });
+            } else {
+                assignRep(leadId, val);
+            }
+        }
+
+        function autoAssign() {
+            var dateVal = document.getElementById('route-date').value;
+            if (!dateVal) { alert('Pick a date first'); return; }
+
+            var statusEl = document.getElementById('assign-status');
+            statusEl.textContent = 'Assigning...';
+
+            fetch('/api/auto-assign/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: dateVal })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    statusEl.textContent = 'Error: ' + data.error;
+                    return;
+                }
+                var s = data.summary;
+                statusEl.innerHTML = '<strong>' + s.assigned + '/' + s.total_leads +
+                    '</strong> assigned to <strong>' + s.reps_used + '</strong> rep(s)';
+                if (s.unassigned > 0) {
+                    statusEl.innerHTML += '<br><span style="color:#e74c3c;">' +
+                        s.unassigned + ' unassigned</span>';
+                }
+                statusEl.innerHTML += '<br><em style="font-size:10px;">Preview — click Confirm to save</em>';
+
+                // Store pending assignments for confirm
+                pendingAssignments = data;
+
+                // Show confirm/redo buttons
+                document.getElementById('confirm-bar').classList.add('show');
+
+                // Show routes preview on map
+                renderPreviewRoutes(data);
+
+                // Update sidebar with proposed assignments
+                updateSidebar(data);
+                openSidebar();
+            });
+        }
+
+        function renderPreviewRoutes(data) {
+            routeLayer.clearLayers();
+
+            var allPoints = [];
+            var typeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+
+            data.assignments.forEach(function(assignment) {
+                var rep = assignment.rep;
+                var repColor = rep.color || '#2980b9';
+                var points = [];
+
+                if (rep.lat && rep.lng) {
+                    var homeIcon = L.divIcon({
+                        className: 'route-marker',
+                        html: '<div style="background:' + repColor + ';width:28px;height:28px;border-radius:50%;border:3px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;box-shadow:0 0 6px rgba(0,0,0,0.4);">&#9733;</div>',
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    });
+                    L.marker([rep.lat, rep.lng], { icon: homeIcon })
+                        .bindPopup('<strong>' + rep.name + ' (Home)</strong><br>' + rep.home_address)
+                        .addTo(routeLayer);
+                    points.push([rep.lat, rep.lng]);
+                }
+
+                assignment.stops.forEach(function(stop, i) {
+                    var pinColor = typeColors[stop.type] || repColor;
+                    var stopIcon = L.divIcon({
+                        className: 'route-marker',
+                        html: '<div style="background:' + pinColor + ';width:24px;height:24px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px;box-shadow:0 0 6px rgba(0,0,0,0.4);">' + (i + 1) + '</div>',
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    });
+                    var typeLabel = stop.type ? stop.type.charAt(0).toUpperCase() + stop.type.slice(1) : '';
+                    L.marker([stop.lat, stop.lng], { icon: stopIcon })
+                        .bindPopup(
+                            '<strong>' + rep.name + ' #' + (i + 1) + ': ' + stop.name + '</strong><br>' +
+                            stop.address + (stop.city ? ', ' + stop.city : '') + '<br>' +
+                            (typeLabel ? '<em>' + typeLabel + '</em> &mdash; ' : '') +
+                            '<em>' + stop.estimated_arrival + '</em>'
+                        )
+                        .addTo(routeLayer);
+                    points.push([stop.lat, stop.lng]);
+                });
+
+                if (points.length >= 2) {
+                    L.polyline(points, {
+                        color: repColor, weight: 4, opacity: 0.8, dashArray: '10, 8'
+                    }).addTo(routeLayer);
+                }
+                allPoints = allPoints.concat(points);
+            });
+
+            if (allPoints.length >= 2) {
+                map.fitBounds(L.latLngBounds(allPoints), { padding: [50, 50] });
+            }
+        }
+
+        function confirmAssignments() {
+            if (!pendingAssignments) return;
+
+            // Build lead_id -> rep_id mapping
+            var mapping = {};
+            pendingAssignments.assignments.forEach(function(group) {
+                group.stops.forEach(function(stop) {
+                    mapping[stop.lead_id] = group.rep.id;
+                });
+            });
+
+            fetch('/api/confirm-assignments/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assignments: mapping })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                document.getElementById('assign-status').innerHTML =
+                    '<strong style="color:#27ae60;">Confirmed!</strong> ' + data.confirmed + ' appointments saved';
+                document.getElementById('confirm-bar').classList.remove('show');
+                // Keep routes on map — they're already rendered and match the saved assignments
+                pendingAssignments = null;
+                // Refresh leads data (sidebar will update but routes stay)
+                fetchLeads();
+            });
+        }
+
+        function redoAssignments() {
+            pendingAssignments = null;
+            document.getElementById('confirm-bar').classList.remove('show');
+            document.getElementById('assign-status').textContent = '';
+            clearRoute();
+            updateSidebar(null);
+        }
+
+        function sendTextBlast() {
+            var btn = document.getElementById('textblast-btn');
+            var status = document.getElementById('textblast-status');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            status.textContent = '';
+            var dateInput = document.getElementById('route-date');
+            var date = dateInput ? dateInput.value : '';
+            fetch('/api/textblast/send/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: date })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                btn.disabled = false;
+                btn.textContent = 'Send TextBlast';
+                if (data.error) {
+                    status.innerHTML = '<span style="color:#e74c3c;">' + data.error + '</span>';
+                } else {
+                    var msg = 'Sent to ' + data.reps_notified + '/' + (data.reps_tried ? data.reps_tried.length : '?') + ' reps (' + data.leads_blasted + ' appts)';
+                    if (data.reps_tried) msg += '<br><small>Tried: ' + data.reps_tried.join(', ') + '</small>';
+                    if (data.sms_errors && data.sms_errors.length) msg += '<br><small style="color:#e74c3c;">Errors: ' + data.sms_errors.join('; ') + '</small>';
+                    status.innerHTML = '<span style="color:#27ae60;">' + msg + '</span>';
+                }
+            })
+            .catch(function() {
+                btn.disabled = false;
+                btn.textContent = 'Send TextBlast';
+                status.innerHTML = '<span style="color:#e74c3c;">Failed to send</span>';
+            });
+        }
+
+        function clearAssignments() {
+            var dateVal = document.getElementById('route-date').value;
+            if (!dateVal) { alert('Pick a date first'); return; }
+            if (!confirm('Clear all assignments for ' + dateVal + '?')) return;
+
+            fetch('/api/clear-assignments/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: dateVal })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function() {
+                document.getElementById('assign-status').textContent = 'Assignments cleared';
+                document.getElementById('confirm-bar').classList.remove('show');
+                pendingAssignments = null;
+                clearRoute();
+                fetchLeads();
+                updateSidebar(null);
+            });
+        }
+
+        function clearRoute() {
+            routeLayer.clearLayers();
+        }
+
+        // Disable sidebar rep dropdowns for non-managers
+        if (!IS_MANAGER) {
+            var observer = new MutationObserver(function() {
+                document.querySelectorAll('.sidebar-assign-select').forEach(function(s) {
+                    s.disabled = true;
+                    s.style.opacity = '0.7';
+                });
+            });
+            observer.observe(document.getElementById('sidebar-content'), { childList: true, subtree: true });
+        }
+    </script>
+{% endblock %}
