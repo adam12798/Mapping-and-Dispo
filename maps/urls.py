@@ -5,6 +5,7 @@ from . import voice
 urlpatterns = [
     path('privacy/', views.privacy_view, name='privacy'),
     path('terms/', views.terms_view, name='terms'),
+    path('sms-consent/', views.sms_consent_view, name='sms_consent'),
     path('login/', views.login_view, name='login'),
     path('logout/', views.logout_view, name='logout'),
     path('', views.index, name='index'),

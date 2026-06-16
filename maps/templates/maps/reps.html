@@ -21,6 +21,7 @@
                 <tr>
                     <th class="checkbox-col"><input type="checkbox" id="select-all"></th>
                     <th>Name</th>
+                    <th>SMS Consent</th>
                     <th>TextBlast</th>
                     <th>Phone Number</th>
                     <th>Home Address</th>
@@ -37,6 +38,7 @@
                 <tr data-id="{{ rep.id }}">
                     <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
                     <td data-label="Name"><input type="text" class="crm-input" data-field="name" value="{{ rep.name }}"></td>
+                    <td data-label="SMS Consent"><label class="tb-toggle"><input type="checkbox" data-field="sms_consent" {% if rep.sms_consent %}checked{% endif %} onchange="toggleSmsConsent(this)"><span class="tb-slider"></span></label></td>
                     <td data-label="TextBlast"><label class="tb-toggle"><input type="checkbox" data-field="textblast_eligible" {% if rep.textblast_eligible %}checked{% endif %} onchange="toggleTextblast(this)"><span class="tb-slider"></span></label></td>
                     <td data-label="Phone"><input type="text" class="crm-input" data-field="phone_number" value="{{ rep.phone_number }}"></td>
                     <td data-label="Address"><input type="text" class="crm-input" data-field="home_address" value="{{ rep.home_address }}"{% if not rep.latitude and rep.home_address %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this rep won't receive auto-assigned appointments"{% endif %}></td>
@@ -70,6 +72,7 @@
                 <tr data-id="{{ rep.id }}" class="inactive-row">
                     <td class="checkbox-col"><input type="checkbox" class="row-select"></td>
                     <td data-label="Name"><input type="text" class="crm-input" data-field="name" value="{{ rep.name }}"></td>
+                    <td data-label="SMS Consent"><label class="tb-toggle"><input type="checkbox" data-field="sms_consent" {% if rep.sms_consent %}checked{% endif %} onchange="toggleSmsConsent(this)"><span class="tb-slider"></span></label></td>
                     <td data-label="TextBlast"><label class="tb-toggle"><input type="checkbox" data-field="textblast_eligible" {% if rep.textblast_eligible %}checked{% endif %} onchange="toggleTextblast(this)"><span class="tb-slider"></span></label></td>
                     <td data-label="Phone"><input type="text" class="crm-input" data-field="phone_number" value="{{ rep.phone_number }}"></td>
                     <td data-label="Address"><input type="text" class="crm-input" data-field="home_address" value="{{ rep.home_address }}"{% if not rep.latitude and rep.home_address %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this rep won't receive auto-assigned appointments"{% endif %}></td>
@@ -117,6 +120,7 @@
             row.innerHTML =
                 '<td class="checkbox-col"></td>' +
                 '<td><input type="text" class="crm-input" id="new-name" placeholder="Name"></td>' +
+                '<td><label class="tb-toggle"><input type="checkbox" id="new-sms-consent" checked><span class="tb-slider"></span></label></td>' +
                 '<td><label class="tb-toggle"><input type="checkbox" id="new-textblast"><span class="tb-slider"></span></label></td>' +
                 '<td><input type="text" class="crm-input" id="new-phone" placeholder="Phone"></td>' +
                 '<td><input type="text" class="crm-input" id="new-address" placeholder="Home Address"></td>' +
@@ -154,6 +158,7 @@
             data.rating = parseInt(ratingDiv.dataset.rating) || 0;
             data.color = document.getElementById('new-color').value;
             data.textblast_eligible = document.getElementById('new-textblast').checked;
+            data.sms_consent = document.getElementById('new-sms-consent').checked;
             if (!data.name) { alert('Name is required'); return; }
             fetch('/api/reps/', {
                 method: 'POST',
@@ -166,6 +171,12 @@
                   }
                   location.reload();
               });
+        }
+
+        function toggleSmsConsent(checkbox) {
+            var row = checkbox.closest('tr');
+            var repId = row.dataset.id;
+            saveField(repId, 'sms_consent', checkbox.checked, checkbox);
         }
 
         function toggleTextblast(checkbox) {

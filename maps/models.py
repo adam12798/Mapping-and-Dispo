@@ -81,6 +81,8 @@ class Rep(models.Model):
     color = models.CharField(max_length=7, default='#2980b9')
     is_active = models.BooleanField(default=True)
     textblast_eligible = models.BooleanField(default=False)
+    sms_consent = models.BooleanField(default=False)
+    sms_consent_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.name

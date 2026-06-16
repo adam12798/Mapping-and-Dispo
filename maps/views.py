@@ -213,6 +213,10 @@ def terms_view(request):
     return render(request, 'maps/terms.html')
 
 
+def sms_consent_view(request):
+    return render(request, 'maps/sms_consent.html')
+
+
 @login_required
 def leads_api(request):
     """Return all leads as JSON for the map to plot."""
@@ -748,6 +752,7 @@ def rep_create(request):
     else:
         color = data['color']
 
+    sms_consent = data.get('sms_consent', False)
     rep = Rep.objects.create(
         name=data.get('name', ''),
         phone_number=data.get('phone_number', ''),
@@ -758,7 +763,14 @@ def rep_create(request):
         specialty=data.get('specialty', ''),
         color=color,
         textblast_eligible=data.get('textblast_eligible', False),
+        sms_consent=sms_consent,
+        sms_consent_at=datetime.now() if sms_consent else None,
     )
+    if sms_consent and rep.phone_number:
+        send_sms(rep.phone_number,
+            'Sutton by Iceberg Home Solutions: You\'re now subscribed to appointment updates. '
+            'Msg frequency varies. Msg&Data rates may apply. '
+            'Reply HELP for help, STOP to cancel.')
     response = {'status': 'ok', 'id': rep.id}
     if geocode_failed:
         response['geocode_failed'] = True
@@ -777,10 +789,18 @@ def rep_update(request, pk):
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     rep = get_object_or_404(Rep, pk=pk)
     data = json.loads(request.body)
-    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty', 'rating', 'color', 'is_active', 'textblast_eligible']
+    had_consent = rep.sms_consent
+    allowed_fields = ['name', 'phone_number', 'home_address', 'city', 'specialty', 'rating', 'color', 'is_active', 'textblast_eligible', 'sms_consent']
     for field in allowed_fields:
         if field in data:
             setattr(rep, field, data[field])
+    if 'sms_consent' in data and data['sms_consent'] and not had_consent:
+        rep.sms_consent_at = datetime.now()
+        if rep.phone_number:
+            send_sms(rep.phone_number,
+                'Sutton by Iceberg Home Solutions: You\'re now subscribed to appointment updates. '
+                'Msg frequency varies. Msg&Data rates may apply. '
+                'Reply HELP for help, STOP to cancel.')
     # Re-geocode if address or city changed
     geocode_failed = False
     if 'home_address' in data or 'city' in data:
