@@ -2313,6 +2313,160 @@ def sms_webhook(request):
             content_type='text/xml',
         )
 
+    # Check for APPOINTMENT RESCHEDULED / SCHEDULED / UPDATED format from GHL
+    if body:
+        body_upper = body.upper()
+        is_ghl_appt = any(kw in body_upper for kw in (
+            'APPOINTMENT RESCHEDULED', 'APPOINTMENT SCHEDULED',
+            'APPOINTMENT UPDATED', 'NEW APPOINTMENT',
+        ))
+        if is_ghl_appt:
+            ghl_fields = {}
+            for line in body.splitlines():
+                line = line.strip()
+                if ':' not in line:
+                    continue
+                key, val = line.split(':', 1)
+                key = key.strip().lower()
+                val = val.strip()
+                if 'name' in key:
+                    ghl_fields['name'] = val
+                elif 'phone' in key:
+                    ghl_fields['phone'] = val
+                elif 'address' in key:
+                    ghl_fields['address'] = val
+                elif 'city' in key:
+                    ghl_fields['city'] = val
+                elif 'state' in key:
+                    ghl_fields['state'] = val
+                elif 'day and time' in key or ('date' in key and 'time' in key) or key == 'time' or key == 'date':
+                    ghl_fields['datetime'] = val
+                elif 'type' in key or 'product' in key:
+                    ghl_fields['type'] = val
+                elif 'format' in key or 'meeting' in key:
+                    ghl_fields['format'] = val
+                elif 'source' in key:
+                    ghl_fields['source'] = val
+                elif 'notes' in key:
+                    ghl_fields['notes'] = val
+
+            name = ghl_fields.get('name', '')
+            phone = ghl_fields.get('phone', '')
+            address = ghl_fields.get('address', '')
+            lead = None
+            if name and phone:
+                lead = Lead.objects.filter(
+                    homeowner_name__iexact=name,
+                    phone_number__icontains=phone[-10:]
+                ).order_by('-created_at').first()
+            if not lead and name and address:
+                lead = Lead.objects.filter(
+                    homeowner_name__iexact=name,
+                    address__icontains=address
+                ).order_by('-created_at').first()
+            if not lead and name:
+                lead = Lead.objects.filter(
+                    homeowner_name__iexact=name
+                ).order_by('-created_at').first()
+            if not lead and phone:
+                lead = Lead.objects.filter(
+                    phone_number__icontains=phone[-10:]
+                ).order_by('-created_at').first()
+
+            appt_datetime = None
+            raw_dt = ghl_fields.get('datetime', '')
+            if raw_dt:
+                try:
+                    import zoneinfo
+                    eastern = zoneinfo.ZoneInfo('America/New_York')
+                    appt_datetime = dateparser.parse(raw_dt, fuzzy=True)
+                    if appt_datetime and appt_datetime.tzinfo is None:
+                        appt_datetime = appt_datetime.replace(tzinfo=eastern)
+                except (ValueError, OverflowError):
+                    pass
+
+            if lead:
+                changes = []
+                if address and address != lead.address:
+                    lead.address = address
+                    changes.append(f"Address: → {address}")
+                if ghl_fields.get('city') and ghl_fields['city'] != lead.city:
+                    lead.city = ghl_fields['city']
+                    changes.append(f"City: → {ghl_fields['city']}")
+                if ghl_fields.get('state') and ghl_fields['state'] != lead.state:
+                    lead.state = ghl_fields['state']
+                if phone and phone != lead.phone_number:
+                    lead.phone_number = phone
+                    changes.append(f"Phone: → {phone}")
+                if appt_datetime:
+                    old_dt = lead.appointment_datetime
+                    lead.appointment_datetime = appt_datetime
+                    import zoneinfo
+                    eastern = zoneinfo.ZoneInfo('America/New_York')
+                    new_str = appt_datetime.astimezone(eastern).strftime('%m/%d/%Y at %I:%M %p')
+                    changes.append(f"Rescheduled to {new_str}")
+                if ghl_fields.get('type'):
+                    lead.appointment_type = normalize_type(ghl_fields['type'])
+                if ghl_fields.get('format'):
+                    lead.appointment_format = normalize_format(ghl_fields['format'])
+                if ghl_fields.get('source') and not lead.source:
+                    lead.source = ghl_fields['source']
+                if ghl_fields.get('notes'):
+                    lead.appt_notes = ghl_fields['notes']
+                if lead.cancelled and appt_datetime:
+                    lead.cancelled = False
+                    changes.append('Cancelled → Rescheduled')
+                if address or ghl_fields.get('city'):
+                    geocode_address = lead.address
+                    if lead.city:
+                        geocode_address = f"{lead.address}, {lead.city}, MA"
+                    lead.latitude, lead.longitude = geocode(geocode_address) if lead.address else (None, None)
+                lead.raw_message = body
+                lead.save()
+                LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+                if changes:
+                    system_user = User.objects.filter(is_superuser=True).first()
+                    if system_user:
+                        LeadUpdate.objects.create(lead=lead, user=system_user, text='GHL update:\n' + '\n'.join(changes))
+            else:
+                # No existing lead found — create new one with properly parsed fields
+                geocode_address = address
+                city = ghl_fields.get('city', '')
+                if city:
+                    geocode_address = f"{address}, {city}, MA"
+                lat, lng = geocode(geocode_address) if address else (None, None)
+                appt_type = normalize_type(ghl_fields.get('type', ''))
+                tags = ''
+                if appt_type == 'solar':
+                    tags = 'Solar'
+                elif appt_type == 'hvac':
+                    tags = 'Hvac'
+                elif appt_type == 'both':
+                    tags = 'Solar,Hvac'
+                Lead.objects.create(
+                    address=address,
+                    city=city,
+                    state=ghl_fields.get('state', ''),
+                    latitude=lat,
+                    longitude=lng,
+                    from_number=from_number,
+                    homeowner_name=name,
+                    phone_number=phone,
+                    source=ghl_fields.get('source', ''),
+                    tags=tags,
+                    appointment_type=appt_type,
+                    appointment_format=normalize_format(ghl_fields.get('format', '')),
+                    appointment_datetime=appt_datetime,
+                    appt_notes=ghl_fields.get('notes', ''),
+                    raw_message=body,
+                )
+                LeadMessage.objects.create(lead=Lead.objects.latest('id'), phone_number=from_number, direction='inbound', body=body)
+
+            return HttpResponse(
+                '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                content_type='text/xml',
+            )
+
     # Check if sender is a rep
     rep = Rep.objects.filter(phone_number__icontains=from_number[-10:]).first() if from_number else None
 
