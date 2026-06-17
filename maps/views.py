@@ -2364,10 +2364,6 @@ def sms_webhook(request):
                     homeowner_name__iexact=name,
                     address__icontains=address
                 ).order_by('-created_at').first()
-            if not lead and name:
-                lead = Lead.objects.filter(
-                    homeowner_name__iexact=name
-                ).order_by('-created_at').first()
             if not lead and phone:
                 lead = Lead.objects.filter(
                     phone_number__icontains=phone[-10:]
