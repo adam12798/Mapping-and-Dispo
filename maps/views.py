@@ -2532,8 +2532,14 @@ def sms_webhook(request):
         if body:
             fields = parse_sms_fields(body)
 
-            # If structured fields found, use them; otherwise treat whole body as address
-            address = fields.get('address', body if not fields else '')
+            # Only process as a lead if we got structured fields with at least a name or address
+            if not fields or not (fields.get('name') or fields.get('address')):
+                return HttpResponse(
+                    '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                    content_type='text/xml',
+                )
+
+            address = fields.get('address', '')
             city = fields.get('city', '')
 
             # Build full address for geocoding
@@ -2651,13 +2657,8 @@ def sms_webhook(request):
                 )
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
     except Exception:
-        # Always save the lead even if parsing fails
-        lead = Lead.objects.create(
-            address=body,
-            from_number=from_number,
-            raw_message=body,
-        )
-        LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+        import logging
+        logging.getLogger('sms_webhook').exception(f'SMS parse error from {from_number}')
 
     # Return empty TwiML response
     return HttpResponse(
