@@ -2316,10 +2316,12 @@ def sms_webhook(request):
     # Check for APPOINTMENT RESCHEDULED / SCHEDULED / UPDATED format from GHL
     if body:
         body_upper = body.upper()
-        is_ghl_appt = any(kw in body_upper for kw in (
+        is_ghl_reschedule = any(kw in body_upper for kw in (
             'APPOINTMENT RESCHEDULED', 'APPOINTMENT SCHEDULED',
-            'APPOINTMENT UPDATED', 'NEW APPOINTMENT',
+            'NEW APPOINTMENT',
         ))
+        is_ghl_update = 'APPOINTMENT UPDATED' in body_upper
+        is_ghl_appt = is_ghl_reschedule or is_ghl_update
         if is_ghl_appt:
             ghl_fields = {}
             for line in body.splitlines():
@@ -2394,7 +2396,7 @@ def sms_webhook(request):
                 if phone and phone != lead.phone_number:
                     lead.phone_number = phone
                     changes.append(f"Phone: → {phone}")
-                if appt_datetime:
+                if appt_datetime and is_ghl_reschedule:
                     old_dt = lead.appointment_datetime
                     lead.appointment_datetime = appt_datetime
                     import zoneinfo
