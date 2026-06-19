@@ -1702,7 +1702,7 @@ def apply_manager_sms_update(lead, parsed):
 
     if action == 'assign' and parsed.get('rep_name'):
         rep_name = parsed['rep_name']
-        rep = Rep.objects.filter(name__icontains=rep_name, active=True).first()
+        rep = Rep.objects.filter(name__icontains=rep_name, is_active=True).first()
         if rep:
             lead.rep = rep
             changes.append(f"Assigned to {rep.name}")
@@ -2170,7 +2170,7 @@ def sms_webhook(request):
                         for p in pending:
                             time_str = 'All Day' if not p.start_time else f'{p.start_time:%I:%M %p}-{p.end_time:%I:%M %p}'
                             date_str = f'{p.start_date:%m/%d/%Y}' if not p.end_date or p.end_date == p.start_date else f'{p.start_date:%m/%d/%Y}-{p.end_date:%m/%d/%Y}'
-                        lines.append(f'  #{p.id} — {p.rep.name} {date_str} {time_str}')
+                            lines.append(f'  #{p.id} — {p.rep.name} {date_str} {time_str}')
                         send_sms(from_number, '\n'.join(lines))
                     else:
                         send_sms(from_number, 'No pending time off requests.')
@@ -2403,13 +2403,13 @@ def sms_webhook(request):
                     eastern = zoneinfo.ZoneInfo('America/New_York')
                     new_str = appt_datetime.astimezone(eastern).strftime('%m/%d/%Y at %I:%M %p')
                     changes.append(f"Rescheduled to {new_str}")
-                if ghl_fields.get('type'):
+                if ghl_fields.get('type') and not lead.appointment_type:
                     lead.appointment_type = normalize_type(ghl_fields['type'])
-                if ghl_fields.get('format'):
+                if ghl_fields.get('format') and not lead.appointment_format:
                     lead.appointment_format = normalize_format(ghl_fields['format'])
                 if ghl_fields.get('source') and not lead.source:
                     lead.source = ghl_fields['source']
-                if ghl_fields.get('notes'):
+                if ghl_fields.get('notes') and not lead.appt_notes:
                     lead.appt_notes = ghl_fields['notes']
                 if lead.cancelled and appt_datetime:
                     lead.cancelled = False
@@ -2441,7 +2441,7 @@ def sms_webhook(request):
                     tags = 'Hvac'
                 elif appt_type == 'both':
                     tags = 'Solar,Hvac'
-                Lead.objects.create(
+                new_lead = Lead.objects.create(
                     address=address,
                     city=city,
                     state=ghl_fields.get('state', ''),
@@ -2458,7 +2458,7 @@ def sms_webhook(request):
                     appt_notes=ghl_fields.get('notes', ''),
                     raw_message=body,
                 )
-                LeadMessage.objects.create(lead=Lead.objects.latest('id'), phone_number=from_number, direction='inbound', body=body)
+                LeadMessage.objects.create(lead=new_lead, phone_number=from_number, direction='inbound', body=body)
 
             return HttpResponse(
                 '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
