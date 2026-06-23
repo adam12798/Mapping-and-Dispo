@@ -3395,9 +3395,19 @@ def _ghl_log_changes(lead, changes):
 
 def _ghl_log_inbound(webhook_type, request, lead=None, lead_name='', success=True, error_message='', response_status=200):
     try:
-        payload = request.body.decode('utf-8', errors='replace')[:5000]
+        raw = request.body.decode('utf-8', errors='replace')
+        payload = raw[:10000]
     except Exception:
         payload = ''
+    try:
+        keys = list(json.loads(request.body).keys())
+        key_info = f"Keys: {keys}"
+    except Exception:
+        key_info = ''
+    if error_message and key_info:
+        error_message = f"{error_message}\n{key_info}"
+    elif key_info:
+        error_message = key_info
     GHLWebhookLog.objects.create(
         direction='inbound',
         webhook_type=webhook_type,
@@ -3414,27 +3424,36 @@ def _ghl_log_inbound(webhook_type, request, lead=None, lead_name='', success=Tru
 
 def _ghl_normalize_data(data):
     """Map GHL's field names to our expected names.
-    GHL sends: Name, Phone, Address, City, State, Day and Time,
-    Meeting Type, Product Type, Source, Notes (capitalized with spaces).
+    Uses case-insensitive lookup and tries multiple key variations.
     """
-    def g(*keys):
-        for k in keys:
-            v = data.get(k, '')
+    lower_map = {}
+    for k, v in data.items():
+        lk = k.lower().replace(' ', '_').replace('-', '_')
+        if v and (lk not in lower_map or not lower_map[lk]):
+            lower_map[lk] = v
+
+    def g(*aliases):
+        for alias in aliases:
+            v = lower_map.get(alias, '')
             if v:
                 return v
         return ''
+
+    _ghl_logger.info(f"GHL payload keys: {list(data.keys())}")
+    _ghl_logger.info(f"GHL normalized keys: {list(lower_map.keys())}")
+
     return {
-        'name': g('name', 'Name'),
-        'phone': g('phone', 'Phone'),
-        'address': g('address', 'Address', 'full_address'),
-        'city': g('city', 'City'),
-        'state': g('state', 'State'),
-        'appointment_datetime': g('appointment_datetime', 'Day and Time', 'appointment_start_time', 'day_and_time'),
-        'appointment_type': g('appointment_type', 'Product Type', 'product_type'),
-        'appointment_format': g('appointment_format', 'Meeting Type', 'In Person or Virtual', 'meeting_type'),
-        'source': g('source', 'Source'),
-        'notes': g('notes', 'Notes'),
-        'disposition': g('disposition', 'Disposition'),
+        'name': g('name', 'full_name', 'contact_name', 'contactname', 'first_name'),
+        'phone': g('phone', 'phone_number', 'contact_phone'),
+        'address': g('address', 'full_address', 'street_address', 'street'),
+        'city': g('city', 'contact_city'),
+        'state': g('state', 'contact_state'),
+        'appointment_datetime': g('day_and_time', 'appointment_datetime', 'appointment_start_time', 'start_time', 'starttime', 'appointment_time', 'date_and_time'),
+        'appointment_type': g('product_type', 'appointment_type', 'producttype', 'type'),
+        'appointment_format': g('meeting_type', 'appointment_format', 'in_person_or_virtual', 'meetingtype', 'format'),
+        'source': g('source', 'lead_source', 'leadsource', 'contact_source'),
+        'notes': g('notes', 'hvac_notes', 'contact_notes', 'appt_notes'),
+        'disposition': g('disposition', 'status', 'lead_status'),
     }
 
 
