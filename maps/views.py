@@ -423,7 +423,7 @@ def daily_view(request):
 def lead_update(request, pk):
     """Update or delete a lead's CRM fields."""
     is_mgr = getattr(request.user, 'profile', None) and request.user.profile.is_manager
-    REP_EDITABLE_FIELDS = {'disposition', 'sat', 'call_notes', 'appt_notes', 'follow_up_date'}
+    REP_EDITABLE_FIELDS = {'disposition', 'sat', 'call_notes', 'appt_notes', 'follow_up_date', 'follow_up_time', 'monthly_cost', 'total_cost', 'adders', 'post_appt_notes'}
     if not is_mgr:
         user_rep = get_user_rep(request.user)
         if not user_rep:
@@ -449,7 +449,8 @@ def lead_update(request, pk):
     allowed_fields = [
         'homeowner_name', 'phone_number', 'address', 'city', 'state',
         'source', 'tags', 'appointment_type', 'appointment_format', 'appointment_datetime',
-        'disposition', 'sat', 'follow_up_date', 'call_notes', 'appt_notes', 'call_transcript',
+        'disposition', 'sat', 'follow_up_date', 'follow_up_time', 'call_notes', 'appt_notes', 'call_transcript',
+        'monthly_cost', 'total_cost', 'adders', 'post_appt_notes',
     ]
     FIELD_LABELS = {
         'homeowner_name': 'Name', 'phone_number': 'Phone', 'address': 'Address',
@@ -457,7 +458,10 @@ def lead_update(request, pk):
         'appointment_type': 'Appt Type',
         'appointment_format': 'Appt Format', 'appointment_datetime': 'Appt Time',
         'disposition': 'Disposition', 'sat': 'Sit', 'follow_up_date': 'Follow Up Date',
-        'call_notes': 'Call Notes', 'appt_notes': 'Appt Notes', 'call_transcript': 'Transcript', 'rep_id': 'Rep',
+        'follow_up_time': 'Follow Up Time', 'call_notes': 'Call Notes', 'appt_notes': 'Appt Notes',
+        'call_transcript': 'Transcript', 'rep_id': 'Rep',
+        'monthly_cost': 'Monthly Cost', 'total_cost': 'Total Cost', 'adders': 'Adders',
+        'post_appt_notes': 'Post-Appt Notes',
     }
     VALUE_LABELS = {
         'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
@@ -479,7 +483,7 @@ def lead_update(request, pk):
         if field in data:
             old_value = getattr(lead, field)
             value = data[field]
-            if field in ('appointment_datetime', 'follow_up_date') and value == '':
+            if field in ('appointment_datetime', 'follow_up_date', 'follow_up_time') and value == '':
                 value = None
             if field == 'sat':
                 value = {'true': True, 'false': False, 'yes': True, 'no': False}.get(str(value).lower().strip()) if value != '' else None
@@ -2937,8 +2941,13 @@ def provider_crm_api(request):
             'sat': lead.sat,
             'disposition': lead.disposition,
             'follow_up_date': lead.follow_up_date.isoformat() if lead.follow_up_date else '',
+            'follow_up_time': lead.follow_up_time.strftime('%H:%M') if lead.follow_up_time else '',
             'call_notes': lead.call_notes,
             'appt_notes': lead.appt_notes,
+            'monthly_cost': lead.monthly_cost,
+            'total_cost': lead.total_cost,
+            'adders': lead.adders,
+            'post_appt_notes': lead.post_appt_notes,
         }
         if search:
             haystack = (row['homeowner_name'] + row['phone_number'] + row['address'] + row['city']).lower()
@@ -3078,8 +3087,13 @@ def v1_leads_list(request):
             'disposition': lead.disposition,
             'sat': lead.sat,
             'follow_up_date': lead.follow_up_date.isoformat() if lead.follow_up_date else None,
+            'follow_up_time': lead.follow_up_time.strftime('%H:%M') if lead.follow_up_time else None,
             'call_notes': lead.call_notes,
             'appt_notes': lead.appt_notes,
+            'monthly_cost': lead.monthly_cost,
+            'total_cost': lead.total_cost,
+            'adders': lead.adders,
+            'post_appt_notes': lead.post_appt_notes,
             'cancelled': lead.cancelled,
             'created_at': lead.created_at.astimezone(eastern).isoformat(),
         })
@@ -3113,8 +3127,13 @@ def v1_lead_detail(request, pk):
             'disposition': lead.disposition,
             'sat': lead.sat,
             'follow_up_date': lead.follow_up_date.isoformat() if lead.follow_up_date else None,
+            'follow_up_time': lead.follow_up_time.strftime('%H:%M') if lead.follow_up_time else None,
             'call_notes': lead.call_notes,
             'appt_notes': lead.appt_notes,
+            'monthly_cost': lead.monthly_cost,
+            'total_cost': lead.total_cost,
+            'adders': lead.adders,
+            'post_appt_notes': lead.post_appt_notes,
             'call_transcript': lead.call_transcript,
             'cancelled': lead.cancelled,
             'created_at': lead.created_at.astimezone(eastern).isoformat(),
@@ -3127,13 +3146,14 @@ def v1_lead_detail(request, pk):
         allowed = [
             'homeowner_name', 'phone_number', 'address', 'city', 'state',
             'source', 'tags', 'appointment_type', 'appointment_format',
-            'appointment_datetime', 'disposition', 'sat', 'follow_up_date',
+            'appointment_datetime', 'disposition', 'sat', 'follow_up_date', 'follow_up_time',
             'call_notes', 'appt_notes', 'call_transcript', 'cancelled',
+            'monthly_cost', 'total_cost', 'adders', 'post_appt_notes',
         ]
         for field in allowed:
             if field in data:
                 value = data[field]
-                if field in ('appointment_datetime', 'follow_up_date') and value == '':
+                if field in ('appointment_datetime', 'follow_up_date', 'follow_up_time') and value == '':
                     value = None
                 if field == 'sat':
                     value = {'true': True, 'false': False}.get(str(value).lower().strip()) if value != '' else None

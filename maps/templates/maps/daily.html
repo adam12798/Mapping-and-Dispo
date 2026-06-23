@@ -375,7 +375,8 @@
                     <th class="sortable" onclick="sortTable(14)">Follow Up Date <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(15)">Call Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th class="sortable" onclick="sortTable(16)">Appt Notes <span class="sort-arrow"></span><div class="col-resize"></div></th>
-                    <th class="sortable" onclick="sortTable(17)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
+                    <th>Deal Info</th>
+                    <th class="sortable" onclick="sortTable(18)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th style="width:40px;text-align:center;">Updates</th>
                     <th style="width:40px;text-align:center;">SMS</th>
                     <th class="action-col"></th>
@@ -455,9 +456,21 @@
                             <option value="no_show" {% if lead.disposition == "no_show" %}selected{% endif %}>No Show</option>
                         </select>
                     </td>
-                    <td data-label="Follow Up"><input type="date" class="crm-input" data-field="follow_up_date" value="{{ lead.follow_up_date|date:'Y-m-d'|default:'' }}"></td>
+                    <td data-label="Follow Up">
+                        <input type="date" class="crm-input" data-field="follow_up_date" value="{{ lead.follow_up_date|date:'Y-m-d'|default:'' }}" style="width:120px;">
+                        <input type="time" class="crm-input" data-field="follow_up_time" value="{{ lead.follow_up_time|time:'H:i'|default:'' }}" style="width:90px;margin-top:2px;">
+                    </td>
                     <td data-label="Call Notes"><input type="text" class="crm-input" data-field="call_notes" value="{{ lead.call_notes }}" placeholder="—"></td>
                     <td data-label="Appt Notes"><textarea class="crm-input" data-field="appt_notes" rows="1" style="resize:vertical;min-height:28px;max-width:300px;" placeholder="—">{{ lead.appt_notes }}</textarea></td>
+                    <td data-label="Deal Info">
+                        <button class="deal-toggle" onclick="toggleDealInfo(this)" style="font-size:11px;padding:2px 8px;background:#3d5a80;color:#fff;border:none;border-radius:4px;cursor:pointer;">{% if lead.monthly_cost or lead.total_cost or lead.adders or lead.post_appt_notes %}Details ▾{% else %}+ Deal{% endif %}</button>
+                        <div class="deal-info-box" style="display:none;margin-top:4px;font-size:12px;">
+                            <input type="text" class="crm-input" data-field="monthly_cost" value="{{ lead.monthly_cost }}" placeholder="Monthly $" style="width:100%;margin-bottom:2px;">
+                            <input type="text" class="crm-input" data-field="total_cost" value="{{ lead.total_cost }}" placeholder="Total $" style="width:100%;margin-bottom:2px;">
+                            <input type="text" class="crm-input" data-field="adders" value="{{ lead.adders }}" placeholder="Adders" style="width:100%;margin-bottom:2px;">
+                            <textarea class="crm-input" data-field="post_appt_notes" rows="2" style="width:100%;resize:vertical;min-height:28px;" placeholder="Post-appt notes">{{ lead.post_appt_notes }}</textarea>
+                        </div>
+                    </td>
                     <td data-label="Transcript"><textarea class="crm-input" data-field="call_transcript" rows="1" style="resize:vertical;min-height:28px;max-width:300px;">{{ lead.call_transcript }}</textarea></td>
                     <td data-label="" style="text-align:center;"><button class="chatter-btn" onclick="openChatter({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button></td>
                     <td data-label="" style="text-align:center;"><button class="sms-btn" onclick="openSmsThread({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8l10 6 10-6"/></svg></button></td>
@@ -682,6 +695,17 @@
                     }
                 }
             });
+        }
+
+        function toggleDealInfo(btn) {
+            var box = btn.nextElementSibling;
+            if (box.style.display === 'none') {
+                box.style.display = 'block';
+                btn.textContent = btn.textContent.replace('+ Deal', 'Hide').replace('▾', '▴');
+            } else {
+                box.style.display = 'none';
+                btn.textContent = btn.textContent.replace('Hide', '+ Deal').replace('▴', '▾');
+            }
         }
 
         function deleteLead(btn) {
@@ -1470,9 +1494,14 @@
             var source = gv('source');
             var apptTime = gv('appointment_datetime');
             var followUp = gv('follow_up_date');
+            var followUpTime = gv('follow_up_time');
             var notes = gv('call_notes');
             var apptNotes = gv('appt_notes');
             var transcript = gv('call_transcript');
+            var monthlyCost = gv('monthly_cost');
+            var totalCost = gv('total_cost');
+            var addersVal = gv('adders');
+            var postApptNotes = gv('post_appt_notes');
             var tagsPills = row.querySelector('.tag-pills');
             var tagsValue = tagsPills ? (tagsPills.dataset.value || '') : '';
 
@@ -1525,8 +1554,25 @@
             html += '</div>';
 
             // Follow Up
+            html += '<div class="detail-grid">';
             html += '<div class="detail-field"><div class="detail-field-label">Follow Up Date</div>';
             html += '<input type="date" value="' + escapeDetailHtml(followUp) + '" data-lead="' + leadId + '" data-field="follow_up_date" onchange="saveDetailField(this)"></div>';
+            html += '<div class="detail-field"><div class="detail-field-label">Follow Up Time</div>';
+            html += '<input type="time" value="' + escapeDetailHtml(followUpTime) + '" data-lead="' + leadId + '" data-field="follow_up_time" onchange="saveDetailField(this)"></div>';
+            html += '</div>';
+
+            // Deal Info
+            html += '<div class="detail-field" style="margin-top:8px;"><div class="detail-field-label" style="font-weight:600;">Deal Info</div></div>';
+            html += '<div class="detail-grid">';
+            html += '<div class="detail-field"><div class="detail-field-label">Monthly Cost</div>';
+            html += '<input type="text" value="' + escapeDetailHtml(monthlyCost) + '" data-lead="' + leadId + '" data-field="monthly_cost" onchange="saveDetailField(this)" placeholder="$"></div>';
+            html += '<div class="detail-field"><div class="detail-field-label">Total Cost</div>';
+            html += '<input type="text" value="' + escapeDetailHtml(totalCost) + '" data-lead="' + leadId + '" data-field="total_cost" onchange="saveDetailField(this)" placeholder="$"></div>';
+            html += '</div>';
+            html += '<div class="detail-field"><div class="detail-field-label">Adders</div>';
+            html += '<input type="text" value="' + escapeDetailHtml(addersVal) + '" data-lead="' + leadId + '" data-field="adders" onchange="saveDetailField(this)" placeholder="Battery, panel upgrade, etc."></div>';
+            html += '<div class="detail-field"><div class="detail-field-label">Post-Appt Notes</div>';
+            html += '<textarea data-lead="' + leadId + '" data-field="post_appt_notes" onchange="saveDetailField(this)" placeholder="Objections, next steps...">' + escapeDetailHtml(postApptNotes) + '</textarea></div>';
 
             // Tags
             html += '<div class="detail-field"><div class="detail-field-label">Tags</div>';

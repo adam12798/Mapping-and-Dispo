@@ -149,7 +149,8 @@ If they DID sit:
 ### After determining disposition:
 - BEFORE calling update_disposition, you MUST confirm the homeowner name with the rep. Say something like "Just to confirm, that was the appointment with [name], right?" and WAIT for the rep to confirm before calling the tool. If the rep corrects the name, use the corrected name.
 - Do NOT tell the rep the disposition category name. Just confirm naturally: "Alright, I've got that noted" or "Very good, I'll update that straightaway"
-- For **follow_up** or **cpfu**: ask "When would be a good time to follow up with the homeowner?" Get a specific date. Reps will often say relative dates like "next Tuesday", "this Friday", "in two weeks", etc. — convert these to the actual YYYY-MM-DD date based on today's date when calling update_disposition. If the date is more than a month out, the system automatically marks it as future contact.
+- For **follow_up** or **cpfu**: ask "When would be a good time to follow up with the homeowner?" Get a specific date AND time. Reps will often say relative dates like "next Tuesday", "this Friday at 2", "in two weeks", etc. — convert dates to YYYY-MM-DD and times to HH:MM (24hr) format. If they only give a date, ask what time. If the date is more than a month out, the system automatically marks it as future contact.
+- After getting the follow-up date/time, ask: "Would you like to make any notes about the deal? Monthly price, total cost, adders, or any next steps the homeowner needs to take?" Listen for details and fill in whatever they mention. Don't push hard — if they say no or skip it, that's fine. Save whatever they give you in the appropriate fields (monthly_cost, total_cost, adders, post_appt_notes).
 - After updating, if the rep has another appointment the same day, remind them of the time and drive time (if available). Example: "Right then, you've got the Smiths at 3 PM — about 25 minutes from here."
 
 Your appointment list includes past appointments from today. When a rep calls in to debrief an appointment, after handling that debrief, check if there are any EARLIER appointments from today that still have no disposition (dispo: none). If there are, proactively ask the rep about them one at a time — e.g. "By the way, I don't have an update on your earlier appointment with [name] at [time]. How did that one go?" Only ask about appointments with dispo: none — skip any that already have a disposition. If a rep asks "what's on my schedule?", only tell them about future appointments.
@@ -222,6 +223,26 @@ DISPOSITION_TOOL = {
             'follow_up_date': {
                 'type': 'string',
                 'description': 'The follow-up date in YYYY-MM-DD format. Required when disposition is follow_up or cpfu.',
+            },
+            'follow_up_time': {
+                'type': 'string',
+                'description': 'The follow-up time in HH:MM (24-hour) format. Required when disposition is follow_up or cpfu.',
+            },
+            'monthly_cost': {
+                'type': 'string',
+                'description': 'Monthly cost/price the rep quoted or discussed. Include dollar sign if mentioned.',
+            },
+            'total_cost': {
+                'type': 'string',
+                'description': 'Total project cost the rep quoted or discussed. Include dollar sign if mentioned.',
+            },
+            'adders': {
+                'type': 'string',
+                'description': 'Any adders discussed (e.g. battery, panel upgrade, extra circuits).',
+            },
+            'post_appt_notes': {
+                'type': 'string',
+                'description': 'Post-appointment notes: objections, next steps the homeowner needs to take, or any other deal details the rep mentioned.',
             },
         },
         'required': ['homeowner_name', 'disposition', 'call_notes', 'sat'],
@@ -512,6 +533,11 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
         call_notes = fn_args.get('call_notes', '')
         sat = fn_args.get('sat')
         follow_up_date_str = fn_args.get('follow_up_date', '')
+        follow_up_time_str = fn_args.get('follow_up_time', '')
+        monthly_cost = fn_args.get('monthly_cost', '')
+        total_cost = fn_args.get('total_cost', '')
+        adders = fn_args.get('adders', '')
+        post_appt_notes = fn_args.get('post_appt_notes', '')
 
         if not rep:
             return {'success': False, 'error': 'Could not identify rep'}
@@ -564,6 +590,16 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
             except ValueError:
                 logger.warning(f'Could not parse follow_up_date: {follow_up_date_str}')
 
+        # Parse follow_up_time
+        follow_up_time = None
+        if follow_up_time_str:
+            try:
+                from datetime import time as dt_time
+                parts = follow_up_time_str.split(':')
+                follow_up_time = dt_time(int(parts[0]), int(parts[1]))
+            except (ValueError, IndexError):
+                logger.warning(f'Could not parse follow_up_time: {follow_up_time_str}')
+
         # Build current transcript
         call_transcript = '\n'.join(transcript_parts) if transcript_parts else ''
 
@@ -573,6 +609,16 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
             update_kwargs['sat'] = sat
         if follow_up_date is not None:
             update_kwargs['follow_up_date'] = follow_up_date
+        if follow_up_time is not None:
+            update_kwargs['follow_up_time'] = follow_up_time
+        if monthly_cost:
+            update_kwargs['monthly_cost'] = monthly_cost
+        if total_cost:
+            update_kwargs['total_cost'] = total_cost
+        if adders:
+            update_kwargs['adders'] = adders
+        if post_appt_notes:
+            update_kwargs['post_appt_notes'] = post_appt_notes
         updated = await sync_to_async(
             Lead.objects.filter(id=lead_id, rep=rep).update
         )(**update_kwargs)

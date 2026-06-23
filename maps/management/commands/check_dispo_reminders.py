@@ -71,14 +71,18 @@ def make_outbound_call(to, lead_id):
 
 
 class Command(BaseCommand):
-    help = 'Check for un-dispositioned appointments and send SMS/call reminders'
+    help = 'Check for un-dispositioned appointments and follow-up reminders'
 
     def handle(self, *args, **options):
         now = datetime.now(EASTERN)
+        self._check_dispo_reminders(now)
+        self._check_followup_reminders(now)
+        self.stdout.write('Done.')
+
+    def _check_dispo_reminders(self, now):
         three_hours_ago = now - timedelta(hours=3)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # Find leads needing reminders: past appointment, no dispo, has rep with phone
         overdue_leads = Lead.objects.filter(
             appointment_datetime__isnull=False,
             appointment_datetime__gte=today_start,
@@ -91,30 +95,21 @@ class Command(BaseCommand):
         ).select_related('rep')
 
         if not overdue_leads.exists():
-            self.stdout.write('No overdue leads found.')
+            self.stdout.write('No overdue dispo leads found.')
             return
 
-        self.stdout.write(f'Found {overdue_leads.count()} overdue lead(s)')
+        self.stdout.write(f'Found {overdue_leads.count()} overdue dispo lead(s)')
 
         for lead in overdue_leads:
             rep = lead.rep
             appt_time = lead.appointment_datetime.astimezone(EASTERN)
 
-            # Check if rep is currently in another appointment
-            has_future_appt = Lead.objects.filter(
-                rep=rep,
-                cancelled=False,
-                appointment_datetime__gt=now - timedelta(hours=1),
-                appointment_datetime__lte=now + timedelta(hours=2),
-            ).exclude(id=lead.id).exists()
-
-            if has_future_appt:
+            if self._rep_in_appointment(rep, now, lead.id):
                 self.stdout.write(
                     f'  Skipping {lead.homeowner_name} — {rep.name} is in/near another appointment'
                 )
                 continue
 
-            # Phase 1: SMS reminder (3+ hours, no SMS sent yet)
             if not lead.dispo_reminder_sent_at:
                 name = lead.homeowner_name or 'your appointment'
                 time_str = appt_time.strftime('%I:%M %p').lstrip('0')
@@ -129,7 +124,6 @@ class Command(BaseCommand):
                 lead.save(update_fields=['dispo_reminder_sent_at'])
                 continue
 
-            # Phase 2: Outbound call (1+ hour after SMS, no call yet)
             sms_age = now - lead.dispo_reminder_sent_at
             if sms_age >= timedelta(hours=1) and not lead.dispo_call_made_at:
                 self.stdout.write(f'  CALL → {rep.name} re: {lead.homeowner_name}')
@@ -137,4 +131,67 @@ class Command(BaseCommand):
                 lead.dispo_call_made_at = now
                 lead.save(update_fields=['dispo_call_made_at'])
 
-        self.stdout.write('Done.')
+    def _check_followup_reminders(self, now):
+        today = now.date()
+        current_time = now.time()
+
+        followup_leads = Lead.objects.filter(
+            follow_up_date=today,
+            follow_up_reminder_sent_at__isnull=True,
+            disposition__in=('follow_up', 'cpfu'),
+            cancelled=False,
+            rep__isnull=False,
+            rep__is_active=True,
+            rep__phone_number__gt='',
+        ).select_related('rep')
+
+        if not followup_leads.exists():
+            self.stdout.write('No follow-up reminders due.')
+            return
+
+        self.stdout.write(f'Found {followup_leads.count()} follow-up reminder(s) due')
+
+        for lead in followup_leads:
+            rep = lead.rep
+
+            if lead.follow_up_time and current_time < lead.follow_up_time:
+                self.stdout.write(
+                    f'  Not yet time for {lead.homeowner_name} (due {lead.follow_up_time.strftime("%I:%M %p")})'
+                )
+                continue
+
+            if self._rep_in_appointment(rep, now, lead.id):
+                self.stdout.write(
+                    f'  Delaying {lead.homeowner_name} — {rep.name} is in an appointment'
+                )
+                continue
+
+            name = lead.homeowner_name or 'a homeowner'
+            lines = [f"Hey {rep.name.split()[0]}, reminder to follow up with {name} today!"]
+
+            if lead.monthly_cost:
+                lines.append(f"Monthly Cost: {lead.monthly_cost}")
+            if lead.total_cost:
+                lines.append(f"Total Cost: {lead.total_cost}")
+            if lead.adders:
+                lines.append(f"Adders: {lead.adders}")
+            if lead.post_appt_notes:
+                lines.append(f"Notes: {lead.post_appt_notes}")
+            if lead.call_notes:
+                lines.append(f"Call Notes: {lead.call_notes}")
+            if lead.phone_number:
+                lines.append(f"Homeowner Phone: {lead.phone_number}")
+
+            body = '\n\n'.join(lines)
+            self.stdout.write(f'  Follow-up SMS → {rep.name} re: {lead.homeowner_name}')
+            send_sms(rep.phone_number, body)
+            lead.follow_up_reminder_sent_at = now
+            lead.save(update_fields=['follow_up_reminder_sent_at'])
+
+    def _rep_in_appointment(self, rep, now, exclude_lead_id):
+        return Lead.objects.filter(
+            rep=rep,
+            cancelled=False,
+            appointment_datetime__gt=now - timedelta(hours=1),
+            appointment_datetime__lte=now + timedelta(hours=2),
+        ).exclude(id=exclude_lead_id).exists()
