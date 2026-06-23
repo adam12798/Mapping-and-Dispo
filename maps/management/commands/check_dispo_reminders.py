@@ -80,6 +80,11 @@ class Command(BaseCommand):
         self.stdout.write('Done.')
 
     def _check_dispo_reminders(self, now):
+        # No SMS or calls after 9pm Eastern
+        if now.hour >= 21:
+            self.stdout.write('Past 9pm — skipping dispo reminders.')
+            return
+
         three_hours_ago = now - timedelta(hours=3)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -132,6 +137,10 @@ class Command(BaseCommand):
                 lead.save(update_fields=['dispo_call_made_at'])
 
     def _check_followup_reminders(self, now):
+        if now.hour >= 21:
+            self.stdout.write('Past 9pm — skipping follow-up reminders.')
+            return
+
         today = now.date()
         current_time = now.time()
 
