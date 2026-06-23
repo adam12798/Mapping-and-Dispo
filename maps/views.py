@@ -1112,7 +1112,7 @@ def send_textblast(leads):
     sent_count = 0
     errors = []
     for rep in eligible_reps:
-        ok, err = send_sms_with_result(rep.phone_number, message)
+        ok, err = send_sms_with_result(rep.phone_number, message, from_number=settings.TWILIO_PHONE_NUMBER_2)
         if ok:
             sent_count += 1
         else:
