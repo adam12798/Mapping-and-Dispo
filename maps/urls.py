@@ -66,6 +66,12 @@ urlpatterns = [
     path('api/v1/reps/', views.v1_reps_list, name='v1_reps_list'),
     path('api/v1/stats/', views.v1_stats, name='v1_stats'),
     path('api/v1/time-off/', views.v1_time_off, name='v1_time_off'),
+    # GHL inbound webhooks
+    path('api/v1/ghl/appointment/', views.ghl_appointment, name='ghl_appointment'),
+    path('api/v1/ghl/reschedule/', views.ghl_reschedule, name='ghl_reschedule'),
+    path('api/v1/ghl/cancel/', views.ghl_cancel, name='ghl_cancel'),
+    path('api/v1/ghl/update/', views.ghl_update, name='ghl_update'),
+    path('api/v1/ghl/disposition/', views.ghl_disposition, name='ghl_disposition'),
     # Tenant management (manager-only)
     path('tenants/', views.tenants_view, name='tenants'),
     path('api/tenants/', views.tenants_api, name='tenants_api'),

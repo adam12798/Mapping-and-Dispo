@@ -3276,6 +3276,243 @@ def v1_time_off(request):
     return JsonResponse({'time_off': data})
 
 
+# ===== GHL Inbound Webhooks =====
+
+def _ghl_match_lead(name, phone, address=None):
+    """Match an existing lead by name+phone, name+address, or phone-only."""
+    lead = None
+    if name and phone:
+        lead = Lead.objects.filter(
+            homeowner_name__iexact=name,
+            phone_number__icontains=phone[-10:]
+        ).order_by('-created_at').first()
+    if not lead and name and address:
+        lead = Lead.objects.filter(
+            homeowner_name__iexact=name,
+            address__icontains=address
+        ).order_by('-created_at').first()
+    if not lead and phone:
+        lead = Lead.objects.filter(
+            phone_number__icontains=phone[-10:]
+        ).order_by('-created_at').first()
+    return lead
+
+
+def _ghl_parse_datetime(raw_dt):
+    if not raw_dt:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        eastern = ZoneInfo('America/New_York')
+        dt = dateparser.parse(raw_dt, fuzzy=True)
+        if dt and dt.tzinfo is None:
+            dt = dt.replace(tzinfo=eastern)
+        return dt
+    except (ValueError, OverflowError):
+        return None
+
+
+def _ghl_log_changes(lead, changes):
+    if not changes:
+        return
+    system_user = User.objects.filter(is_superuser=True).first()
+    if system_user:
+        LeadUpdate.objects.create(lead=lead, user=system_user, text='GHL webhook:\n' + '\n'.join(changes))
+
+
+@api_key_required
+def ghl_appointment(request):
+    """GHL webhook: new appointment booked."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    name = data.get('name', '')
+    phone = data.get('phone', '')
+    address = data.get('address', '')
+    city = data.get('city', '')
+    state = data.get('state', 'MA')
+
+    existing = _ghl_match_lead(name, phone, address)
+    if existing:
+        return JsonResponse({'status': 'ok', 'id': existing.id, 'note': 'lead already exists'})
+
+    appt_dt = _ghl_parse_datetime(data.get('appointment_datetime', ''))
+    appt_type = normalize_type(data.get('appointment_type', ''))
+    tags = ''
+    if appt_type == 'solar':
+        tags = 'Solar'
+    elif appt_type == 'hvac':
+        tags = 'Hvac'
+    elif appt_type == 'both':
+        tags = 'Solar,Hvac'
+
+    geocode_address = address
+    if city:
+        geocode_address = f"{address}, {city}, MA"
+    lat, lng = geocode(geocode_address) if address else (None, None)
+
+    lead = Lead.objects.create(
+        homeowner_name=name,
+        phone_number=phone,
+        address=address,
+        city=city,
+        state=state,
+        latitude=lat,
+        longitude=lng,
+        source=data.get('source', ''),
+        tags=tags,
+        appointment_type=appt_type,
+        appointment_format=normalize_format(data.get('appointment_format', '')),
+        appointment_datetime=appt_dt,
+        appt_notes=data.get('notes', ''),
+    )
+    _ghl_log_changes(lead, [f"New appointment via GHL: {name} at {address}"])
+    return JsonResponse({'status': 'ok', 'id': lead.id}, status=201)
+
+
+@api_key_required
+def ghl_reschedule(request):
+    """GHL webhook: appointment rescheduled."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    name = data.get('name', '')
+    phone = data.get('phone', '')
+
+    lead = _ghl_match_lead(name, phone, data.get('address'))
+    if not lead:
+        return JsonResponse({'error': 'Lead not found'}, status=404)
+
+    appt_dt = _ghl_parse_datetime(data.get('appointment_datetime', ''))
+    if not appt_dt:
+        return JsonResponse({'error': 'appointment_datetime is required'}, status=400)
+
+    changes = []
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+    new_str = appt_dt.astimezone(eastern).strftime('%m/%d/%Y at %I:%M %p')
+    changes.append(f"Rescheduled to {new_str}")
+    lead.appointment_datetime = appt_dt
+
+    if lead.cancelled:
+        lead.cancelled = False
+        changes.append('Cancelled → Rescheduled')
+
+    if data.get('address') and data['address'] != lead.address:
+        lead.address = data['address']
+        changes.append(f"Address → {data['address']}")
+    if data.get('city') and data['city'] != lead.city:
+        lead.city = data['city']
+        changes.append(f"City → {data['city']}")
+    if lead.address:
+        geocode_address = lead.address
+        if lead.city:
+            geocode_address = f"{lead.address}, {lead.city}, MA"
+        lead.latitude, lead.longitude = geocode(geocode_address)
+
+    lead.save()
+    _ghl_log_changes(lead, changes)
+    return JsonResponse({'status': 'ok', 'id': lead.id})
+
+
+@api_key_required
+def ghl_cancel(request):
+    """GHL webhook: appointment cancelled."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    name = data.get('name', '')
+    phone = data.get('phone', '')
+
+    lead = _ghl_match_lead(name, phone, data.get('address'))
+    if not lead:
+        return JsonResponse({'error': 'Lead not found'}, status=404)
+
+    lead.cancelled = True
+    lead.save(update_fields=['cancelled'])
+    _ghl_log_changes(lead, ['Appointment cancelled via GHL'])
+    return JsonResponse({'status': 'ok', 'id': lead.id})
+
+
+@api_key_required
+def ghl_update(request):
+    """GHL webhook: appointment details updated (no datetime change)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    name = data.get('name', '')
+    phone = data.get('phone', '')
+
+    lead = _ghl_match_lead(name, phone, data.get('address'))
+    if not lead:
+        return JsonResponse({'error': 'Lead not found'}, status=404)
+
+    changes = []
+    if data.get('address') and data['address'] != lead.address:
+        lead.address = data['address']
+        changes.append(f"Address → {data['address']}")
+    if data.get('city') and data['city'] != lead.city:
+        lead.city = data['city']
+        changes.append(f"City → {data['city']}")
+    if data.get('phone') and data['phone'] != lead.phone_number:
+        lead.phone_number = data['phone']
+        changes.append(f"Phone → {data['phone']}")
+    if data.get('name') and data['name'] != lead.homeowner_name:
+        lead.homeowner_name = data['name']
+        changes.append(f"Name → {data['name']}")
+    if data.get('appointment_type') and not lead.appointment_type:
+        lead.appointment_type = normalize_type(data['appointment_type'])
+    if data.get('appointment_format') and not lead.appointment_format:
+        lead.appointment_format = normalize_format(data['appointment_format'])
+    if data.get('source') and not lead.source:
+        lead.source = data['source']
+    if data.get('notes') and not lead.appt_notes:
+        lead.appt_notes = data['notes']
+
+    if 'address' in data or 'city' in data:
+        if lead.address:
+            geocode_address = lead.address
+            if lead.city:
+                geocode_address = f"{lead.address}, {lead.city}, MA"
+            lead.latitude, lead.longitude = geocode(geocode_address)
+
+    lead.save()
+    _ghl_log_changes(lead, changes)
+    return JsonResponse({'status': 'ok', 'id': lead.id})
+
+
+@api_key_required
+def ghl_disposition(request):
+    """GHL webhook: disposition updated. Does NOT echo back to GHL."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    data = json.loads(request.body)
+    name = data.get('name', '')
+    phone = data.get('phone', '')
+
+    lead = _ghl_match_lead(name, phone)
+    if not lead:
+        return JsonResponse({'error': 'Lead not found'}, status=404)
+
+    raw_dispo = data.get('disposition', '')
+    dispo = raw_dispo.lower().replace(' ', '_')
+    valid_dispos = dict(Lead.DISPOSITION_CHOICES)
+    if dispo not in valid_dispos:
+        return JsonResponse({'error': f'Invalid disposition: {raw_dispo}'}, status=400)
+
+    old_dispo = lead.disposition
+    if dispo == old_dispo:
+        return JsonResponse({'status': 'ok', 'id': lead.id, 'note': 'no change'})
+
+    lead.disposition = dispo
+    lead.save(update_fields=['disposition'])
+
+    old_display = valid_dispos.get(old_dispo, old_dispo or '—')
+    new_display = valid_dispos.get(dispo, dispo)
+    _ghl_log_changes(lead, [f"Disposition: {old_display} → {new_display}"])
+    return JsonResponse({'status': 'ok', 'id': lead.id})
+
+
 # ===== Tenant Management (Manager-only) =====
 
 @manager_required
