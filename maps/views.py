@@ -3377,13 +3377,13 @@ def _ghl_log_changes(lead, changes):
 
 def _ghl_log_inbound(webhook_type, request, lead=None, lead_name='', success=True, error_message='', response_status=200):
     try:
-        raw = request.body.decode('utf-8', errors='replace')
-        payload = raw[:10000]
+        payload = request.body.decode('utf-8', errors='replace')
     except Exception:
         payload = ''
     try:
-        keys = list(json.loads(request.body).keys())
-        key_info = f"Keys: {keys}"
+        parsed = json.loads(request.body)
+        keys_with_values = {k: v for k, v in parsed.items() if v}
+        key_info = f"Keys with values: {json.dumps(keys_with_values, default=str)}"
     except Exception:
         key_info = ''
     if error_message and key_info:
