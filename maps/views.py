@@ -1829,6 +1829,7 @@ def parse_time_off_request(body, rep):
 def ghl_debug_view(request):
     type_filter = request.GET.get('type', '')
     success_filter = request.GET.get('success', '')
+    direction_filter = request.GET.get('direction', '')
     logs = GHLWebhookLog.objects.order_by('-created_at')
     if type_filter:
         logs = logs.filter(webhook_type=type_filter)
@@ -1836,20 +1837,48 @@ def ghl_debug_view(request):
         logs = logs.filter(success=True)
     elif success_filter == '0':
         logs = logs.filter(success=False)
+    if direction_filter:
+        logs = logs.filter(direction=direction_filter)
     total = GHLWebhookLog.objects.count()
     success_count = GHLWebhookLog.objects.filter(success=True).count()
     fail_count = GHLWebhookLog.objects.filter(success=False).count()
+    inbound_count = GHLWebhookLog.objects.filter(direction='inbound').count()
+    outbound_count = GHLWebhookLog.objects.filter(direction='outbound').count()
     logs = logs[:100]
+
+    app_host = 'lavish-reflection-production-1e5f.up.railway.app'
+    api_keys = list(APITenant.objects.filter(is_active=True).values_list('name', 'api_key'))
+
+    inbound_endpoints = [
+        {'name': 'New Appointment', 'path': '/api/v1/ghl/appointment/', 'method': 'POST',
+         'fields': 'name, phone, address, city, appointment_datetime, appointment_type, appointment_format, source, notes'},
+        {'name': 'Reschedule', 'path': '/api/v1/ghl/reschedule/', 'method': 'POST',
+         'fields': 'name, phone, appointment_datetime, address (optional), city (optional)'},
+        {'name': 'Cancel', 'path': '/api/v1/ghl/cancel/', 'method': 'POST',
+         'fields': 'name, phone'},
+        {'name': 'Update Details', 'path': '/api/v1/ghl/update/', 'method': 'POST',
+         'fields': 'name, phone, address, city, appointment_type, appointment_format, source, notes'},
+        {'name': 'Disposition', 'path': '/api/v1/ghl/disposition/', 'method': 'POST',
+         'fields': 'name, phone, disposition'},
+    ]
+    for ep in inbound_endpoints:
+        ep['full_url'] = f"https://{app_host}{ep['path']}"
+
     return render(request, 'maps/ghl_debug.html', {
         'logs': logs,
         'total': total,
         'success_count': success_count,
         'fail_count': fail_count,
+        'inbound_count': inbound_count,
+        'outbound_count': outbound_count,
         'active_tab': 'ghl_debug',
         'type_filter': type_filter,
         'success_filter': success_filter,
+        'direction_filter': direction_filter,
         'ghl_dispo_url': GHL_WEBHOOK_URL,
         'ghl_appt_url': GHL_APPT_WEBHOOK_URL,
+        'inbound_endpoints': inbound_endpoints,
+        'api_keys': api_keys,
     })
 
 
@@ -2994,10 +3023,16 @@ def api_key_required(view_func):
     @wraps(view_func)
     @csrf_exempt
     def wrapper(request, *args, **kwargs):
+        key = None
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-        if not auth_header.startswith('Bearer '):
+        if auth_header.startswith('Bearer '):
+            key = auth_header[7:].strip()
+        if not key:
+            key = request.GET.get('api_key', '').strip()
+        if not key:
+            key = request.META.get('HTTP_X_API_KEY', '').strip()
+        if not key:
             return JsonResponse({'error': 'Authentication required'}, status=401)
-        key = auth_header[7:].strip()
         try:
             tenant = APITenant.objects.get(api_key=key)
         except (APITenant.DoesNotExist, ValueError):
@@ -3340,6 +3375,25 @@ def _ghl_log_changes(lead, changes):
         LeadUpdate.objects.create(lead=lead, user=system_user, text='GHL webhook:\n' + '\n'.join(changes))
 
 
+def _ghl_log_inbound(webhook_type, request, lead=None, lead_name='', success=True, error_message='', response_status=200):
+    try:
+        payload = request.body.decode('utf-8', errors='replace')[:2000]
+    except Exception:
+        payload = ''
+    GHLWebhookLog.objects.create(
+        direction='inbound',
+        webhook_type=webhook_type,
+        lead=lead,
+        lead_name=lead_name,
+        source=getattr(request, 'api_tenant', None) and request.api_tenant.name or 'unknown',
+        url=request.path,
+        payload=payload,
+        response_status=response_status,
+        success=success,
+        error_message=error_message,
+    )
+
+
 @api_key_required
 def ghl_appointment(request):
     """GHL webhook: new appointment booked."""
@@ -3354,6 +3408,7 @@ def ghl_appointment(request):
 
     existing = _ghl_match_lead(name, phone, address)
     if existing:
+        _ghl_log_inbound('appointment', request, lead=existing, lead_name=name, success=True, response_status=200)
         return JsonResponse({'status': 'ok', 'id': existing.id, 'note': 'lead already exists'})
 
     appt_dt = _ghl_parse_datetime(data.get('appointment_datetime', ''))
@@ -3387,6 +3442,7 @@ def ghl_appointment(request):
         appt_notes=data.get('notes', ''),
     )
     _ghl_log_changes(lead, [f"New appointment via GHL: {name} at {address}"])
+    _ghl_log_inbound('appointment', request, lead=lead, lead_name=name, success=True, response_status=201)
     return JsonResponse({'status': 'ok', 'id': lead.id}, status=201)
 
 
@@ -3401,10 +3457,12 @@ def ghl_reschedule(request):
 
     lead = _ghl_match_lead(name, phone, data.get('address'))
     if not lead:
+        _ghl_log_inbound('reschedule', request, lead_name=name, success=False, error_message='Lead not found', response_status=404)
         return JsonResponse({'error': 'Lead not found'}, status=404)
 
     appt_dt = _ghl_parse_datetime(data.get('appointment_datetime', ''))
     if not appt_dt:
+        _ghl_log_inbound('reschedule', request, lead=lead, lead_name=name, success=False, error_message='Missing datetime', response_status=400)
         return JsonResponse({'error': 'appointment_datetime is required'}, status=400)
 
     changes = []
@@ -3432,6 +3490,7 @@ def ghl_reschedule(request):
 
     lead.save()
     _ghl_log_changes(lead, changes)
+    _ghl_log_inbound('reschedule', request, lead=lead, lead_name=name, success=True, response_status=200)
     return JsonResponse({'status': 'ok', 'id': lead.id})
 
 
@@ -3446,11 +3505,13 @@ def ghl_cancel(request):
 
     lead = _ghl_match_lead(name, phone, data.get('address'))
     if not lead:
+        _ghl_log_inbound('cancel', request, lead_name=name, success=False, error_message='Lead not found', response_status=404)
         return JsonResponse({'error': 'Lead not found'}, status=404)
 
     lead.cancelled = True
     lead.save(update_fields=['cancelled'])
     _ghl_log_changes(lead, ['Appointment cancelled via GHL'])
+    _ghl_log_inbound('cancel', request, lead=lead, lead_name=name, success=True, response_status=200)
     return JsonResponse({'status': 'ok', 'id': lead.id})
 
 
@@ -3465,6 +3526,7 @@ def ghl_update(request):
 
     lead = _ghl_match_lead(name, phone, data.get('address'))
     if not lead:
+        _ghl_log_inbound('update', request, lead_name=name, success=False, error_message='Lead not found', response_status=404)
         return JsonResponse({'error': 'Lead not found'}, status=404)
 
     changes = []
@@ -3498,6 +3560,7 @@ def ghl_update(request):
 
     lead.save()
     _ghl_log_changes(lead, changes)
+    _ghl_log_inbound('update', request, lead=lead, lead_name=name, success=True, response_status=200)
     return JsonResponse({'status': 'ok', 'id': lead.id})
 
 
@@ -3512,16 +3575,19 @@ def ghl_disposition(request):
 
     lead = _ghl_match_lead(name, phone)
     if not lead:
+        _ghl_log_inbound('disposition', request, lead_name=name, success=False, error_message='Lead not found', response_status=404)
         return JsonResponse({'error': 'Lead not found'}, status=404)
 
     raw_dispo = data.get('disposition', '')
     dispo = raw_dispo.lower().replace(' ', '_')
     valid_dispos = dict(Lead.DISPOSITION_CHOICES)
     if dispo not in valid_dispos:
+        _ghl_log_inbound('disposition', request, lead=lead, lead_name=name, success=False, error_message=f'Invalid disposition: {raw_dispo}', response_status=400)
         return JsonResponse({'error': f'Invalid disposition: {raw_dispo}'}, status=400)
 
     old_dispo = lead.disposition
     if dispo == old_dispo:
+        _ghl_log_inbound('disposition', request, lead=lead, lead_name=name, success=True, response_status=200)
         return JsonResponse({'status': 'ok', 'id': lead.id, 'note': 'no change'})
 
     lead.disposition = dispo
@@ -3530,6 +3596,7 @@ def ghl_disposition(request):
     old_display = valid_dispos.get(old_dispo, old_dispo or '—')
     new_display = valid_dispos.get(dispo, dispo)
     _ghl_log_changes(lead, [f"Disposition: {old_display} → {new_display}"])
+    _ghl_log_inbound('disposition', request, lead=lead, lead_name=name, success=True, response_status=200)
     return JsonResponse({'status': 'ok', 'id': lead.id})
 
 

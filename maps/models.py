@@ -240,13 +240,21 @@ class GHLWebhookLog(models.Model):
     WEBHOOK_TYPE_CHOICES = [
         ('disposition', 'Disposition'),
         ('appointment', 'Appointment'),
+        ('reschedule', 'Reschedule'),
+        ('cancel', 'Cancel'),
+        ('update', 'Update'),
         ('test', 'Test'),
     ]
+    DIRECTION_CHOICES = [
+        ('outbound', 'Outbound'),
+        ('inbound', 'Inbound'),
+    ]
+    direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default='outbound')
     webhook_type = models.CharField(max_length=20, choices=WEBHOOK_TYPE_CHOICES)
     lead = models.ForeignKey('Lead', null=True, blank=True, on_delete=models.SET_NULL)
     lead_name = models.CharField(max_length=200, blank=True)
     source = models.CharField(max_length=50, blank=True)
-    url = models.URLField(max_length=500)
+    url = models.URLField(max_length=500, blank=True)
     payload = models.TextField(blank=True)
     response_status = models.IntegerField(null=True, blank=True)
     response_body = models.TextField(blank=True)

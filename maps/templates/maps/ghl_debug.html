@@ -1,7 +1,7 @@
 {% extends "maps/base.html" %}
 {% load static %}
 
-{% block title %}GHL Debug{% endblock %}
+{% block title %}GHL Webhooks{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -13,9 +13,27 @@
     .ghl-pill.total { background:#3d5a80; }
     .ghl-pill.ok { background:#27ae60; }
     .ghl-pill.fail { background:#e74c3c; }
-    .ghl-urls { background:#f8fbfd;border:1px solid #e0fbfc;border-radius:8px;padding:14px 18px;margin-bottom:16px;font-family:'Montserrat',sans-serif;font-size:12px;color:#293241; }
-    .ghl-urls strong { color:#3d5a80; }
-    .ghl-urls code { font-family:'Courier New',monospace;font-size:11px;color:#555;word-break:break-all; }
+    .ghl-pill.inbound { background:#8e44ad; }
+    .ghl-pill.outbound { background:#2980b9; }
+
+    .ghl-section { background:#f8fbfd;border:1px solid #e0fbfc;border-radius:8px;padding:18px;margin-bottom:16px;font-family:'Montserrat',sans-serif; }
+    .ghl-section h3 { font-size:14px;color:#293241;margin:0 0 12px;font-weight:700; }
+    .ghl-ep { background:#fff;border:1px solid #e0e0e0;border-radius:6px;padding:12px 16px;margin-bottom:8px; }
+    .ghl-ep-header { display:flex;align-items:center;gap:8px;margin-bottom:6px; }
+    .ghl-ep-method { background:#27ae60;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px; }
+    .ghl-ep-name { font-weight:600;color:#293241;font-size:13px; }
+    .ghl-ep-url { font-family:'Courier New',monospace;font-size:11px;color:#555;word-break:break-all;background:#f0f0f0;padding:4px 8px;border-radius:4px;display:block;margin-bottom:4px; }
+    .ghl-ep-fields { font-size:11px;color:#666; }
+    .ghl-ep-fields strong { color:#3d5a80; }
+    .ghl-copy-btn { font-size:10px;padding:2px 8px;background:#3d5a80;color:#fff;border:none;border-radius:3px;cursor:pointer;margin-left:6px; }
+    .ghl-copy-btn:hover { background:#293241; }
+
+    .ghl-auth-note { font-size:11px;color:#666;margin-top:8px;padding:8px 12px;background:#fff8e1;border-radius:4px;border-left:3px solid #f39c12; }
+    .ghl-auth-note code { font-family:'Courier New',monospace;font-size:10px;background:#f0f0f0;padding:1px 4px;border-radius:2px; }
+
+    .ghl-outbound { margin-top:8px; }
+    .ghl-outbound-url { font-family:'Courier New',monospace;font-size:11px;color:#555;word-break:break-all; }
+
     .ghl-actions { display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center; }
     .ghl-btn { font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;padding:8px 18px;border:none;border-radius:6px;cursor:pointer;transition:opacity 0.2s; }
     .ghl-btn:hover { opacity:0.85; }
@@ -25,8 +43,10 @@
     .ghl-test-result { font-family:'Montserrat',sans-serif;font-size:12px;padding:8px 14px;border-radius:6px;display:none; }
     .ghl-test-result.ok { background:#d4edda;color:#155724;display:inline-block; }
     .ghl-test-result.fail { background:#f8d7da;color:#721c24;display:inline-block; }
+
     .ghl-filters { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px; }
     .ghl-filters select { font-family:'Montserrat',sans-serif;font-size:12px;padding:6px 10px;border:1px solid #98c1d9;border-radius:4px;background:#fff; }
+
     .ghl-table { width:100%;border-collapse:collapse;font-family:'Montserrat',sans-serif;font-size:12px; }
     .ghl-table th { background:#293241;color:#e0fbfc;padding:10px 12px;text-align:left;font-weight:600;white-space:nowrap; }
     .ghl-table td { padding:8px 12px;border-bottom:1px solid #e0fbfc;color:#293241;vertical-align:top; }
@@ -37,9 +57,14 @@
     .ghl-badge.test { background:#f39c12; }
     .ghl-badge.dispo { background:#3d5a80; }
     .ghl-badge.appt { background:#8e44ad; }
-    .ghl-payload { max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:#555;font-family:'Courier New',monospace;font-size:11px; }
+    .ghl-badge.reschedule { background:#e67e22; }
+    .ghl-badge.cancel { background:#95a5a6; }
+    .ghl-badge.update { background:#2ecc71; }
+    .ghl-badge.in { background:#8e44ad; }
+    .ghl-badge.out { background:#2980b9; }
+    .ghl-payload { max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:#555;font-family:'Courier New',monospace;font-size:11px; }
     .ghl-payload:hover { white-space:normal;word-break:break-all; }
-    .ghl-error { color:#e74c3c;font-size:11px;max-width:250px;word-break:break-word; }
+    .ghl-error { color:#e74c3c;font-size:11px;max-width:200px;word-break:break-word; }
     .ghl-empty { text-align:center;padding:40px;color:#666;font-family:'Montserrat',sans-serif;font-size:14px; }
     .ghl-detail-modal { display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center; }
     .ghl-detail-modal.open { display:flex; }
@@ -55,30 +80,87 @@
 {% block content %}
 <div class="ghl-container">
     <div class="ghl-header">
-        <h2>GHL Webhook Diagnostics</h2>
+        <h2>GHL Webhook Hub</h2>
         <div class="ghl-pills">
             <span class="ghl-pill total">Total: {{ total }}</span>
+            <span class="ghl-pill inbound">Inbound: {{ inbound_count }}</span>
+            <span class="ghl-pill outbound">Outbound: {{ outbound_count }}</span>
             <span class="ghl-pill ok">OK: {{ success_count }}</span>
             <span class="ghl-pill fail">Failed: {{ fail_count }}</span>
         </div>
     </div>
 
-    <div class="ghl-urls">
-        <div style="margin-bottom:6px;"><strong>Disposition URL:</strong> <code>{{ ghl_dispo_url }}</code></div>
-        <div><strong>Appointment URL:</strong> <code>{{ ghl_appt_url }}</code></div>
+    <!-- INBOUND ENDPOINTS -->
+    <div class="ghl-section">
+        <h3>Inbound Endpoints (GHL &rarr; Sutton)</h3>
+        {% for ep in inbound_endpoints %}
+        <div class="ghl-ep">
+            <div class="ghl-ep-header">
+                <span class="ghl-ep-method">{{ ep.method }}</span>
+                <span class="ghl-ep-name">{{ ep.name }}</span>
+            </div>
+            <code class="ghl-ep-url" id="url-{{ forloop.counter }}">{{ ep.full_url }}</code>
+            <button class="ghl-copy-btn" onclick="copyUrl('url-{{ forloop.counter }}')">Copy URL</button>
+            <div class="ghl-ep-fields"><strong>Fields:</strong> {{ ep.fields }}</div>
+        </div>
+        {% endfor %}
+
+        <div class="ghl-auth-note">
+            <strong>Auth:</strong> Add your API key one of three ways:<br>
+            1. Query param: <code>?api_key=YOUR_KEY</code><br>
+            2. Header: <code>Authorization: Bearer YOUR_KEY</code><br>
+            3. Header: <code>X-API-Key: YOUR_KEY</code><br><br>
+            <strong>Active API Keys:</strong>
+            {% for name, key in api_keys %}
+            <div style="margin-top:4px;"><code>{{ name }}: {{ key }}</code> <button class="ghl-copy-btn" onclick="navigator.clipboard.writeText('{{ key }}')">Copy</button></div>
+            {% empty %}
+            <div style="margin-top:4px;color:#e74c3c;">No API keys configured. Create one on the <a href="{% url 'tenants' %}">Tenants page</a>.</div>
+            {% endfor %}
+        </div>
     </div>
 
+    <!-- OUTBOUND WEBHOOKS -->
+    <div class="ghl-section">
+        <h3>Outbound Webhooks (Sutton &rarr; GHL)</h3>
+        <div class="ghl-ep">
+            <div class="ghl-ep-header">
+                <span class="ghl-ep-method">POST</span>
+                <span class="ghl-ep-name">Disposition Change</span>
+            </div>
+            <div class="ghl-outbound-url">{{ ghl_dispo_url|default:"Not configured" }}</div>
+            <div class="ghl-ep-fields"><strong>Fires when:</strong> Disposition updated via CRM, Daily, or Alfred</div>
+        </div>
+        <div class="ghl-ep">
+            <div class="ghl-ep-header">
+                <span class="ghl-ep-method">POST</span>
+                <span class="ghl-ep-name">Appointment DateTime Change</span>
+            </div>
+            <div class="ghl-outbound-url">{{ ghl_appt_url|default:"Not configured" }}</div>
+            <div class="ghl-ep-fields"><strong>Fires when:</strong> Appointment datetime changed via CRM or Daily</div>
+        </div>
+    </div>
+
+    <!-- TEST BUTTONS -->
     <div class="ghl-actions">
-        <button class="ghl-btn test-dispo" id="test-dispo-btn" onclick="testGHL('disposition')">Test Disposition Webhook</button>
-        <button class="ghl-btn test-appt" id="test-appt-btn" onclick="testGHL('appointment')">Test Appointment Webhook</button>
+        <button class="ghl-btn test-dispo" id="test-dispo-btn" onclick="testGHL('disposition')">Test Outbound Dispo</button>
+        <button class="ghl-btn test-appt" id="test-appt-btn" onclick="testGHL('appointment')">Test Outbound Appt</button>
         <span class="ghl-test-result" id="test-result"></span>
     </div>
 
+    <!-- FILTERS -->
     <form class="ghl-filters" method="get" action="">
+        <select name="direction" onchange="this.form.submit()">
+            <option value="">All Directions</option>
+            <option value="inbound" {% if direction_filter == 'inbound' %}selected{% endif %}>Inbound</option>
+            <option value="outbound" {% if direction_filter == 'outbound' %}selected{% endif %}>Outbound</option>
+        </select>
         <select name="type" onchange="this.form.submit()">
             <option value="">All Types</option>
-            <option value="disposition" {% if type_filter == 'disposition' %}selected{% endif %}>Disposition</option>
             <option value="appointment" {% if type_filter == 'appointment' %}selected{% endif %}>Appointment</option>
+            <option value="reschedule" {% if type_filter == 'reschedule' %}selected{% endif %}>Reschedule</option>
+            <option value="cancel" {% if type_filter == 'cancel' %}selected{% endif %}>Cancel</option>
+            <option value="update" {% if type_filter == 'update' %}selected{% endif %}>Update</option>
+            <option value="disposition" {% if type_filter == 'disposition' %}selected{% endif %}>Disposition</option>
             <option value="test" {% if type_filter == 'test' %}selected{% endif %}>Test</option>
         </select>
         <select name="success" onchange="this.form.submit()">
@@ -86,21 +168,24 @@
             <option value="1" {% if success_filter == '1' %}selected{% endif %}>Success</option>
             <option value="0" {% if success_filter == '0' %}selected{% endif %}>Failed</option>
         </select>
-        {% if type_filter or success_filter %}
-        <a href="{% url 'ghl_debug' %}" style="font-family:'Montserrat',sans-serif;font-size:11px;color:#ee6c4d;text-decoration:none;">Clear</a>
+        {% if type_filter or success_filter or direction_filter %}
+        <a href="{% url 'ghl_debug' %}" style="font-family:'Montserrat',sans-serif;font-size:11px;color:#ee6c4d;text-decoration:none;">Clear Filters</a>
         {% endif %}
     </form>
 
+    <!-- LOG TABLE -->
     {% if logs %}
     <div style="overflow-x:auto;">
     <table class="ghl-table">
         <thead>
             <tr>
                 <th>Time</th>
+                <th>Dir</th>
                 <th>Status</th>
                 <th>Type</th>
-                <th>Source</th>
+                <th>URL/Path</th>
                 <th>Lead</th>
+                <th>Source</th>
                 <th>HTTP</th>
                 <th>Payload</th>
                 <th>Error</th>
@@ -110,6 +195,13 @@
             {% for log in logs %}
             <tr style="cursor:pointer;" onclick="showDetail({{ log.id }})">
                 <td style="white-space:nowrap;">{{ log.created_at|date:"M d, g:i A" }}</td>
+                <td>
+                    {% if log.direction == 'inbound' %}
+                    <span class="ghl-badge in">IN</span>
+                    {% else %}
+                    <span class="ghl-badge out">OUT</span>
+                    {% endif %}
+                </td>
                 <td>
                     {% if log.success %}
                     <span class="ghl-badge ok">OK</span>
@@ -122,20 +214,25 @@
                     <span class="ghl-badge test">Test</span>
                     {% elif log.webhook_type == 'appointment' %}
                     <span class="ghl-badge appt">Appt</span>
+                    {% elif log.webhook_type == 'reschedule' %}
+                    <span class="ghl-badge reschedule">Resched</span>
+                    {% elif log.webhook_type == 'cancel' %}
+                    <span class="ghl-badge cancel">Cancel</span>
+                    {% elif log.webhook_type == 'update' %}
+                    <span class="ghl-badge update">Update</span>
                     {% else %}
                     <span class="ghl-badge dispo">Dispo</span>
                     {% endif %}
                 </td>
-                <td>{{ log.source }}</td>
+                <td style="font-family:'Courier New',monospace;font-size:10px;max-width:180px;word-break:break-all;">{{ log.url|default:"—" }}</td>
                 <td>{{ log.lead_name|default:"—" }}</td>
+                <td>{{ log.source|default:"—" }}</td>
                 <td>{{ log.response_status|default:"—" }}</td>
-                <td><span class="ghl-payload">{{ log.payload|truncatechars:60 }}</span></td>
+                <td><span class="ghl-payload">{{ log.payload|truncatechars:50 }}</span></td>
                 <td>
                     {% if log.error_message %}
-                    <span class="ghl-error">{{ log.error_message|truncatechars:80 }}</span>
-                    {% else %}
-                    —
-                    {% endif %}
+                    <span class="ghl-error">{{ log.error_message|truncatechars:60 }}</span>
+                    {% else %}—{% endif %}
                 </td>
             </tr>
             {% endfor %}
@@ -143,7 +240,7 @@
     </table>
     </div>
     {% else %}
-    <div class="ghl-empty">No webhook logs yet. Webhooks will be logged when disposition or appointment changes fire.</div>
+    <div class="ghl-empty">No webhook logs yet. Send a test webhook or make a change to see activity here.</div>
     {% endif %}
 </div>
 
@@ -160,6 +257,7 @@ const LOG_DATA = {
     {% for log in logs %}
     {{ log.id }}: {
         time: "{{ log.created_at|date:'M d, Y g:i:s A' }}",
+        direction: "{{ log.direction }}",
         type: "{{ log.webhook_type }}",
         source: "{{ log.source }}",
         lead: "{{ log.lead_name|default:'—' }}",
@@ -173,23 +271,33 @@ const LOG_DATA = {
     {% endfor %}
 };
 
+function copyUrl(id) {
+    var el = document.getElementById(id);
+    navigator.clipboard.writeText(el.textContent.trim());
+    var btn = el.nextElementSibling;
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = 'Copy URL'; }, 1500);
+}
+
 function showDetail(id) {
     const d = LOG_DATA[id];
     if (!d) return;
+    let dirLabel = d.direction === 'inbound' ? '<span class="ghl-badge in">INBOUND</span>' : '<span class="ghl-badge out">OUTBOUND</span>';
     let html = '';
     html += '<div class="ghl-detail-label">Time</div><div>' + d.time + '</div>';
+    html += '<div class="ghl-detail-label">Direction</div><div>' + dirLabel + '</div>';
     html += '<div class="ghl-detail-label">Type / Source</div><div>' + d.type + ' (' + d.source + ')</div>';
     html += '<div class="ghl-detail-label">Lead</div><div>' + d.lead + '</div>';
     html += '<div class="ghl-detail-label">Result</div><div>' + (d.success ? '<span class="ghl-badge ok">OK</span>' : '<span class="ghl-badge fail">FAIL</span>') + ' HTTP ' + (d.status || '—') + '</div>';
     html += '<div class="ghl-detail-label">URL</div><pre>' + d.url + '</pre>';
-    html += '<div class="ghl-detail-label">Payload Sent</div><pre>' + JSON.stringify(d.payload, null, 2) + '</pre>';
+    html += '<div class="ghl-detail-label">Payload</div><pre>' + JSON.stringify(d.payload, null, 2) + '</pre>';
     if (d.response) {
         html += '<div class="ghl-detail-label">Response Body</div><pre>' + d.response + '</pre>';
     }
     if (d.error) {
         html += '<div class="ghl-detail-label">Error</div><pre style="color:#e74c3c;">' + d.error + '</pre>';
     }
-    document.getElementById('detail-title').textContent = d.type.charAt(0).toUpperCase() + d.type.slice(1) + ' Webhook — ' + d.lead;
+    document.getElementById('detail-title').textContent = (d.direction === 'inbound' ? 'IN' : 'OUT') + ' — ' + d.type + ' — ' + d.lead;
     document.getElementById('detail-body').innerHTML = html;
     document.getElementById('detail-modal').classList.add('open');
 }
@@ -213,10 +321,10 @@ function testGHL(type) {
     .then(r => r.json())
     .then(data => {
         btn.disabled = false;
-        btn.textContent = type === 'appointment' ? 'Test Appointment Webhook' : 'Test Disposition Webhook';
+        btn.textContent = type === 'appointment' ? 'Test Outbound Appt' : 'Test Outbound Dispo';
         if (data.success) {
             result.className = 'ghl-test-result ok';
-            result.textContent = 'GHL responded HTTP ' + data.status + ' — connection OK';
+            result.textContent = 'GHL responded HTTP ' + data.status;
         } else {
             result.className = 'ghl-test-result fail';
             result.textContent = 'Failed: ' + (data.error || 'HTTP ' + data.status);
@@ -226,7 +334,7 @@ function testGHL(type) {
     })
     .catch(err => {
         btn.disabled = false;
-        btn.textContent = type === 'appointment' ? 'Test Appointment Webhook' : 'Test Disposition Webhook';
+        btn.textContent = type === 'appointment' ? 'Test Outbound Appt' : 'Test Outbound Dispo';
         result.className = 'ghl-test-result fail';
         result.textContent = 'Network error: ' + err.message;
         result.style.display = 'inline-block';
