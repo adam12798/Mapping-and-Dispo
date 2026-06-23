@@ -1882,6 +1882,24 @@ def ghl_debug_view(request):
     })
 
 
+@api_key_required
+def ghl_webhook_logs_api(request):
+    """API endpoint to query webhook log payloads for debugging."""
+    logs = GHLWebhookLog.objects.filter(direction='inbound').order_by('-created_at')[:10]
+    result = []
+    for log in logs:
+        result.append({
+            'id': log.id,
+            'type': log.webhook_type,
+            'lead_name': log.lead_name,
+            'success': log.success,
+            'payload': log.payload,
+            'error_message': log.error_message,
+            'created_at': log.created_at.isoformat(),
+        })
+    return JsonResponse(result, safe=False)
+
+
 @csrf_exempt
 @manager_required
 def ghl_test_api(request):
