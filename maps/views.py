@@ -3406,11 +3406,14 @@ def _ghl_log_inbound(webhook_type, request, lead=None, lead_name='', success=Tru
 
 def _ghl_normalize_data(data):
     """Map GHL's field names to our expected names.
-    Uses case-insensitive lookup and tries multiple key variations.
+    GHL sends raw contact fields like full_name, address1, contact_source,
+    plus custom fields like 'In Person or Virtual', 'Appointment Date and Time (Call Center)'.
     """
     lower_map = {}
     for k, v in data.items():
-        lk = k.lower().replace(' ', '_').replace('-', '_')
+        if isinstance(v, dict):
+            continue
+        lk = k.lower().replace(' ', '_').replace('-', '_').replace('(', '').replace(')', '')
         if v and (lk not in lower_map or not lower_map[lk]):
             lower_map[lk] = v
 
@@ -3418,24 +3421,36 @@ def _ghl_normalize_data(data):
         for alias in aliases:
             v = lower_map.get(alias, '')
             if v:
-                return v
+                return str(v) if not isinstance(v, list) else ', '.join(str(x) for x in v)
         return ''
 
-    _ghl_logger.info(f"GHL payload keys: {list(data.keys())}")
-    _ghl_logger.info(f"GHL normalized keys: {list(lower_map.keys())}")
+    services = data.get('Services', data.get('services', []))
+    if isinstance(services, list) and services:
+        svc_str = ', '.join(services).lower()
+        if 'solar' in svc_str and 'hvac' in svc_str:
+            appt_type = 'both'
+        elif 'solar' in svc_str:
+            appt_type = 'solar'
+        elif 'hvac' in svc_str:
+            appt_type = 'hvac'
+        else:
+            appt_type = ''
+    else:
+        appt_type = g('product_type', 'appointment_type', 'service_type', 'services')
 
     return {
-        'name': g('name', 'full_name', 'contact_name', 'contactname', 'first_name'),
+        'name': g('full_name', 'name', 'contact_name', 'first_name', 'given_name'),
         'phone': g('phone', 'phone_number', 'contact_phone'),
-        'address': g('address', 'full_address', 'street_address', 'street'),
+        'address': g('address1', 'address', 'full_address', 'street_address'),
         'city': g('city', 'contact_city'),
         'state': g('state', 'contact_state'),
-        'appointment_datetime': g('day_and_time', 'appointment_datetime', 'appointment_start_time', 'start_time', 'starttime', 'appointment_time', 'date_and_time'),
-        'appointment_type': g('product_type', 'appointment_type', 'producttype', 'type'),
-        'appointment_format': g('meeting_type', 'appointment_format', 'in_person_or_virtual', 'meetingtype', 'format'),
-        'source': g('source', 'lead_source', 'leadsource', 'contact_source'),
+        'appointment_datetime': g('appointment_date_and_time_call_center', 'day_and_time', 'appointment_datetime', 'appointment_start_time', 'start_time', 'hvac_appointment_date_and_time', 'date_and_time'),
+        'appointment_type': appt_type,
+        'appointment_format': g('in_person_or_virtual', 'meeting_type', 'appointment_format'),
+        'source': g('contact_source', 'source', 'lead_source', 'lead_generator'),
+        'tags': g('tags', 'vendor_tags'),
         'notes': g('notes', 'hvac_notes', 'contact_notes', 'appt_notes'),
-        'disposition': g('disposition', 'status', 'lead_status'),
+        'disposition': g('disposition', 'lead_disposition'),
     }
 
 
@@ -3476,14 +3491,15 @@ def ghl_appointment(request):
         return JsonResponse({'status': 'ok', 'id': existing.id, 'note': 'lead already exists'})
 
     appt_dt = _ghl_parse_datetime(data['appointment_datetime'])
-    appt_type = normalize_type(data['appointment_type'])
-    tags = ''
-    if appt_type == 'solar':
-        tags = 'Solar'
-    elif appt_type == 'hvac':
-        tags = 'Hvac'
-    elif appt_type == 'both':
-        tags = 'Solar,Hvac'
+    appt_type = data['appointment_type'] if data['appointment_type'] in ('solar', 'hvac', 'both') else normalize_type(data['appointment_type'])
+    tags = data.get('tags', '')
+    if not tags:
+        if appt_type == 'solar':
+            tags = 'Solar'
+        elif appt_type == 'hvac':
+            tags = 'Hvac'
+        elif appt_type == 'both':
+            tags = 'Solar,Hvac'
 
     appt_format = data['appointment_format']
     if appt_format.lower() in ('in person', 'in_person'):

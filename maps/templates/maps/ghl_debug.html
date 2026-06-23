@@ -62,18 +62,33 @@
     .ghl-badge.update { background:#2ecc71; }
     .ghl-badge.in { background:#8e44ad; }
     .ghl-badge.out { background:#2980b9; }
-    .ghl-payload { max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:#555;font-family:'Courier New',monospace;font-size:11px; }
-    .ghl-payload:hover { white-space:normal;word-break:break-all; }
+    .ghl-payload-preview { max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#555;font-family:'Courier New',monospace;font-size:11px; }
     .ghl-error { color:#e74c3c;font-size:11px;max-width:200px;word-break:break-word; }
     .ghl-empty { text-align:center;padding:40px;color:#666;font-family:'Montserrat',sans-serif;font-size:14px; }
+
     .ghl-detail-modal { display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center; }
     .ghl-detail-modal.open { display:flex; }
-    .ghl-detail-box { background:#fff;border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.2); }
+    .ghl-detail-box { background:#fff;border-radius:12px;padding:24px;max-width:800px;width:95%;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.2); }
     .ghl-detail-box h3 { font-family:'Montserrat',sans-serif;color:#293241;margin:0 0 16px; }
-    .ghl-detail-box pre { background:#f8fbfd;padding:12px;border-radius:6px;font-size:11px;overflow-x:auto;white-space:pre-wrap;word-break:break-all; }
+    .ghl-detail-box pre { background:#f8fbfd;padding:12px;border-radius:6px;font-size:11px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto; }
     .ghl-detail-box .close-btn { float:right;background:none;border:none;font-size:20px;cursor:pointer;color:#999; }
     .ghl-detail-box .close-btn:hover { color:#293241; }
-    .ghl-detail-label { font-weight:600;color:#3d5a80;margin-top:12px;margin-bottom:4px; }
+    .ghl-detail-label { font-weight:600;color:#3d5a80;margin-top:12px;margin-bottom:4px;font-family:'Montserrat',sans-serif;font-size:12px; }
+
+    .payload-toggle { font-size:11px;color:#3d5a80;cursor:pointer;text-decoration:underline;font-family:'Montserrat',sans-serif;margin-top:4px; }
+    .payload-toggle:hover { color:#293241; }
+    .payload-section { margin-top:4px; }
+    .payload-full { display:none;background:#f0f4f8;padding:10px;border-radius:6px;font-family:'Courier New',monospace;font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto;margin-top:6px;border:1px solid #d0d8e0; }
+    .payload-full.open { display:block; }
+
+    .payload-key-val { display:flex;gap:4px;padding:2px 0;border-bottom:1px solid #eee; }
+    .payload-key-val:last-child { border-bottom:none; }
+    .pkey { color:#8e44ad;font-weight:600;min-width:200px;flex-shrink:0; }
+    .pval { color:#293241;word-break:break-word; }
+    .pval.empty { color:#ccc;font-style:italic; }
+    .payload-filter-bar { display:flex;gap:8px;margin-bottom:8px;align-items:center; }
+    .payload-filter-bar input { font-family:'Montserrat',sans-serif;font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;width:200px; }
+    .payload-filter-bar label { font-size:11px;color:#666;font-family:'Montserrat',sans-serif;cursor:pointer; }
 </style>
 {% endblock %}
 
@@ -183,17 +198,15 @@
                 <th>Dir</th>
                 <th>Status</th>
                 <th>Type</th>
-                <th>URL/Path</th>
                 <th>Lead</th>
                 <th>Source</th>
                 <th>HTTP</th>
                 <th>Payload</th>
-                <th>Error</th>
             </tr>
         </thead>
         <tbody>
             {% for log in logs %}
-            <tr style="cursor:pointer;" onclick="showDetail({{ log.id }})">
+            <tr>
                 <td style="white-space:nowrap;">{{ log.created_at|date:"M d, g:i A" }}</td>
                 <td>
                     {% if log.direction == 'inbound' %}
@@ -224,15 +237,17 @@
                     <span class="ghl-badge dispo">Dispo</span>
                     {% endif %}
                 </td>
-                <td style="font-family:'Courier New',monospace;font-size:10px;max-width:180px;word-break:break-all;">{{ log.url|default:"—" }}</td>
                 <td>{{ log.lead_name|default:"—" }}</td>
                 <td>{{ log.source|default:"—" }}</td>
                 <td>{{ log.response_status|default:"—" }}</td>
-                <td><span class="ghl-payload">{{ log.payload|truncatechars:50 }}</span></td>
                 <td>
-                    {% if log.error_message %}
-                    <span class="ghl-error">{{ log.error_message|truncatechars:60 }}</span>
-                    {% else %}—{% endif %}
+                    <div class="payload-section">
+                        <div class="payload-preview">{{ log.payload|truncatechars:60 }}</div>
+                        <span class="payload-toggle" onclick="togglePayload(this, {{ log.id }})">Expand payload</span>
+                        {% if log.error_message %}
+                        <div style="margin-top:4px;font-size:10px;color:#e74c3c;">{{ log.error_message|truncatechars:80 }}</div>
+                        {% endif %}
+                    </div>
                 </td>
             </tr>
             {% endfor %}
@@ -244,33 +259,20 @@
     {% endif %}
 </div>
 
-<div class="ghl-detail-modal" id="detail-modal" onclick="if(event.target===this)closeDetail()">
+<!-- PAYLOAD DETAIL MODAL -->
+<div class="ghl-detail-modal" id="payload-modal" onclick="if(event.target===this)closePayloadModal()">
     <div class="ghl-detail-box">
-        <button class="close-btn" onclick="closeDetail()">&times;</button>
-        <h3 id="detail-title">Webhook Detail</h3>
-        <div id="detail-body"></div>
+        <button class="close-btn" onclick="closePayloadModal()">&times;</button>
+        <h3 id="payload-modal-title">Webhook Payload</h3>
+        <div class="payload-filter-bar">
+            <input type="text" id="payload-search" placeholder="Filter keys..." oninput="filterPayloadKeys()">
+            <label><input type="checkbox" id="hide-empty" onchange="filterPayloadKeys()"> Hide empty</label>
+        </div>
+        <div id="payload-modal-body"></div>
     </div>
 </div>
 
 <script>
-const LOG_DATA = {
-    {% for log in logs %}
-    {{ log.id }}: {
-        time: "{{ log.created_at|date:'M d, Y g:i:s A' }}",
-        direction: "{{ log.direction }}",
-        type: "{{ log.webhook_type }}",
-        source: "{{ log.source }}",
-        lead: "{{ log.lead_name|default:'—' }}",
-        success: {{ log.success|yesno:"true,false" }},
-        status: {{ log.response_status|default:"null" }},
-        url: "{{ log.url|escapejs }}",
-        payload: {{ log.payload|default:"'{}'" }},
-        response: "{{ log.response_body|escapejs }}",
-        error: "{{ log.error_message|escapejs }}"
-    },
-    {% endfor %}
-};
-
 function copyUrl(id) {
     var el = document.getElementById(id);
     navigator.clipboard.writeText(el.textContent.trim());
@@ -279,31 +281,88 @@ function copyUrl(id) {
     setTimeout(function() { btn.textContent = 'Copy URL'; }, 1500);
 }
 
-function showDetail(id) {
-    const d = LOG_DATA[id];
-    if (!d) return;
-    let dirLabel = d.direction === 'inbound' ? '<span class="ghl-badge in">INBOUND</span>' : '<span class="ghl-badge out">OUTBOUND</span>';
-    let html = '';
-    html += '<div class="ghl-detail-label">Time</div><div>' + d.time + '</div>';
-    html += '<div class="ghl-detail-label">Direction</div><div>' + dirLabel + '</div>';
-    html += '<div class="ghl-detail-label">Type / Source</div><div>' + d.type + ' (' + d.source + ')</div>';
-    html += '<div class="ghl-detail-label">Lead</div><div>' + d.lead + '</div>';
-    html += '<div class="ghl-detail-label">Result</div><div>' + (d.success ? '<span class="ghl-badge ok">OK</span>' : '<span class="ghl-badge fail">FAIL</span>') + ' HTTP ' + (d.status || '—') + '</div>';
-    html += '<div class="ghl-detail-label">URL</div><pre>' + d.url + '</pre>';
-    html += '<div class="ghl-detail-label">Payload</div><pre>' + JSON.stringify(d.payload, null, 2) + '</pre>';
-    if (d.response) {
-        html += '<div class="ghl-detail-label">Response Body</div><pre>' + d.response + '</pre>';
-    }
-    if (d.error) {
-        html += '<div class="ghl-detail-label">Error</div><pre style="color:#e74c3c;">' + d.error + '</pre>';
-    }
-    document.getElementById('detail-title').textContent = (d.direction === 'inbound' ? 'IN' : 'OUT') + ' — ' + d.type + ' — ' + d.lead;
-    document.getElementById('detail-body').innerHTML = html;
-    document.getElementById('detail-modal').classList.add('open');
+function togglePayload(el, logId) {
+    // Fetch the full payload via the API and show in modal
+    fetch('/api/v1/ghl/logs/?api_key={{ api_keys.0.1|default:"" }}')
+    .then(r => r.json())
+    .then(logs => {
+        const log = logs.find(l => l.id === logId);
+        if (!log) { alert('Log not found'); return; }
+        showPayloadModal(log);
+    })
+    .catch(err => {
+        alert('Error loading payload: ' + err.message);
+    });
 }
 
-function closeDetail() {
-    document.getElementById('detail-modal').classList.remove('open');
+function showPayloadModal(log) {
+    const title = document.getElementById('payload-modal-title');
+    const body = document.getElementById('payload-modal-body');
+    title.textContent = (log.type || 'webhook') + ' — ' + (log.lead_name || 'unknown') + ' — ' + log.created_at;
+
+    let payload;
+    try {
+        payload = JSON.parse(log.payload);
+    } catch(e) {
+        body.innerHTML = '<pre>' + escapeHtml(log.payload || 'Empty payload') + '</pre>';
+        document.getElementById('payload-modal').classList.add('open');
+        return;
+    }
+
+    let html = '<div id="payload-kv-list">';
+    const keys = Object.keys(payload);
+    for (const key of keys) {
+        let val = payload[key];
+        let valStr;
+        if (val === null || val === undefined) valStr = '';
+        else if (typeof val === 'object') valStr = JSON.stringify(val, null, 2);
+        else valStr = String(val);
+
+        const isEmpty = !valStr || valStr === '""' || valStr === '[]' || valStr === '{}';
+        html += '<div class="payload-key-val" data-key="' + escapeHtml(key.toLowerCase()) + '" data-empty="' + isEmpty + '">';
+        html += '<span class="pkey">' + escapeHtml(key) + '</span>';
+        if (isEmpty) {
+            html += '<span class="pval empty">(empty)</span>';
+        } else {
+            html += '<span class="pval">' + escapeHtml(valStr) + '</span>';
+        }
+        html += '</div>';
+    }
+    html += '</div>';
+
+    if (log.error_message) {
+        html += '<div class="ghl-detail-label" style="margin-top:16px;">Debug Info</div>';
+        html += '<pre style="font-size:10px;max-height:200px;overflow-y:auto;">' + escapeHtml(log.error_message) + '</pre>';
+    }
+
+    body.innerHTML = html;
+    document.getElementById('payload-search').value = '';
+    document.getElementById('hide-empty').checked = false;
+    document.getElementById('payload-modal').classList.add('open');
+}
+
+function closePayloadModal() {
+    document.getElementById('payload-modal').classList.remove('open');
+}
+
+function filterPayloadKeys() {
+    const search = document.getElementById('payload-search').value.toLowerCase();
+    const hideEmpty = document.getElementById('hide-empty').checked;
+    const rows = document.querySelectorAll('#payload-kv-list .payload-key-val');
+    rows.forEach(row => {
+        const key = row.getAttribute('data-key');
+        const isEmpty = row.getAttribute('data-empty') === 'true';
+        let show = true;
+        if (search && !key.includes(search)) show = false;
+        if (hideEmpty && isEmpty) show = false;
+        row.style.display = show ? 'flex' : 'none';
+    });
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 function testGHL(type) {
