@@ -3442,6 +3442,7 @@ def _ghl_normalize_data(data):
         'tags': raw_get('tags'),
         'notes': cd_get('Notes') or raw_get('notes', 'HVAC Notes'),
         'disposition': cd_get('Disposition') or raw_get('disposition'),
+        'status': cd_get('Status') or raw_get('status'),
     }
 
 
@@ -3465,7 +3466,10 @@ def ghl_webhook_logs_api(request):
 
 @api_key_required
 def ghl_appointment(request):
-    """GHL webhook: new appointment booked."""
+    """GHL webhook: appointment created, confirmed, cancelled, or rescheduled.
+    Uses customData.Status to determine action. Never creates duplicates —
+    always updates existing lead if one matches by name/phone/address.
+    """
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
     raw_data = json.loads(request.body)
@@ -3475,14 +3479,74 @@ def ghl_appointment(request):
     address = data['address']
     city = data['city']
     state = data['state'] or 'MA'
-
-    existing = _ghl_match_lead(name, phone, address)
-    if existing:
-        _ghl_log_inbound('appointment', request, lead=existing, lead_name=name, success=True, response_status=200)
-        return JsonResponse({'status': 'ok', 'id': existing.id, 'note': 'lead already exists'})
+    status = data.get('status', '').lower().strip()
 
     appt_dt = _ghl_parse_datetime(data['appointment_datetime'])
     appt_type = data['appointment_type'] if data['appointment_type'] in ('solar', 'hvac', 'both') else normalize_type(data['appointment_type'])
+    appt_format = data['appointment_format']
+    if appt_format.lower() in ('in person', 'in_person'):
+        appt_format = 'in_person'
+    elif appt_format.lower() == 'virtual':
+        appt_format = 'virtual'
+    else:
+        appt_format = normalize_format(appt_format)
+
+    existing = _ghl_match_lead(name, phone, address)
+
+    if existing:
+        changes = []
+
+        if status == 'cancelled':
+            if not existing.cancelled:
+                existing.cancelled = True
+                changes.append('Appointment cancelled via GHL')
+            _ghl_log_inbound('cancel', request, lead=existing, lead_name=name, success=True, response_status=200)
+
+        else:
+            if existing.cancelled:
+                existing.cancelled = False
+                changes.append(f'Appointment reconfirmed via GHL (status: {status or "confirmed"})')
+
+            if appt_dt and appt_dt != existing.appointment_datetime:
+                old_dt = existing.appointment_datetime
+                existing.appointment_datetime = appt_dt
+                old_str = old_dt.strftime('%m/%d/%Y %I:%M %p') if old_dt else 'none'
+                new_str = appt_dt.strftime('%m/%d/%Y %I:%M %p')
+                changes.append(f'Appointment datetime updated: {old_str} → {new_str}')
+
+            if address and address != existing.address:
+                changes.append(f'Address updated: {existing.address} → {address}')
+                existing.address = address
+            if city and city != existing.city:
+                existing.city = city
+            if state and state != existing.state:
+                existing.state = state
+            if appt_type and appt_type != existing.appointment_type:
+                changes.append(f'Type updated: {existing.appointment_type} → {appt_type}')
+                existing.appointment_type = appt_type
+            if appt_format and appt_format != existing.appointment_format:
+                existing.appointment_format = appt_format
+            if data['source'] and data['source'] != existing.source:
+                existing.source = data['source']
+            if data['notes'] and data['notes'] != existing.appt_notes:
+                existing.appt_notes = data['notes']
+
+            if address and (address != existing.address or not existing.latitude):
+                geocode_address = f"{address}, {city}, {state}" if city else address
+                existing.latitude, existing.longitude = geocode(geocode_address)
+
+            _ghl_log_inbound('appointment', request, lead=existing, lead_name=name, success=True, response_status=200)
+
+        existing.save()
+        if changes:
+            _ghl_log_changes(existing, changes)
+        return JsonResponse({'status': 'ok', 'id': existing.id, 'updated': bool(changes)})
+
+    # No existing lead — create new (only if not a cancellation)
+    if status == 'cancelled':
+        _ghl_log_inbound('cancel', request, lead_name=name, success=False, error_message='No lead found to cancel', response_status=404)
+        return JsonResponse({'error': 'No lead found to cancel'}, status=404)
+
     tags = data.get('tags', '')
     if not tags:
         if appt_type == 'solar':
@@ -3491,14 +3555,6 @@ def ghl_appointment(request):
             tags = 'Hvac'
         elif appt_type == 'both':
             tags = 'Solar,Hvac'
-
-    appt_format = data['appointment_format']
-    if appt_format.lower() in ('in person', 'in_person'):
-        appt_format = 'in_person'
-    elif appt_format.lower() == 'virtual':
-        appt_format = 'virtual'
-    else:
-        appt_format = normalize_format(appt_format)
 
     geocode_address = address
     if city:
