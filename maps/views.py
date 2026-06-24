@@ -3524,6 +3524,12 @@ def ghl_appointment(request):
             if appt_type and appt_type != existing.appointment_type:
                 changes.append(f'Type updated: {existing.appointment_type} → {appt_type}')
                 existing.appointment_type = appt_type
+                if appt_type == 'solar':
+                    existing.tags = 'Solar'
+                elif appt_type == 'hvac':
+                    existing.tags = 'Hvac'
+                elif appt_type == 'both':
+                    existing.tags = 'Solar,Hvac'
             if appt_format and appt_format != existing.appointment_format:
                 existing.appointment_format = appt_format
             if data['source'] and data['source'] != existing.source:
