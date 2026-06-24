@@ -3406,12 +3406,13 @@ def _ghl_log_inbound(webhook_type, request, lead=None, lead_name='', success=Tru
 
 def _ghl_normalize_data(data):
     """Map GHL's field names to our expected names.
-    GHL sends raw contact fields like full_name, address1, contact_source,
-    plus custom fields like 'In Person or Virtual', 'Appointment Date and Time (Call Center)'.
+    GHL sends raw contact fields (full_name, address1, contact_source),
+    custom fields ('In Person or Virtual'), and a nested calendar object
+    with startTime for the appointment datetime.
     """
     lower_map = {}
     for k, v in data.items():
-        if isinstance(v, dict):
+        if isinstance(v, (dict, list)):
             continue
         lk = k.lower().replace(' ', '_').replace('-', '_').replace('(', '').replace(')', '')
         if v and (lk not in lower_map or not lower_map[lk]):
@@ -3421,12 +3422,21 @@ def _ghl_normalize_data(data):
         for alias in aliases:
             v = lower_map.get(alias, '')
             if v:
-                return str(v) if not isinstance(v, list) else ', '.join(str(x) for x in v)
+                return str(v)
         return ''
 
+    # Appointment datetime: primary source is calendar.startTime
+    calendar = data.get('calendar', {})
+    appt_dt = ''
+    if isinstance(calendar, dict) and calendar.get('startTime'):
+        appt_dt = calendar['startTime']
+    if not appt_dt:
+        appt_dt = g('day_and_time', 'appointment_date_and_time_call_center', 'appointment_datetime', 'appointment_start_time', 'start_time', 'hvac_appointment_date_and_time', 'date_and_time')
+
+    # Appointment type from Services array or calendar title
     services = data.get('Services', data.get('services', []))
     if isinstance(services, list) and services:
-        svc_str = ', '.join(services).lower()
+        svc_str = ', '.join(str(s) for s in services).lower()
         if 'solar' in svc_str and 'hvac' in svc_str:
             appt_type = 'both'
         elif 'solar' in svc_str:
@@ -3436,7 +3446,7 @@ def _ghl_normalize_data(data):
         else:
             appt_type = ''
     else:
-        appt_type = g('product_type', 'appointment_type', 'service_type', 'services')
+        appt_type = g('product_type', 'appointment_type', 'service_type')
 
     return {
         'name': g('full_name', 'name', 'contact_name', 'first_name', 'given_name'),
@@ -3444,7 +3454,7 @@ def _ghl_normalize_data(data):
         'address': g('address1', 'address', 'full_address', 'street_address'),
         'city': g('city', 'contact_city'),
         'state': g('state', 'contact_state'),
-        'appointment_datetime': g('day_and_time', 'appointment_date_and_time_call_center', 'appointment_datetime', 'appointment_start_time', 'start_time', 'hvac_appointment_date_and_time', 'date_and_time'),
+        'appointment_datetime': appt_dt,
         'appointment_type': appt_type,
         'appointment_format': g('in_person_or_virtual', 'meeting_type', 'appointment_format'),
         'source': g('contact_source', 'source', 'lead_source', 'lead_generator'),
