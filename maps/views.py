@@ -3444,7 +3444,7 @@ def _ghl_normalize_data(data):
         'address': g('address1', 'address', 'full_address', 'street_address'),
         'city': g('city', 'contact_city'),
         'state': g('state', 'contact_state'),
-        'appointment_datetime': g('appointment_date_and_time_call_center', 'day_and_time', 'appointment_datetime', 'appointment_start_time', 'start_time', 'hvac_appointment_date_and_time', 'date_and_time'),
+        'appointment_datetime': g('day_and_time', 'appointment_date_and_time_call_center', 'appointment_datetime', 'appointment_start_time', 'start_time', 'hvac_appointment_date_and_time', 'date_and_time'),
         'appointment_type': appt_type,
         'appointment_format': g('in_person_or_virtual', 'meeting_type', 'appointment_format'),
         'source': g('contact_source', 'source', 'lead_source', 'lead_generator'),
