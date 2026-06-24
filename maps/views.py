@@ -3406,61 +3406,42 @@ def _ghl_log_inbound(webhook_type, request, lead=None, lead_name='', success=Tru
 
 def _ghl_normalize_data(data):
     """Map GHL's field names to our expected names.
-    GHL sends raw contact fields (full_name, address1, contact_source),
-    custom fields ('In Person or Virtual'), and a nested calendar object
-    with startTime for the appointment datetime.
+    GHL sends: customData (our configured webhook body fields) as primary,
+    plus raw contact fields and nested calendar/location/contact objects.
+    customData keys: Name, Phone, Address, City, State, Day and Time,
+    Meeting Type, Product Type, Source, Notes.
     """
-    lower_map = {}
-    for k, v in data.items():
-        if isinstance(v, (dict, list)):
-            continue
-        lk = k.lower().replace(' ', '_').replace('-', '_').replace('(', '').replace(')', '')
-        if v and (lk not in lower_map or not lower_map[lk]):
-            lower_map[lk] = v
+    cd = data.get('customData', {})
+    if not isinstance(cd, dict):
+        cd = {}
 
-    def g(*aliases):
-        for alias in aliases:
-            v = lower_map.get(alias, '')
+    def cd_get(*keys):
+        for k in keys:
+            v = cd.get(k, '')
             if v:
-                return str(v)
+                return str(v).strip()
         return ''
 
-    # Appointment datetime: primary source is calendar.startTime
-    calendar = data.get('calendar', {})
-    appt_dt = ''
-    if isinstance(calendar, dict) and calendar.get('startTime'):
-        appt_dt = calendar['startTime']
-    if not appt_dt:
-        appt_dt = g('day_and_time', 'appointment_date_and_time_call_center', 'appointment_datetime', 'appointment_start_time', 'start_time', 'hvac_appointment_date_and_time', 'date_and_time')
-
-    # Appointment type from Services array or calendar title
-    services = data.get('Services', data.get('services', []))
-    if isinstance(services, list) and services:
-        svc_str = ', '.join(str(s) for s in services).lower()
-        if 'solar' in svc_str and 'hvac' in svc_str:
-            appt_type = 'both'
-        elif 'solar' in svc_str:
-            appt_type = 'solar'
-        elif 'hvac' in svc_str:
-            appt_type = 'hvac'
-        else:
-            appt_type = ''
-    else:
-        appt_type = g('product_type', 'appointment_type', 'service_type')
+    def raw_get(*keys):
+        for k in keys:
+            v = data.get(k, '')
+            if v and not isinstance(v, (dict, list)):
+                return str(v).strip()
+        return ''
 
     return {
-        'name': g('full_name', 'name', 'contact_name', 'first_name', 'given_name'),
-        'phone': g('phone', 'phone_number', 'contact_phone'),
-        'address': g('address1', 'address', 'full_address', 'street_address'),
-        'city': g('city', 'contact_city'),
-        'state': g('state', 'contact_state'),
-        'appointment_datetime': appt_dt,
-        'appointment_type': appt_type,
-        'appointment_format': g('in_person_or_virtual', 'meeting_type', 'appointment_format'),
-        'source': g('contact_source', 'source', 'lead_source', 'lead_generator'),
-        'tags': g('tags', 'vendor_tags'),
-        'notes': g('notes', 'hvac_notes', 'contact_notes', 'appt_notes'),
-        'disposition': g('disposition', 'lead_disposition'),
+        'name': cd_get('Name') or raw_get('full_name', 'first_name'),
+        'phone': cd_get('Phone') or raw_get('phone'),
+        'address': cd_get('Address') or raw_get('address1', 'full_address'),
+        'city': cd_get('City') or raw_get('city'),
+        'state': cd_get('State') or raw_get('state'),
+        'appointment_datetime': cd_get('Day and Time') or raw_get('appointment_datetime'),
+        'appointment_type': cd_get('Product Type') or raw_get('appointment_type'),
+        'appointment_format': cd_get('Meeting Type') or raw_get('In Person or Virtual'),
+        'source': cd_get('Source') or raw_get('contact_source'),
+        'tags': raw_get('tags'),
+        'notes': cd_get('Notes') or raw_get('notes', 'HVAC Notes'),
+        'disposition': cd_get('Disposition') or raw_get('disposition'),
     }
 
 
