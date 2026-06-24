@@ -3449,7 +3449,8 @@ def _ghl_normalize_data(data):
 @api_key_required
 def ghl_webhook_logs_api(request):
     """API endpoint to query webhook log payloads for debugging."""
-    logs = GHLWebhookLog.objects.filter(direction='inbound').order_by('-created_at')[:10]
+    limit = min(int(request.GET.get('limit', 20)), 100)
+    logs = GHLWebhookLog.objects.filter(direction='inbound').order_by('-created_at')[:limit]
     result = []
     for log in logs:
         result.append({
