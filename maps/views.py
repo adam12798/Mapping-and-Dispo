@@ -3437,6 +3437,7 @@ def _ghl_normalize_data(data):
         'state': cd_get('State') or raw_get('state'),
         'appointment_datetime': cd_get('Day and Time') or raw_get('appointment_datetime'),
         'appointment_type': cd_get('Product Type') or raw_get('appointment_type'),
+        'product_type_raw': cd_get('Product Type'),
         'appointment_format': cd_get('Meeting Type') or raw_get('In Person or Virtual'),
         'source': cd_get('Source') or raw_get('contact_source'),
         'tags': raw_get('tags'),
@@ -3525,12 +3526,8 @@ def ghl_appointment(request):
             if appt_type and appt_type != existing.appointment_type:
                 changes.append(f'Type updated: {existing.appointment_type} → {appt_type}')
                 existing.appointment_type = appt_type
-                if appt_type == 'solar':
-                    existing.tags = 'Solar'
-                elif appt_type == 'hvac':
-                    existing.tags = 'Hvac'
-                elif appt_type == 'both':
-                    existing.tags = 'Solar,Hvac'
+            if data.get('product_type_raw') and data['product_type_raw'] != existing.tags:
+                existing.tags = data['product_type_raw']
             if appt_format and appt_format != existing.appointment_format:
                 existing.appointment_format = appt_format
             if data['source'] and data['source'] != existing.source:
@@ -3554,14 +3551,7 @@ def ghl_appointment(request):
         _ghl_log_inbound('cancel', request, lead_name=name, success=False, error_message='No lead found to cancel', response_status=404)
         return JsonResponse({'error': 'No lead found to cancel'}, status=404)
 
-    tags = data.get('tags', '')
-    if not tags:
-        if appt_type == 'solar':
-            tags = 'Solar'
-        elif appt_type == 'hvac':
-            tags = 'Hvac'
-        elif appt_type == 'both':
-            tags = 'Solar,Hvac'
+    tags = data.get('product_type_raw', '') or data.get('tags', '')
 
     geocode_address = address
     if city:
