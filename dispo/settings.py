@@ -143,7 +143,7 @@ OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-CSRF_TRUSTED_ORIGINS = ['https://*.ngrok-free.dev', 'https://*.up.railway.app']
+CSRF_TRUSTED_ORIGINS = ['https://*.ngrok-free.dev', 'https://*.up.railway.app', 'https://sutton-soda.com', 'https://www.sutton-soda.com']
 
 # CORS — v1 API endpoints only, origins controlled per-tenant
 CORS_ALLOW_ALL_ORIGINS = False
