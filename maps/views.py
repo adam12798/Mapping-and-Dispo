@@ -1409,31 +1409,55 @@ def dashboard_chart_api(request):
 
     stack_by = request.GET.get('stack_by', '')
 
-    if stack_by == 'rep_id':
-        rows = list(qs.filter(rep__isnull=False).values(group_by, 'rep__name', 'rep__color')
-                     .annotate(count=Count('id')).order_by(group_by, 'rep__name'))
-        label_map = LABEL_MAPS.get(group_by, {})
-        cat_order = []
-        cat_set = set()
-        rep_info = {}
+    if stack_by == 'disposition':
+        stack_field = 'disposition'
+        if group_by == 'rep_id':
+            rows = list(qs.filter(rep__isnull=False)
+                         .values('rep__name', stack_field)
+                         .annotate(count=Count('id')).order_by('rep__name', stack_field))
+            cat_order = []
+            cat_set = set()
+            for r in rows:
+                name = r['rep__name']
+                if name not in cat_set:
+                    cat_order.append(name)
+                    cat_set.add(name)
+        else:
+            rows = list(qs.values(group_by, stack_field)
+                         .annotate(count=Count('id')).order_by(group_by, stack_field))
+            label_map = LABEL_MAPS.get(group_by, {})
+            cat_order = []
+            cat_set = set()
+            for r in rows:
+                raw = r[group_by]
+                raw_str = str(raw) if raw not in (None, '') else ''
+                cat_label = label_map.get(raw_str, raw_str) if raw_str else '(empty)'
+                if cat_label not in cat_set:
+                    cat_order.append(cat_label)
+                    cat_set.add(cat_label)
+        dispo_color_map = COLOR_MAPS['disposition']
+        dispo_label_map = LABEL_MAPS.get('disposition', {})
+        dispo_order = []
+        dispo_set = set()
         pivot = {}
         for r in rows:
-            raw = r[group_by]
-            raw_str = str(raw) if raw not in (None, '') else ''
-            cat_label = label_map.get(raw_str, raw_str) if raw_str else '(empty)'
-            if cat_label not in cat_set:
-                cat_order.append(cat_label)
-                cat_set.add(cat_label)
-            rep_name = r['rep__name']
-            if rep_name not in rep_info:
-                rep_info[rep_name] = r['rep__color'] or PALETTE[len(rep_info) % len(PALETTE)]
-            pivot.setdefault(rep_name, {})[cat_label] = r['count']
+            dispo_raw = str(r[stack_field]) if r[stack_field] not in (None, '') else ''
+            if dispo_raw not in dispo_set:
+                dispo_order.append(dispo_raw)
+                dispo_set.add(dispo_raw)
+            if group_by == 'rep_id':
+                cat_label = r['rep__name']
+            else:
+                raw = r[group_by]
+                raw_str = str(raw) if raw not in (None, '') else ''
+                cat_label = label_map.get(raw_str, raw_str) if raw_str else '(empty)'
+            pivot.setdefault(dispo_raw, {})[cat_label] = r['count']
         datasets = []
-        for rep_name, color in rep_info.items():
+        for i, dispo in enumerate(dispo_order):
             datasets.append({
-                'label': rep_name,
-                'data': [pivot.get(rep_name, {}).get(cat, 0) for cat in cat_order],
-                'backgroundColor': color,
+                'label': dispo_label_map.get(dispo, dispo) if dispo else '(empty)',
+                'data': [pivot.get(dispo, {}).get(cat, 0) for cat in cat_order],
+                'backgroundColor': dispo_color_map.get(dispo, PALETTE[i % len(PALETTE)]),
             })
         total = sum(r['count'] for r in rows)
         sales_count = qs.filter(disposition='sale').count()

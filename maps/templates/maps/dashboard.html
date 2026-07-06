@@ -438,7 +438,7 @@
             var params = new URLSearchParams();
             params.set('group_by', w.groupBy);
             params.set('metric', w.metric);
-            if (w.chartType === 'stacked_bar') params.set('stack_by', 'rep_id');
+            if (w.chartType === 'stacked_bar') params.set('stack_by', 'disposition');
             var gs = document.getElementById('global-start').value;
             var ge = document.getElementById('global-end').value;
             if (gs) params.set('start', gs);
