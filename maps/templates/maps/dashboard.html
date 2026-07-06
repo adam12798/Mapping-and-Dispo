@@ -93,6 +93,7 @@
         var CHART_TYPES = [
             {value: 'bar', label: 'Bar'},
             {value: 'bar_h', label: 'Horizontal Bar'},
+            {value: 'stacked_bar', label: 'Stacked Bar'},
             {value: 'doughnut', label: 'Doughnut'},
             {value: 'pie', label: 'Pie'},
             {value: 'line', label: 'Line'},
@@ -437,6 +438,7 @@
             var params = new URLSearchParams();
             params.set('group_by', w.groupBy);
             params.set('metric', w.metric);
+            if (w.chartType === 'stacked_bar') params.set('stack_by', 'rep_id');
             var gs = document.getElementById('global-start').value;
             var ge = document.getElementById('global-end').value;
             if (gs) params.set('start', gs);
@@ -455,11 +457,37 @@
             var canvas = document.getElementById('canvas-' + w.id);
             if (!canvas) return;
 
-            var isHorizontal = w.chartType === 'bar_h';
-            var chartType = isHorizontal ? 'bar' : w.chartType;
             var fontFamily = "'Montserrat', sans-serif";
             var gridColor = '#e0fbfc';
             var textColor = '#293241';
+
+            if (data.stacked) {
+                var chartData = { labels: data.labels, datasets: data.datasets };
+                var options = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    layout: { padding: { right: 20 } },
+                    scales: {
+                        x: { stacked: true, grid: { display: false }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } },
+                        y: { stacked: true, grid: { color: gridColor }, ticks: { font: { family: fontFamily, size: 11 }, color: textColor } }
+                    },
+                    plugins: {
+                        legend: { display: true, position: 'bottom', labels: { font: { family: fontFamily, size: 11 }, color: textColor, padding: 12 } },
+                        datalabels: {
+                            color: '#fff',
+                            font: { family: fontFamily, size: 11, weight: '600' },
+                            anchor: 'center',
+                            align: 'center',
+                            formatter: function(value) { return value === 0 ? '' : value; },
+                        },
+                    },
+                };
+                chartInstances[w.id] = new Chart(canvas, { type: 'bar', data: chartData, options: options });
+                return;
+            }
+
+            var isHorizontal = w.chartType === 'bar_h';
+            var chartType = isHorizontal ? 'bar' : w.chartType;
 
             var isPercent = w.metric === 'conversion_rate';
             var chartData = {

@@ -1407,6 +1407,42 @@ def dashboard_chart_api(request):
     PALETTE = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22',
                '#34495e', '#d35400', '#16a085', '#c0392b', '#8e44ad', '#27ae60', '#2980b9', '#f1c40f']
 
+    stack_by = request.GET.get('stack_by', '')
+
+    if stack_by == 'rep_id':
+        rows = list(qs.filter(rep__isnull=False).values(group_by, 'rep__name', 'rep__color')
+                     .annotate(count=Count('id')).order_by(group_by, 'rep__name'))
+        label_map = LABEL_MAPS.get(group_by, {})
+        cat_order = []
+        cat_set = set()
+        rep_info = {}
+        pivot = {}
+        for r in rows:
+            raw = r[group_by]
+            raw_str = str(raw) if raw not in (None, '') else ''
+            cat_label = label_map.get(raw_str, raw_str) if raw_str else '(empty)'
+            if cat_label not in cat_set:
+                cat_order.append(cat_label)
+                cat_set.add(cat_label)
+            rep_name = r['rep__name']
+            if rep_name not in rep_info:
+                rep_info[rep_name] = r['rep__color'] or PALETTE[len(rep_info) % len(PALETTE)]
+            pivot.setdefault(rep_name, {})[cat_label] = r['count']
+        datasets = []
+        for rep_name, color in rep_info.items():
+            datasets.append({
+                'label': rep_name,
+                'data': [pivot.get(rep_name, {}).get(cat, 0) for cat in cat_order],
+                'backgroundColor': color,
+            })
+        total = sum(r['count'] for r in rows)
+        sales_count = qs.filter(disposition='sale').count()
+        return JsonResponse({
+            'labels': cat_order, 'datasets': datasets, 'stacked': True,
+            'total': total, 'sales': sales_count,
+            'conversion_rate': round(sales_count / total * 100, 1) if total else 0,
+        })
+
     if group_by == 'rep_id':
         if metric == 'conversion_rate':
             rows = list(qs.filter(rep__isnull=False).values('rep__name', 'rep__color').annotate(
