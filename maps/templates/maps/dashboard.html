@@ -37,6 +37,9 @@
     .dashboard-controls { display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px; }
     #add-widget-btn { font-size:13px;padding:7px 16px;border:1px dashed #98c1d9;border-radius:6px;background:transparent;color:#3d5a80;cursor:pointer;font-family:'Montserrat',sans-serif;font-weight:600; }
     #add-widget-btn:hover { background:#e0fbfc;border-style:solid; }
+    #save-dashboard-btn { font-size:13px;padding:7px 16px;border:1px solid #3d5a80;border-radius:6px;background:#3d5a80;color:#fff;cursor:pointer;font-family:'Montserrat',sans-serif;font-weight:600; }
+    #save-dashboard-btn:hover { background:#293241;border-color:#293241; }
+    #save-dashboard-btn.saved { background:#27ae60;border-color:#27ae60; }
     .undo-banner { position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px;background:#293241;color:#fff;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:500;animation:undoSlide .3s ease; }
     .undo-banner button { background:#ee6c4d;color:#fff;border:none;border-radius:4px;padding:6px 16px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;cursor:pointer; }
     .undo-banner button:hover { background:#d85a3d; }
@@ -62,7 +65,13 @@
                     <label>To</label>
                     <input type="date" id="global-end" onchange="refreshAll()">
                 </div>
+                <button class="widget-filter-btn" id="global-filter-toggle" onclick="toggleGlobalFilters()">Filter All</button>
                 <button id="add-widget-btn" onclick="addWidget()">+ Add Chart</button>
+                <button id="save-dashboard-btn" onclick="saveDashboard()">Save</button>
+            </div>
+            <div id="global-filter-panel" style="display:none;background:#f8fbfd;border:1px solid #e0fbfc;border-radius:6px;padding:12px;margin-top:8px;">
+                <div id="global-filter-rows"></div>
+                <button class="filter-add-btn" onclick="addGlobalFilter()">+ Add Filter</button>
             </div>
         </div>
         <div class="dashboard-grid" id="widget-grid"></div>
@@ -156,6 +165,8 @@
             ]
         };
 
+        var globalFilters = [];
+
         var DEFAULT_WIDGETS = [
             {title: 'Appointments by Disposition', chartType: 'bar_h', groupBy: 'disposition', metric: 'count', filters: []},
             {title: 'Appointments by Rep', chartType: 'bar', groupBy: 'rep_id', metric: 'count', filters: []},
@@ -170,7 +181,31 @@
             localStorage.setItem('dashboard_widgets', JSON.stringify(configs));
         }
 
+        function saveDashboard() {
+            saveWidgets();
+            localStorage.setItem('dashboard_global_filters', JSON.stringify(globalFilters));
+            var gs = document.getElementById('global-start').value;
+            var ge = document.getElementById('global-end').value;
+            localStorage.setItem('dashboard_date_range', JSON.stringify({start: gs, end: ge}));
+            var btn = document.getElementById('save-dashboard-btn');
+            btn.textContent = 'Saved!';
+            btn.classList.add('saved');
+            setTimeout(function() { btn.textContent = 'Save'; btn.classList.remove('saved'); }, 2000);
+        }
+
         function loadWidgets() {
+            var savedDates = localStorage.getItem('dashboard_date_range');
+            if (savedDates) {
+                var dr = JSON.parse(savedDates);
+                if (dr.start) document.getElementById('global-start').value = dr.start;
+                if (dr.end) document.getElementById('global-end').value = dr.end;
+            }
+            var savedGF = localStorage.getItem('dashboard_global_filters');
+            if (savedGF) {
+                globalFilters = JSON.parse(savedGF);
+                globalFilters.forEach(function() { addGlobalFilter(); });
+                restoreGlobalFilterUI();
+            }
             var saved = localStorage.getItem('dashboard_widgets');
             var configs = saved ? JSON.parse(saved) : DEFAULT_WIDGETS;
             configs.forEach(function(c) { addWidget(c); });
@@ -431,6 +466,147 @@
             saveWidgets();
         }
 
+        function toggleGlobalFilters() {
+            var panel = document.getElementById('global-filter-panel');
+            var showing = panel.style.display === 'none';
+            panel.style.display = showing ? '' : 'none';
+            document.getElementById('global-filter-toggle').classList.toggle('active', showing);
+        }
+
+        function addGlobalFilter() {
+            var container = document.getElementById('global-filter-rows');
+            var row = document.createElement('div');
+            row.className = 'filter-row';
+            var colSel = document.createElement('select');
+            colSel.className = 'filter-col';
+            colSel.innerHTML = '<option value="">Column...</option>';
+            FILTER_COLUMNS.forEach(function(c) {
+                colSel.innerHTML += '<option value="' + c.key + '">' + c.label + '</option>';
+            });
+            colSel.onchange = function() { onGlobalFilterColChange(this); };
+            var condSel = document.createElement('select');
+            condSel.className = 'filter-cond';
+            condSel.style.display = 'none';
+            var valWrap = document.createElement('div');
+            valWrap.className = 'filter-val-wrap';
+            var removeBtn = document.createElement('button');
+            removeBtn.className = 'filter-row-remove';
+            removeBtn.innerHTML = '&times;';
+            removeBtn.onclick = function() { row.remove(); syncGlobalFilters(); refreshAll(); };
+            row.appendChild(colSel);
+            row.appendChild(condSel);
+            row.appendChild(valWrap);
+            row.appendChild(removeBtn);
+            container.appendChild(row);
+        }
+
+        function onGlobalFilterColChange(colSel) {
+            var row = colSel.closest('.filter-row');
+            var condSel = row.querySelector('.filter-cond');
+            var valWrap = row.querySelector('.filter-val-wrap');
+            condSel.innerHTML = '';
+            valWrap.innerHTML = '';
+            if (!colSel.value) { condSel.style.display = 'none'; syncGlobalFilters(); refreshAll(); return; }
+            var col = FILTER_COLUMNS.find(function(c) { return c.key === colSel.value; });
+            var conds = FILTER_CONDITIONS[col.type] || FILTER_CONDITIONS.text;
+            conds.forEach(function(c) {
+                condSel.innerHTML += '<option value="' + c.value + '">' + c.label + '</option>';
+            });
+            condSel.style.display = '';
+            condSel.onchange = function() { buildGlobalFilterVal(row, col); syncGlobalFilters(); refreshAll(); };
+            buildGlobalFilterVal(row, col);
+            syncGlobalFilters();
+            refreshAll();
+        }
+
+        function buildGlobalFilterVal(row, col) {
+            var valWrap = row.querySelector('.filter-val-wrap');
+            var cond = row.querySelector('.filter-cond').value;
+            valWrap.innerHTML = '';
+            if (cond === 'is_empty' || cond === 'is_not_empty') return;
+            var onChange = function() { syncGlobalFilters(); refreshAll(); };
+            if (col.type === 'select' && col.options) {
+                var sel = document.createElement('select');
+                sel.innerHTML = '<option value="">Select...</option>';
+                col.options.forEach(function(o) { sel.innerHTML += '<option value="' + o.value + '">' + o.label + '</option>'; });
+                sel.onchange = onChange;
+                valWrap.appendChild(sel);
+            } else if (col.type === 'date' || col.type === 'datetime') {
+                var inputType = col.type === 'datetime' ? 'datetime-local' : 'date';
+                var inp = document.createElement('input');
+                inp.type = inputType;
+                inp.className = 'filter-date-from';
+                inp.onchange = onChange;
+                valWrap.appendChild(inp);
+                if (cond === 'between') {
+                    var span = document.createElement('span');
+                    span.textContent = ' and ';
+                    span.style.cssText = 'font-size:12px;color:#3d5a80;';
+                    valWrap.appendChild(span);
+                    var inp2 = document.createElement('input');
+                    inp2.type = inputType;
+                    inp2.className = 'filter-date-to';
+                    inp2.onchange = onChange;
+                    valWrap.appendChild(inp2);
+                }
+            } else {
+                var inp = document.createElement('input');
+                inp.type = 'text';
+                inp.placeholder = 'Value...';
+                inp.oninput = onChange;
+                valWrap.appendChild(inp);
+            }
+        }
+
+        function syncGlobalFilters() {
+            var rows = document.getElementById('global-filter-rows').children;
+            globalFilters = [];
+            for (var i = 0; i < rows.length; i++) {
+                var fr = rows[i];
+                var colKey = fr.querySelector('.filter-col').value;
+                if (!colKey) continue;
+                var cond = fr.querySelector('.filter-cond').value;
+                var valEl = fr.querySelector('.filter-val-wrap select, .filter-val-wrap input');
+                var val = valEl ? valEl.value : '';
+                var val2 = '';
+                if (cond === 'between') {
+                    var toEl = fr.querySelector('.filter-date-to');
+                    val2 = toEl ? toEl.value : '';
+                }
+                globalFilters.push({key: colKey, cond: cond, val: val, val2: val2});
+            }
+        }
+
+        function restoreGlobalFilterUI() {
+            var rows = document.getElementById('global-filter-rows').children;
+            for (var i = 0; i < rows.length; i++) {
+                var f = globalFilters[i];
+                if (!f) continue;
+                var colSel = rows[i].querySelector('.filter-col');
+                colSel.value = f.key;
+                var col = FILTER_COLUMNS.find(function(c) { return c.key === f.key; });
+                if (!col) continue;
+                var condSel = rows[i].querySelector('.filter-cond');
+                var conds = FILTER_CONDITIONS[col.type] || FILTER_CONDITIONS.text;
+                condSel.innerHTML = '';
+                conds.forEach(function(c) { condSel.innerHTML += '<option value="' + c.value + '">' + c.label + '</option>'; });
+                condSel.value = f.cond;
+                condSel.style.display = '';
+                condSel.onchange = function() { var r = this.closest('.filter-row'); buildGlobalFilterVal(r, col); syncGlobalFilters(); refreshAll(); };
+                buildGlobalFilterVal(rows[i], col);
+                var valEl = rows[i].querySelector('.filter-val-wrap select, .filter-val-wrap input');
+                if (valEl && f.val) valEl.value = f.val;
+                if (f.cond === 'between') {
+                    var toEl = rows[i].querySelector('.filter-date-to');
+                    if (toEl && f.val2) toEl.value = f.val2;
+                }
+            }
+            if (globalFilters.length) {
+                document.getElementById('global-filter-panel').style.display = '';
+                document.getElementById('global-filter-toggle').classList.add('active');
+            }
+        }
+
         function refreshWidget(id) {
             var w = widgets.find(function(x) { return x.id === id; });
             if (!w) return;
@@ -443,7 +619,8 @@
             var ge = document.getElementById('global-end').value;
             if (gs) params.set('start', gs);
             if (ge) params.set('end', ge);
-            if (w.filters.length) params.set('filters', JSON.stringify(w.filters));
+            var allFilters = globalFilters.concat(w.filters);
+            if (allFilters.length) params.set('filters', JSON.stringify(allFilters));
 
             fetch('/api/dashboard/chart/?' + params.toString())
                 .then(function(r) { return r.json(); })
