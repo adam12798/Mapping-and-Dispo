@@ -13,7 +13,7 @@ def seed_configs(apps, schema_editor):
         trigger='disposition_changed',
         url='https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd',
         method='POST',
-        fields=['phone_number', 'homeowner_name', 'disposition', 'call_transcript'],
+        fields=['source', 'phone_number', 'homeowner_name', 'disposition', 'call_transcript'],
         headers=[{'key': 'Content-Type', 'value': 'application/json'}],
         is_active=True,
     )
@@ -23,7 +23,7 @@ def seed_configs(apps, schema_editor):
         trigger='appointment_changed',
         url='https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/bc69b54d-d701-432f-82be-80d8dcfa799b',
         method='POST',
-        fields=['phone_number', 'appointment_type', 'appointment_datetime'],
+        fields=['source', 'phone_number', 'appointment_type', 'appointment_datetime'],
         headers=[{'key': 'Content-Type', 'value': 'application/json'}],
         is_active=True,
     )
