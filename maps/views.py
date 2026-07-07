@@ -21,7 +21,7 @@ from django.conf import settings
 from django.db.models import Q
 
 from .assignment import auto_assign_leads
-from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant
+from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant, WebhookConfig
 
 
 GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd'
@@ -521,11 +521,22 @@ def lead_update(request, pk):
 
     if 'disposition' in data:
         _send_ghl_dispo_webhook(lead, source='crm')
+        fire_webhooks('disposition_changed', lead)
 
     # Send webhook to Go High Level only if appointment datetime actually changed
     new_appt_dt = str(lead.appointment_datetime) if lead.appointment_datetime else ''
     if 'appointment_datetime' in data and new_appt_dt != old_appt_dt:
         _send_ghl_appt_webhook(lead, pk)
+        fire_webhooks('appointment_changed', lead)
+
+    if 'rep_id' in data:
+        fire_webhooks('rep_assigned', lead)
+    if 'sat' in data:
+        fire_webhooks('sat_changed', lead)
+    if 'follow_up_date' in data:
+        fire_webhooks('follow_up_set', lead)
+    if 'cancelled' in data and lead.cancelled:
+        fire_webhooks('lead_cancelled', lead)
 
     response = {'status': 'ok'}
     if geocode_failed:
@@ -1939,6 +1950,7 @@ def ghl_debug_view(request):
         'ghl_appt_url': GHL_APPT_WEBHOOK_URL,
         'inbound_endpoints': inbound_endpoints,
         'api_keys': api_keys,
+        'trigger_choices': WebhookConfig.TRIGGER_CHOICES,
     })
 
 
@@ -2074,6 +2086,114 @@ def ghl_webhook_builder_api(request):
         'response_headers': resp_headers,
         'error': log_entry.error_message,
     })
+
+
+@csrf_exempt
+@manager_required
+def webhook_config_api(request):
+    """CRUD for saved webhook configurations."""
+    if request.method == 'GET':
+        configs = WebhookConfig.objects.order_by('-updated_at')
+        data = [{
+            'id': c.id,
+            'name': c.name,
+            'trigger': c.trigger,
+            'trigger_display': c.get_trigger_display(),
+            'url': c.url,
+            'method': c.method,
+            'fields': c.fields,
+            'headers': c.headers,
+            'is_active': c.is_active,
+        } for c in configs]
+        return JsonResponse(data, safe=False)
+
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        config_id = data.get('id')
+        if config_id:
+            config = WebhookConfig.objects.get(id=config_id)
+        else:
+            config = WebhookConfig()
+        config.name = data.get('name', 'Untitled')
+        config.trigger = data.get('trigger', 'disposition_changed')
+        config.url = data.get('url', '')
+        config.method = data.get('method', 'POST')
+        config.fields = data.get('fields', [])
+        config.headers = data.get('headers', [])
+        config.is_active = data.get('is_active', True)
+        config.save()
+        return JsonResponse({'id': config.id, 'status': 'saved'})
+
+    if request.method == 'DELETE':
+        data = json.loads(request.body)
+        WebhookConfig.objects.filter(id=data.get('id')).delete()
+        return JsonResponse({'status': 'deleted'})
+
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+def fire_webhooks(trigger, lead):
+    """Fire all active webhook configs matching the given trigger."""
+    configs = WebhookConfig.objects.filter(trigger=trigger, is_active=True)
+    for config in configs:
+        payload = {}
+        for field_key in config.fields:
+            if field_key == 'rep_name':
+                payload[field_key] = lead.rep.name if lead.rep else ''
+            elif field_key == 'appointment_datetime':
+                payload[field_key] = _format_appt_dt_for_ghl(lead.appointment_datetime)
+            elif field_key == 'disposition':
+                payload[field_key] = _format_dispo_for_ghl(lead.disposition)
+            else:
+                val = getattr(lead, field_key, '')
+                if val is None:
+                    val = ''
+                payload[field_key] = str(val)
+
+        log_entry = GHLWebhookLog(
+            webhook_type=trigger,
+            lead=lead,
+            lead_name=lead.homeowner_name,
+            source=f'config:{config.name}',
+            url=config.url,
+            payload=json.dumps(payload),
+        )
+
+        custom_headers = {'Content-Type': 'application/json'}
+        for h in (config.headers or []):
+            key = (h.get('key') or '').strip()
+            val = (h.get('value') or '').strip()
+            if key:
+                custom_headers[key] = val
+
+        try:
+            if config.method == 'GET':
+                url = config.url
+                if payload:
+                    sep = '&' if '?' in url else '?'
+                    url = url + sep + urllib.parse.urlencode(payload)
+                req = urllib.request.Request(url, method='GET')
+            else:
+                req = urllib.request.Request(
+                    config.url,
+                    data=json.dumps(payload).encode(),
+                    method=config.method,
+                )
+                for k, v in custom_headers.items():
+                    req.add_header(k, v)
+            resp = urllib.request.urlopen(req, timeout=10)
+            body = resp.read().decode('utf-8', errors='replace')
+            log_entry.response_status = resp.status
+            log_entry.response_body = body[:2000]
+            log_entry.success = 200 <= resp.status < 300
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8', errors='replace') if e.fp else ''
+            log_entry.response_status = e.code
+            log_entry.response_body = err_body[:2000]
+            log_entry.error_message = f'HTTP {e.code}'
+        except Exception as e:
+            log_entry.error_message = str(e)
+        log_entry.save()
 
 
 @manager_required
@@ -3373,6 +3493,7 @@ def v1_lead_create(request):
         geocode_address = f"{lead.address}, {lead.city}, MA"
     lead.latitude, lead.longitude = geocode(geocode_address)
     lead.save()
+    fire_webhooks('lead_created', lead)
     return JsonResponse({'status': 'ok', 'id': lead.id}, status=201)
 
 

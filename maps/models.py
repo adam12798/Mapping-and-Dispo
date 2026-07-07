@@ -321,3 +321,33 @@ class APITenant(models.Model):
             'color_text_muted': self.color_text_muted,
             'font_family': self.font_family,
         }
+
+
+class WebhookConfig(models.Model):
+    TRIGGER_CHOICES = [
+        ('disposition_changed', 'Disposition Changed'),
+        ('appointment_changed', 'Appointment DateTime Changed'),
+        ('lead_created', 'New Lead Created'),
+        ('lead_cancelled', 'Lead Cancelled'),
+        ('rep_assigned', 'Rep Assigned'),
+        ('sat_changed', 'SAT Changed'),
+        ('follow_up_set', 'Follow-Up Date Set'),
+    ]
+    METHOD_CHOICES = [
+        ('POST', 'POST'),
+        ('GET', 'GET'),
+        ('PUT', 'PUT'),
+        ('PATCH', 'PATCH'),
+    ]
+    name = models.CharField(max_length=200)
+    trigger = models.CharField(max_length=30, choices=TRIGGER_CHOICES)
+    url = models.URLField(max_length=1000)
+    method = models.CharField(max_length=6, choices=METHOD_CHOICES, default='POST')
+    fields = models.JSONField(default=list)
+    headers = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.get_trigger_display()})"
