@@ -379,6 +379,7 @@
                     <th class="sortable" onclick="sortTable(18)">Transcript <span class="sort-arrow"></span><div class="col-resize"></div></th>
                     <th style="width:40px;text-align:center;">Updates</th>
                     <th style="width:40px;text-align:center;">SMS</th>
+                    <th style="width:50px;text-align:center;"></th>
                     <th class="action-col"></th>
                 </tr>
             </thead>
@@ -474,10 +475,11 @@
                     <td data-label="Transcript"><textarea class="crm-input" data-field="call_transcript" rows="1" style="resize:vertical;min-height:28px;max-width:300px;">{{ lead.call_transcript }}</textarea></td>
                     <td data-label="" style="text-align:center;"><button class="chatter-btn" onclick="openChatter({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button></td>
                     <td data-label="" style="text-align:center;"><button class="sms-btn" onclick="openSmsThread({{ lead.id }}, '{{ lead.homeowner_name|escapejs }}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8l10 6 10-6"/></svg></button></td>
+                    <td data-label="" style="text-align:center;"><button class="cancel-appt-btn" onclick="cancelLead(this)" title="Cancel Appointment" style="background:{% if lead.cancelled %}#95a5a6{% else %}#e74c3c{% endif %};color:#fff;border:none;border-radius:4px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Montserrat',sans-serif;">{% if lead.cancelled %}Undo{% else %}Cancel{% endif %}</button></td>
                     <td data-label="" class="action-col"><button class="delete-btn row-delete" onclick="deleteLead(this)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg></button></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="20" class="empty-row">No appointments for this date</td></tr>
+                <tr><td colspan="21" class="empty-row">No appointments for this date</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -706,6 +708,32 @@
                 box.style.display = 'none';
                 btn.textContent = btn.textContent.replace('Hide', '+ Deal').replace('▴', '▾');
             }
+        }
+
+        function cancelLead(btn) {
+            var row = btn.closest('tr');
+            var leadId = row.dataset.id;
+            var isCancelled = btn.textContent.trim() === 'Undo';
+            var newVal = !isCancelled;
+            if (newVal && !confirm('Cancel this appointment? GHL will be notified.')) return;
+            fetch('/api/leads/' + leadId + '/', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cancelled: newVal })
+            }).then(function(r) { return r.json(); }).then(function() {
+                btn.textContent = newVal ? 'Undo' : 'Cancel';
+                btn.style.background = newVal ? '#95a5a6' : '#e74c3c';
+                var nameCell = row.querySelector('[data-field="homeowner_name"]');
+                var badge = row.querySelector('.cancelled-badge');
+                if (newVal && !badge) {
+                    var span = document.createElement('span');
+                    span.className = 'cancelled-badge';
+                    span.textContent = 'CANCELLED';
+                    nameCell.parentElement.appendChild(span);
+                } else if (!newVal && badge) {
+                    badge.remove();
+                }
+            });
         }
 
         function deleteLead(btn) {
