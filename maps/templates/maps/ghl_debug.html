@@ -317,6 +317,34 @@
                 <div class="wb-resp-body" id="wb-resp-body"></div>
                 <div class="wb-resp-headers" id="wb-resp-headers"></div>
             </div>
+
+            <!-- Receive Webhooks (Inbound) -->
+            <div class="wb-configs" style="margin-top:24px;">
+                <span class="wb-field-label">Receive Webhooks (GHL &rarr; Sutton)</span>
+                <div style="font-size:11px;color:#888;margin-bottom:8px;">These endpoints receive data from GHL. Copy the URL and set it up as a webhook in your GHL account.</div>
+                {% for ep in inbound_endpoints %}
+                <div class="wb-config-card">
+                    <div class="wb-config-info">
+                        <span class="wb-config-name">{{ ep.name }}</span>
+                        <span class="wb-config-trigger" style="background:#8e44ad;">RECEIVE</span>
+                        <div class="wb-config-meta">{{ ep.method }} {{ ep.full_url }}</div>
+                        <div class="wb-config-meta" style="margin-top:2px;"><strong>Fields:</strong> {{ ep.fields }}</div>
+                    </div>
+                    <div class="wb-config-actions">
+                        <button class="wb-config-edit" onclick="navigator.clipboard.writeText('{{ ep.full_url }}');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy URL',1500)">Copy URL</button>
+                    </div>
+                </div>
+                {% endfor %}
+                <div style="font-size:11px;color:#666;margin-top:8px;padding:8px;background:#f0f4f8;border-radius:6px;">
+                    <strong>Auth:</strong> Append <code>?api_key=YOUR_KEY</code> to the URL, or send header <code>Authorization: Bearer YOUR_KEY</code>
+                    {% if api_keys %}<br>
+                    {% for name, key in api_keys %}
+                    <span style="margin-top:2px;display:inline-block;"><code>{{ name }}: {{ key }}</code>
+                    <button class="wb-config-edit" style="font-size:9px;padding:2px 6px;" onclick="navigator.clipboard.writeText('{{ key }}');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button></span>
+                    {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
         </div>
     </div>
 

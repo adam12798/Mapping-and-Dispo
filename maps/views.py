@@ -1915,7 +1915,7 @@ def ghl_debug_view(request):
     outbound_count = GHLWebhookLog.objects.filter(direction='outbound').count()
     logs = logs[:100]
 
-    app_host = 'lavish-reflection-production-1e5f.up.railway.app'
+    app_host = 'sutton-soda.com'
     api_keys = list(APITenant.objects.filter(is_active=True).values_list('name', 'api_key'))
 
     inbound_endpoints = [
