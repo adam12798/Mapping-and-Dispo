@@ -102,7 +102,7 @@
     .wb-input { font-family:'Montserrat',sans-serif;font-size:12px;padding:8px 10px;border:1px solid #ccc;border-radius:5px;width:100%; }
     .wb-input:focus { border-color:#3d5a80;outline:none; }
     .wb-select { font-family:'Montserrat',sans-serif;font-size:12px;padding:8px 10px;border:1px solid #ccc;border-radius:5px;background:#fff; }
-    .wb-textarea { font-family:'Courier New',monospace;font-size:11px;padding:10px;border:1px solid #ccc;border-radius:5px;width:100%;min-height:120px;resize:vertical; }
+    .wb-textarea { font-family:'Courier New',monospace;font-size:11px;padding:10px;border:1px solid #ccc;border-radius:5px;width:100%;min-height:100px;resize:vertical; }
     .wb-textarea:focus { border-color:#3d5a80;outline:none; }
     .wb-header-row { display:flex;gap:8px;align-items:center;margin-bottom:6px; }
     .wb-header-row input { font-family:'Montserrat',sans-serif;font-size:11px;padding:6px 8px;border:1px solid #ccc;border-radius:4px; }
@@ -114,6 +114,7 @@
     .wb-presets { display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px; }
     .wb-preset { font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid #3d5a80;color:#3d5a80;background:#fff;cursor:pointer;font-family:'Montserrat',sans-serif;font-weight:600; }
     .wb-preset:hover { background:#3d5a80;color:#fff; }
+    .wb-preset.active { background:#3d5a80;color:#fff; }
     .wb-response { margin-top:14px;border:1px solid #ccc;border-radius:6px;overflow:hidden;display:none; }
     .wb-response.visible { display:block; }
     .wb-resp-header { display:flex;justify-content:space-between;align-items:center;padding:8px 14px;font-size:12px;font-weight:600; }
@@ -121,9 +122,24 @@
     .wb-resp-header.fail { background:#f8d7da;color:#721c24; }
     .wb-resp-body { padding:12px;background:#f8fbfd;font-family:'Courier New',monospace;font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto; }
     .wb-resp-headers { padding:8px 12px;background:#f0f4f8;font-family:'Courier New',monospace;font-size:10px;border-top:1px solid #e0e0e0;max-height:150px;overflow-y:auto; }
-    .wb-tabs { display:flex;gap:0;margin-bottom:0; }
-    .wb-tab { padding:6px 14px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid #ccc;border-bottom:none;border-radius:5px 5px 0 0;background:#f0f0f0;font-family:'Montserrat',sans-serif; }
-    .wb-tab.active { background:#fff;border-bottom:1px solid #fff;margin-bottom:-1px;z-index:1; }
+
+    /* Field Tags */
+    .wb-field-label { font-size:11px;font-weight:600;color:#3d5a80;margin-bottom:6px;display:block; }
+    .wb-field-pool { display:flex;flex-wrap:wrap;gap:6px;padding:10px;background:#fff;border:1px solid #e0e0e0;border-radius:6px;margin-bottom:10px;min-height:40px; }
+    .wb-tag { font-size:11px;padding:4px 10px;border-radius:20px;cursor:pointer;font-family:'Montserrat',sans-serif;font-weight:600;transition:all 0.15s;user-select:none; }
+    .wb-tag.off { background:#f0f0f0;color:#888;border:1px solid #ddd; }
+    .wb-tag.off:hover { background:#e0e0e0;color:#555; }
+    .wb-tag.on { background:#3d5a80;color:#fff;border:1px solid #3d5a80; }
+    .wb-tag.on:hover { background:#293241; }
+    .wb-tag-cat { font-size:10px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.5px;margin-right:4px;padding:4px 0;width:100%; }
+    .wb-selected-fields { margin-top:8px; }
+    .wb-field-row { display:flex;gap:8px;align-items:center;margin-bottom:5px;padding:6px 10px;background:#f8fbfd;border:1px solid #e0fbfc;border-radius:5px; }
+    .wb-field-row .wb-field-key { font-size:11px;font-weight:600;color:#3d5a80;min-width:160px; }
+    .wb-field-row input { font-family:'Montserrat',sans-serif;font-size:11px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;flex:1; }
+    .wb-field-row input:focus { border-color:#3d5a80;outline:none; }
+    .wb-field-row .wb-field-remove { background:none;border:none;color:#e74c3c;cursor:pointer;font-size:14px;font-weight:700;padding:0 4px; }
+    .wb-field-search { font-family:'Montserrat',sans-serif;font-size:11px;padding:6px 10px;border:1px solid #ccc;border-radius:5px;width:200px;margin-bottom:8px; }
+    .wb-field-search:focus { border-color:#3d5a80;outline:none; }
 </style>
 {% endblock %}
 
@@ -201,15 +217,16 @@
     <div class="wb-section">
         <h3 onclick="toggleBuilder()"><span class="wb-arrow" id="wb-arrow">&#9654;</span> Webhook Builder</h3>
         <div class="wb-body" id="wb-body">
-            <div class="wb-presets">
-                <span class="wb-preset" onclick="loadPreset('dispo')">Dispo Webhook</span>
-                <span class="wb-preset" onclick="loadPreset('appt')">Appt Webhook</span>
-                <span class="wb-preset" onclick="loadPreset('new_appt_in')">Inbound New Appt</span>
-                <span class="wb-preset" onclick="loadPreset('reschedule_in')">Inbound Reschedule</span>
-                <span class="wb-preset" onclick="loadPreset('cancel_in')">Inbound Cancel</span>
-                <span class="wb-preset" onclick="loadPreset('blank')">Blank</span>
+
+            <!-- Presets -->
+            <span class="wb-field-label">Quick Presets</span>
+            <div class="wb-presets" id="wb-presets">
+                <span class="wb-preset" data-preset="dispo" onclick="loadPreset('dispo',this)">Outbound Dispo</span>
+                <span class="wb-preset" data-preset="appt" onclick="loadPreset('appt',this)">Outbound Appt</span>
+                <span class="wb-preset" data-preset="custom" onclick="loadPreset('custom',this)">Custom</span>
             </div>
 
+            <!-- Method + URL -->
             <div class="wb-row">
                 <div style="flex:0 0 100px;">
                     <label>Method</label>
@@ -218,7 +235,6 @@
                         <option value="GET">GET</option>
                         <option value="PUT">PUT</option>
                         <option value="PATCH">PATCH</option>
-                        <option value="DELETE">DELETE</option>
                     </select>
                 </div>
                 <div style="flex:1;">
@@ -227,31 +243,36 @@
                 </div>
             </div>
 
+            <!-- Headers -->
             <div>
-                <label style="font-size:11px;font-weight:600;color:#3d5a80;margin-bottom:3px;display:block;">Headers</label>
+                <span class="wb-field-label">Headers</span>
                 <div id="wb-headers"></div>
                 <span class="wb-add-header" onclick="addHeader()">+ Add Header</span>
             </div>
 
-            <div style="margin-top:8px;">
-                <div class="wb-tabs">
-                    <span class="wb-tab active" id="wb-tab-json" onclick="switchPayloadTab('json')">JSON Body</span>
-                    <span class="wb-tab" id="wb-tab-kv" onclick="switchPayloadTab('kv')">Key-Value</span>
-                </div>
-                <div id="wb-payload-json" style="border:1px solid #ccc;border-radius:0 5px 5px 5px;overflow:hidden;">
-                    <textarea class="wb-textarea" id="wb-payload" style="border:none;border-radius:0;" placeholder='{"phone": "+1234567890", "name": "Test"}'>{}</textarea>
-                </div>
-                <div id="wb-payload-kv" style="display:none;border:1px solid #ccc;border-radius:0 5px 5px 5px;padding:12px;">
-                    <div id="wb-kv-rows"></div>
-                    <span class="wb-add-header" onclick="addKVRow()">+ Add Field</span>
-                </div>
+            <!-- Field Tags -->
+            <div style="margin-top:12px;">
+                <span class="wb-field-label">Fields <span style="font-weight:400;color:#888;">(click to add/remove from payload)</span></span>
+                <input class="wb-field-search" id="wb-field-search" placeholder="Search fields..." oninput="filterTags()">
+                <div class="wb-field-pool" id="wb-field-pool"></div>
             </div>
 
+            <!-- Selected fields with editable values -->
+            <div class="wb-selected-fields" id="wb-selected-fields"></div>
+
+            <!-- JSON preview -->
+            <div style="margin-top:10px;">
+                <span class="wb-field-label">Payload Preview</span>
+                <textarea class="wb-textarea" id="wb-payload" readonly style="background:#f0f4f8;min-height:60px;"></textarea>
+            </div>
+
+            <!-- Fire -->
             <div style="margin-top:14px;display:flex;align-items:center;gap:12px;">
                 <button class="wb-fire-btn" id="wb-fire" onclick="fireBuilder()">Send Webhook</button>
                 <span id="wb-status" style="font-size:12px;font-family:'Montserrat',sans-serif;"></span>
             </div>
 
+            <!-- Response -->
             <div class="wb-response" id="wb-response">
                 <div class="wb-resp-header" id="wb-resp-header"></div>
                 <div class="wb-resp-body" id="wb-resp-body"></div>
@@ -464,44 +485,156 @@ function escapeHtml(str) {
 }
 
 /* Webhook Builder */
+var ALL_FIELDS = {
+    'Contact': [
+        {key: 'homeowner_name', label: 'Homeowner Name', sample: 'John Smith'},
+        {key: 'phone_number', label: 'Phone', sample: '+15551234567'},
+        {key: 'address', label: 'Address', sample: '123 Main St'},
+        {key: 'city', label: 'City', sample: 'Boston'},
+        {key: 'state', label: 'State', sample: 'MA'},
+        {key: 'source', label: 'Source', sample: 'GHL'},
+        {key: 'tags', label: 'Tags', sample: 'Solar'},
+    ],
+    'Appointment': [
+        {key: 'appointment_datetime', label: 'Appt DateTime', sample: '07-07-2026 12:00 PM'},
+        {key: 'appointment_type', label: 'Appt Type', sample: 'Solar'},
+        {key: 'appointment_format', label: 'Appt Format', sample: 'In-Home'},
+        {key: 'rep_name', label: 'Rep Name', sample: ''},
+        {key: 'cancelled', label: 'Cancelled', sample: 'false'},
+    ],
+    'Disposition': [
+        {key: 'disposition', label: 'Disposition', sample: 'Sale'},
+        {key: 'sat', label: 'SAT', sample: 'true'},
+        {key: 'follow_up_date', label: 'Follow-Up Date', sample: '2026-07-14'},
+        {key: 'follow_up_time', label: 'Follow-Up Time', sample: '10:00'},
+    ],
+    'Notes': [
+        {key: 'call_notes', label: 'Call Notes', sample: 'Spoke with homeowner'},
+        {key: 'appt_notes', label: 'Appt Notes', sample: ''},
+        {key: 'post_appt_notes', label: 'Post-Appt Notes', sample: ''},
+        {key: 'call_transcript', label: 'Call Transcript', sample: 'Test transcript'},
+    ],
+    'Financials': [
+        {key: 'monthly_cost', label: 'Monthly Cost', sample: '$150'},
+        {key: 'total_cost', label: 'Total Cost', sample: '$25,000'},
+        {key: 'adders', label: 'Adders', sample: ''},
+    ],
+};
+
+var selectedFields = {};
+
 var PRESETS = {
     dispo: {
         method: 'POST',
         url: '{{ ghl_dispo_url }}',
-        payload: {phone: '+10000000000', name: 'Test Lead', disposition: 'Sale', call_transcript: 'Test transcript from builder'},
+        fields: ['phone_number', 'homeowner_name', 'disposition', 'call_transcript'],
         headers: [{ key: 'Content-Type', value: 'application/json' }]
     },
     appt: {
         method: 'GET',
         url: '{{ ghl_appt_url }}',
-        payload: {phone: '+10000000000', appointment_type: 'Solar', appointment_datetime: '07-07-2026 12:00 PM'},
+        fields: ['phone_number', 'appointment_type', 'appointment_datetime'],
         headers: []
     },
-    new_appt_in: {
-        method: 'POST',
-        url: 'https://sutton-soda.com/api/v1/ghl/appointment/',
-        payload: {name: 'Test Homeowner', phone: '5551234567', address: '123 Main St', city: 'Boston', appointment_datetime: '2026-07-07T14:00:00', appointment_type: 'Solar', source: 'Builder Test'},
-        headers: [{ key: 'Content-Type', value: 'application/json' }{% if api_keys %}, { key: 'X-API-Key', value: '{{ api_keys.0.1 }}' }{% endif %}]
-    },
-    reschedule_in: {
-        method: 'POST',
-        url: 'https://sutton-soda.com/api/v1/ghl/reschedule/',
-        payload: {name: 'Test Homeowner', phone: '5551234567', appointment_datetime: '2026-07-08T10:00:00'},
-        headers: [{ key: 'Content-Type', value: 'application/json' }{% if api_keys %}, { key: 'X-API-Key', value: '{{ api_keys.0.1 }}' }{% endif %}]
-    },
-    cancel_in: {
-        method: 'POST',
-        url: 'https://sutton-soda.com/api/v1/ghl/cancel/',
-        payload: {name: 'Test Homeowner', phone: '5551234567'},
-        headers: [{ key: 'Content-Type', value: 'application/json' }{% if api_keys %}, { key: 'X-API-Key', value: '{{ api_keys.0.1 }}' }{% endif %}]
-    },
-    blank: {
+    custom: {
         method: 'POST',
         url: '',
-        payload: {},
+        fields: [],
         headers: [{ key: 'Content-Type', value: 'application/json' }]
     }
 };
+
+function initBuilder() {
+    var pool = document.getElementById('wb-field-pool');
+    pool.innerHTML = '';
+    for (var cat in ALL_FIELDS) {
+        var catLabel = document.createElement('span');
+        catLabel.className = 'wb-tag-cat';
+        catLabel.textContent = cat;
+        pool.appendChild(catLabel);
+        ALL_FIELDS[cat].forEach(function(f) {
+            var tag = document.createElement('span');
+            tag.className = 'wb-tag off';
+            tag.setAttribute('data-field', f.key);
+            tag.textContent = f.label;
+            tag.onclick = function() { toggleField(f.key); };
+            pool.appendChild(tag);
+        });
+    }
+}
+
+function getFieldInfo(key) {
+    for (var cat in ALL_FIELDS) {
+        for (var i = 0; i < ALL_FIELDS[cat].length; i++) {
+            if (ALL_FIELDS[cat][i].key === key) return ALL_FIELDS[cat][i];
+        }
+    }
+    return null;
+}
+
+function toggleField(key) {
+    if (selectedFields[key] !== undefined) {
+        delete selectedFields[key];
+    } else {
+        var info = getFieldInfo(key);
+        selectedFields[key] = info ? info.sample : '';
+    }
+    renderSelectedFields();
+    updatePayloadPreview();
+    updateTagStates();
+}
+
+function updateTagStates() {
+    document.querySelectorAll('#wb-field-pool .wb-tag').forEach(function(tag) {
+        var key = tag.getAttribute('data-field');
+        if (key) {
+            tag.className = selectedFields[key] !== undefined ? 'wb-tag on' : 'wb-tag off';
+        }
+    });
+}
+
+function renderSelectedFields() {
+    var container = document.getElementById('wb-selected-fields');
+    container.innerHTML = '';
+    var keys = Object.keys(selectedFields);
+    if (!keys.length) return;
+    keys.forEach(function(key) {
+        var info = getFieldInfo(key);
+        var row = document.createElement('div');
+        row.className = 'wb-field-row';
+        row.innerHTML = '<span class="wb-field-key">' + escapeHtml(info ? info.label : key) + '</span>' +
+            '<input type="text" value="' + escapeHtml(selectedFields[key]) + '" data-field="' + escapeHtml(key) + '" oninput="updateFieldValue(this)">' +
+            '<button class="wb-field-remove" onclick="toggleField(\'' + key + '\')">&times;</button>';
+        container.appendChild(row);
+    });
+}
+
+function updateFieldValue(input) {
+    var key = input.getAttribute('data-field');
+    selectedFields[key] = input.value;
+    updatePayloadPreview();
+}
+
+function updatePayloadPreview() {
+    var payload = {};
+    for (var key in selectedFields) {
+        payload[key] = selectedFields[key];
+    }
+    document.getElementById('wb-payload').value = JSON.stringify(payload, null, 2);
+}
+
+function filterTags() {
+    var search = document.getElementById('wb-field-search').value.toLowerCase();
+    document.querySelectorAll('#wb-field-pool .wb-tag, #wb-field-pool .wb-tag-cat').forEach(function(el) {
+        if (el.classList.contains('wb-tag-cat')) {
+            el.style.display = search ? 'none' : '';
+        } else {
+            var key = el.getAttribute('data-field') || '';
+            var label = el.textContent.toLowerCase();
+            el.style.display = (!search || label.includes(search) || key.includes(search)) ? '' : 'none';
+        }
+    });
+}
 
 function toggleBuilder() {
     var body = document.getElementById('wb-body');
@@ -510,18 +643,23 @@ function toggleBuilder() {
     arrow.classList.toggle('open');
 }
 
-function loadPreset(name) {
+function loadPreset(name, btn) {
     var p = PRESETS[name];
     document.getElementById('wb-method').value = p.method;
     document.getElementById('wb-url').value = p.url;
-    document.getElementById('wb-payload').value = JSON.stringify(p.payload, null, 2);
-    // Set headers
+    document.querySelectorAll('#wb-presets .wb-preset').forEach(function(b) { b.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
     var container = document.getElementById('wb-headers');
     container.innerHTML = '';
     p.headers.forEach(function(h) { addHeader(h.key, h.value); });
-    // Sync KV
-    syncJsonToKV();
-    // Clear response
+    selectedFields = {};
+    p.fields.forEach(function(key) {
+        var info = getFieldInfo(key);
+        selectedFields[key] = info ? info.sample : '';
+    });
+    renderSelectedFields();
+    updatePayloadPreview();
+    updateTagStates();
     document.getElementById('wb-response').classList.remove('visible');
 }
 
@@ -533,45 +671,6 @@ function addHeader(key, value) {
                     '<input type="text" placeholder="Header value" value="' + escapeHtml(value || '') + '" style="flex:1;width:250px;">' +
                     '<button class="wb-remove" onclick="this.parentElement.remove()">X</button>';
     container.appendChild(row);
-}
-
-function addKVRow(key, value) {
-    var container = document.getElementById('wb-kv-rows');
-    var row = document.createElement('div');
-    row.className = 'wb-header-row';
-    row.innerHTML = '<input type="text" placeholder="Key" value="' + escapeHtml(key || '') + '" style="width:180px;" oninput="syncKVToJson()">' +
-                    '<input type="text" placeholder="Value" value="' + escapeHtml(value || '') + '" style="flex:1;width:250px;" oninput="syncKVToJson()">' +
-                    '<button class="wb-remove" onclick="this.parentElement.remove();syncKVToJson()">X</button>';
-    container.appendChild(row);
-}
-
-function switchPayloadTab(tab) {
-    document.getElementById('wb-tab-json').classList.toggle('active', tab === 'json');
-    document.getElementById('wb-tab-kv').classList.toggle('active', tab === 'kv');
-    document.getElementById('wb-payload-json').style.display = tab === 'json' ? '' : 'none';
-    document.getElementById('wb-payload-kv').style.display = tab === 'kv' ? '' : 'none';
-    if (tab === 'kv') syncJsonToKV();
-    else syncKVToJson();
-}
-
-function syncJsonToKV() {
-    var container = document.getElementById('wb-kv-rows');
-    container.innerHTML = '';
-    try {
-        var obj = JSON.parse(document.getElementById('wb-payload').value);
-        Object.keys(obj).forEach(function(k) { addKVRow(k, String(obj[k])); });
-    } catch(e) {}
-}
-
-function syncKVToJson() {
-    var rows = document.querySelectorAll('#wb-kv-rows .wb-header-row');
-    var obj = {};
-    rows.forEach(function(row) {
-        var inputs = row.querySelectorAll('input');
-        var k = inputs[0].value.trim();
-        if (k) obj[k] = inputs[1].value;
-    });
-    document.getElementById('wb-payload').value = JSON.stringify(obj, null, 2);
 }
 
 function fireBuilder() {
@@ -633,6 +732,8 @@ function fireBuilder() {
         status.innerHTML = '<span style="color:#e74c3c;">Network error: ' + err.message + '</span>';
     });
 }
+
+initBuilder();
 
 function testGHL(type) {
     const btn = document.getElementById('test-' + (type === 'appointment' ? 'appt' : 'dispo') + '-btn');
