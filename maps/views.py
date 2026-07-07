@@ -2003,6 +2003,79 @@ def ghl_test_api(request):
     })
 
 
+@csrf_exempt
+@manager_required
+def ghl_webhook_builder_api(request):
+    """Fire a custom webhook from the builder UI."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    data = json.loads(request.body)
+    url = (data.get('url') or '').strip()
+    method = (data.get('method') or 'POST').upper()
+    payload = data.get('payload', {})
+    headers_list = data.get('headers', [])
+
+    if not url:
+        return JsonResponse({'error': 'URL is required'}, status=400)
+
+    log_entry = GHLWebhookLog(
+        webhook_type='test',
+        lead_name='Builder Test',
+        source='builder',
+        url=url,
+        payload=json.dumps(payload) if payload else '',
+    )
+
+    custom_headers = {'Content-Type': 'application/json'}
+    for h in headers_list:
+        key = (h.get('key') or '').strip()
+        val = (h.get('value') or '').strip()
+        if key:
+            custom_headers[key] = val
+
+    try:
+        if method == 'GET':
+            if payload:
+                sep = '&' if '?' in url else '?'
+                url = url + sep + urllib.parse.urlencode(payload)
+            req = urllib.request.Request(url, method='GET')
+        else:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode() if payload else b'',
+                method=method,
+            )
+        for k, v in custom_headers.items():
+            if method == 'GET' and k == 'Content-Type':
+                continue
+            req.add_header(k, v)
+        resp = urllib.request.urlopen(req, timeout=15)
+        body = resp.read().decode('utf-8', errors='replace')
+        log_entry.response_status = resp.status
+        log_entry.response_body = body[:2000]
+        log_entry.success = 200 <= resp.status < 300
+        resp_headers = dict(resp.getheaders())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', errors='replace') if e.fp else ''
+        log_entry.response_status = e.code
+        log_entry.response_body = body[:2000]
+        log_entry.error_message = f'HTTP {e.code}'
+        resp_headers = dict(e.headers) if e.headers else {}
+    except Exception as e:
+        log_entry.error_message = str(e)
+        body = ''
+        resp_headers = {}
+    log_entry.save()
+
+    return JsonResponse({
+        'success': log_entry.success,
+        'status': log_entry.response_status,
+        'response_body': body[:2000] if body else '',
+        'response_headers': resp_headers,
+        'error': log_entry.error_message,
+    })
+
+
 @manager_required
 def calls_view(request):
     reps = Rep.objects.filter(is_active=True).order_by('name')

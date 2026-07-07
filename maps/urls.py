@@ -41,6 +41,7 @@ urlpatterns = [
     path('api/dashboard/chart/', views.dashboard_chart_api, name='dashboard_chart_api'),
     path('ghl-debug/', views.ghl_debug_view, name='ghl_debug'),
     path('api/ghl-test/', views.ghl_test_api, name='ghl_test'),
+    path('api/ghl-builder/', views.ghl_webhook_builder_api, name='ghl_builder'),
     path('api/v1/ghl/logs/', views.ghl_webhook_logs_api, name='ghl_webhook_logs'),
     path('calls/', views.calls_view, name='calls'),
     path('users/', views.users_view, name='users'),

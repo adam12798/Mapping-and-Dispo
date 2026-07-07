@@ -89,6 +89,41 @@
     .payload-filter-bar { display:flex;gap:8px;margin-bottom:8px;align-items:center; }
     .payload-filter-bar input { font-family:'Montserrat',sans-serif;font-size:11px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;width:200px; }
     .payload-filter-bar label { font-size:11px;color:#666;font-family:'Montserrat',sans-serif;cursor:pointer; }
+
+    /* Webhook Builder */
+    .wb-section { background:#fdf6ec;border:1px solid #f0d9a0;border-radius:8px;padding:18px;margin-bottom:16px;font-family:'Montserrat',sans-serif; }
+    .wb-section h3 { font-size:14px;color:#293241;margin:0 0 14px;font-weight:700;display:flex;align-items:center;gap:8px;cursor:pointer; }
+    .wb-section h3 .wb-arrow { transition:transform 0.2s;font-size:12px; }
+    .wb-section h3 .wb-arrow.open { transform:rotate(90deg); }
+    .wb-body { display:none; }
+    .wb-body.open { display:block; }
+    .wb-row { display:flex;gap:10px;margin-bottom:10px;align-items:flex-start;flex-wrap:wrap; }
+    .wb-row label { font-size:11px;font-weight:600;color:#3d5a80;display:block;margin-bottom:3px; }
+    .wb-input { font-family:'Montserrat',sans-serif;font-size:12px;padding:8px 10px;border:1px solid #ccc;border-radius:5px;width:100%; }
+    .wb-input:focus { border-color:#3d5a80;outline:none; }
+    .wb-select { font-family:'Montserrat',sans-serif;font-size:12px;padding:8px 10px;border:1px solid #ccc;border-radius:5px;background:#fff; }
+    .wb-textarea { font-family:'Courier New',monospace;font-size:11px;padding:10px;border:1px solid #ccc;border-radius:5px;width:100%;min-height:120px;resize:vertical; }
+    .wb-textarea:focus { border-color:#3d5a80;outline:none; }
+    .wb-header-row { display:flex;gap:8px;align-items:center;margin-bottom:6px; }
+    .wb-header-row input { font-family:'Montserrat',sans-serif;font-size:11px;padding:6px 8px;border:1px solid #ccc;border-radius:4px; }
+    .wb-header-row .wb-remove { background:#e74c3c;color:#fff;border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:11px; }
+    .wb-add-header { font-size:11px;color:#3d5a80;cursor:pointer;text-decoration:underline;margin-bottom:10px;display:inline-block; }
+    .wb-fire-btn { background:#e67e22;color:#fff;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;padding:10px 24px;border:none;border-radius:6px;cursor:pointer;transition:opacity 0.2s; }
+    .wb-fire-btn:hover { opacity:0.85; }
+    .wb-fire-btn:disabled { opacity:0.5;cursor:not-allowed; }
+    .wb-presets { display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px; }
+    .wb-preset { font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid #3d5a80;color:#3d5a80;background:#fff;cursor:pointer;font-family:'Montserrat',sans-serif;font-weight:600; }
+    .wb-preset:hover { background:#3d5a80;color:#fff; }
+    .wb-response { margin-top:14px;border:1px solid #ccc;border-radius:6px;overflow:hidden;display:none; }
+    .wb-response.visible { display:block; }
+    .wb-resp-header { display:flex;justify-content:space-between;align-items:center;padding:8px 14px;font-size:12px;font-weight:600; }
+    .wb-resp-header.ok { background:#d4edda;color:#155724; }
+    .wb-resp-header.fail { background:#f8d7da;color:#721c24; }
+    .wb-resp-body { padding:12px;background:#f8fbfd;font-family:'Courier New',monospace;font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto; }
+    .wb-resp-headers { padding:8px 12px;background:#f0f4f8;font-family:'Courier New',monospace;font-size:10px;border-top:1px solid #e0e0e0;max-height:150px;overflow-y:auto; }
+    .wb-tabs { display:flex;gap:0;margin-bottom:0; }
+    .wb-tab { padding:6px 14px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid #ccc;border-bottom:none;border-radius:5px 5px 0 0;background:#f0f0f0;font-family:'Montserrat',sans-serif; }
+    .wb-tab.active { background:#fff;border-bottom:1px solid #fff;margin-bottom:-1px;z-index:1; }
 </style>
 {% endblock %}
 
@@ -160,6 +195,69 @@
         <button class="ghl-btn test-dispo" id="test-dispo-btn" onclick="testGHL('disposition')">Test Outbound Dispo</button>
         <button class="ghl-btn test-appt" id="test-appt-btn" onclick="testGHL('appointment')">Test Outbound Appt</button>
         <span class="ghl-test-result" id="test-result"></span>
+    </div>
+
+    <!-- WEBHOOK BUILDER -->
+    <div class="wb-section">
+        <h3 onclick="toggleBuilder()"><span class="wb-arrow" id="wb-arrow">&#9654;</span> Webhook Builder</h3>
+        <div class="wb-body" id="wb-body">
+            <div class="wb-presets">
+                <span class="wb-preset" onclick="loadPreset('dispo')">Dispo Webhook</span>
+                <span class="wb-preset" onclick="loadPreset('appt')">Appt Webhook</span>
+                <span class="wb-preset" onclick="loadPreset('new_appt_in')">Inbound New Appt</span>
+                <span class="wb-preset" onclick="loadPreset('reschedule_in')">Inbound Reschedule</span>
+                <span class="wb-preset" onclick="loadPreset('cancel_in')">Inbound Cancel</span>
+                <span class="wb-preset" onclick="loadPreset('blank')">Blank</span>
+            </div>
+
+            <div class="wb-row">
+                <div style="flex:0 0 100px;">
+                    <label>Method</label>
+                    <select class="wb-select" id="wb-method" style="width:100%;">
+                        <option value="POST">POST</option>
+                        <option value="GET">GET</option>
+                        <option value="PUT">PUT</option>
+                        <option value="PATCH">PATCH</option>
+                        <option value="DELETE">DELETE</option>
+                    </select>
+                </div>
+                <div style="flex:1;">
+                    <label>URL</label>
+                    <input class="wb-input" id="wb-url" placeholder="https://services.leadconnectorhq.com/hooks/...">
+                </div>
+            </div>
+
+            <div>
+                <label style="font-size:11px;font-weight:600;color:#3d5a80;margin-bottom:3px;display:block;">Headers</label>
+                <div id="wb-headers"></div>
+                <span class="wb-add-header" onclick="addHeader()">+ Add Header</span>
+            </div>
+
+            <div style="margin-top:8px;">
+                <div class="wb-tabs">
+                    <span class="wb-tab active" id="wb-tab-json" onclick="switchPayloadTab('json')">JSON Body</span>
+                    <span class="wb-tab" id="wb-tab-kv" onclick="switchPayloadTab('kv')">Key-Value</span>
+                </div>
+                <div id="wb-payload-json" style="border:1px solid #ccc;border-radius:0 5px 5px 5px;overflow:hidden;">
+                    <textarea class="wb-textarea" id="wb-payload" style="border:none;border-radius:0;" placeholder='{"phone": "+1234567890", "name": "Test"}'>{}</textarea>
+                </div>
+                <div id="wb-payload-kv" style="display:none;border:1px solid #ccc;border-radius:0 5px 5px 5px;padding:12px;">
+                    <div id="wb-kv-rows"></div>
+                    <span class="wb-add-header" onclick="addKVRow()">+ Add Field</span>
+                </div>
+            </div>
+
+            <div style="margin-top:14px;display:flex;align-items:center;gap:12px;">
+                <button class="wb-fire-btn" id="wb-fire" onclick="fireBuilder()">Send Webhook</button>
+                <span id="wb-status" style="font-size:12px;font-family:'Montserrat',sans-serif;"></span>
+            </div>
+
+            <div class="wb-response" id="wb-response">
+                <div class="wb-resp-header" id="wb-resp-header"></div>
+                <div class="wb-resp-body" id="wb-resp-body"></div>
+                <div class="wb-resp-headers" id="wb-resp-headers"></div>
+            </div>
+        </div>
     </div>
 
     <!-- FILTERS -->
@@ -363,6 +461,177 @@ function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+/* Webhook Builder */
+var PRESETS = {
+    dispo: {
+        method: 'POST',
+        url: '{{ ghl_dispo_url }}',
+        payload: {phone: '+10000000000', name: 'Test Lead', disposition: 'Sale', call_transcript: 'Test transcript from builder'},
+        headers: [{ key: 'Content-Type', value: 'application/json' }]
+    },
+    appt: {
+        method: 'GET',
+        url: '{{ ghl_appt_url }}',
+        payload: {phone: '+10000000000', appointment_type: 'Solar', appointment_datetime: '07-07-2026 12:00 PM'},
+        headers: []
+    },
+    new_appt_in: {
+        method: 'POST',
+        url: 'https://sutton-soda.com/api/v1/ghl/appointment/',
+        payload: {name: 'Test Homeowner', phone: '5551234567', address: '123 Main St', city: 'Boston', appointment_datetime: '2026-07-07T14:00:00', appointment_type: 'Solar', source: 'Builder Test'},
+        headers: [{ key: 'Content-Type', value: 'application/json' }{% if api_keys %}, { key: 'X-API-Key', value: '{{ api_keys.0.1 }}' }{% endif %}]
+    },
+    reschedule_in: {
+        method: 'POST',
+        url: 'https://sutton-soda.com/api/v1/ghl/reschedule/',
+        payload: {name: 'Test Homeowner', phone: '5551234567', appointment_datetime: '2026-07-08T10:00:00'},
+        headers: [{ key: 'Content-Type', value: 'application/json' }{% if api_keys %}, { key: 'X-API-Key', value: '{{ api_keys.0.1 }}' }{% endif %}]
+    },
+    cancel_in: {
+        method: 'POST',
+        url: 'https://sutton-soda.com/api/v1/ghl/cancel/',
+        payload: {name: 'Test Homeowner', phone: '5551234567'},
+        headers: [{ key: 'Content-Type', value: 'application/json' }{% if api_keys %}, { key: 'X-API-Key', value: '{{ api_keys.0.1 }}' }{% endif %}]
+    },
+    blank: {
+        method: 'POST',
+        url: '',
+        payload: {},
+        headers: [{ key: 'Content-Type', value: 'application/json' }]
+    }
+};
+
+function toggleBuilder() {
+    var body = document.getElementById('wb-body');
+    var arrow = document.getElementById('wb-arrow');
+    body.classList.toggle('open');
+    arrow.classList.toggle('open');
+}
+
+function loadPreset(name) {
+    var p = PRESETS[name];
+    document.getElementById('wb-method').value = p.method;
+    document.getElementById('wb-url').value = p.url;
+    document.getElementById('wb-payload').value = JSON.stringify(p.payload, null, 2);
+    // Set headers
+    var container = document.getElementById('wb-headers');
+    container.innerHTML = '';
+    p.headers.forEach(function(h) { addHeader(h.key, h.value); });
+    // Sync KV
+    syncJsonToKV();
+    // Clear response
+    document.getElementById('wb-response').classList.remove('visible');
+}
+
+function addHeader(key, value) {
+    var container = document.getElementById('wb-headers');
+    var row = document.createElement('div');
+    row.className = 'wb-header-row';
+    row.innerHTML = '<input type="text" placeholder="Header name" value="' + escapeHtml(key || '') + '" style="width:180px;">' +
+                    '<input type="text" placeholder="Header value" value="' + escapeHtml(value || '') + '" style="flex:1;width:250px;">' +
+                    '<button class="wb-remove" onclick="this.parentElement.remove()">X</button>';
+    container.appendChild(row);
+}
+
+function addKVRow(key, value) {
+    var container = document.getElementById('wb-kv-rows');
+    var row = document.createElement('div');
+    row.className = 'wb-header-row';
+    row.innerHTML = '<input type="text" placeholder="Key" value="' + escapeHtml(key || '') + '" style="width:180px;" oninput="syncKVToJson()">' +
+                    '<input type="text" placeholder="Value" value="' + escapeHtml(value || '') + '" style="flex:1;width:250px;" oninput="syncKVToJson()">' +
+                    '<button class="wb-remove" onclick="this.parentElement.remove();syncKVToJson()">X</button>';
+    container.appendChild(row);
+}
+
+function switchPayloadTab(tab) {
+    document.getElementById('wb-tab-json').classList.toggle('active', tab === 'json');
+    document.getElementById('wb-tab-kv').classList.toggle('active', tab === 'kv');
+    document.getElementById('wb-payload-json').style.display = tab === 'json' ? '' : 'none';
+    document.getElementById('wb-payload-kv').style.display = tab === 'kv' ? '' : 'none';
+    if (tab === 'kv') syncJsonToKV();
+    else syncKVToJson();
+}
+
+function syncJsonToKV() {
+    var container = document.getElementById('wb-kv-rows');
+    container.innerHTML = '';
+    try {
+        var obj = JSON.parse(document.getElementById('wb-payload').value);
+        Object.keys(obj).forEach(function(k) { addKVRow(k, String(obj[k])); });
+    } catch(e) {}
+}
+
+function syncKVToJson() {
+    var rows = document.querySelectorAll('#wb-kv-rows .wb-header-row');
+    var obj = {};
+    rows.forEach(function(row) {
+        var inputs = row.querySelectorAll('input');
+        var k = inputs[0].value.trim();
+        if (k) obj[k] = inputs[1].value;
+    });
+    document.getElementById('wb-payload').value = JSON.stringify(obj, null, 2);
+}
+
+function fireBuilder() {
+    var btn = document.getElementById('wb-fire');
+    var status = document.getElementById('wb-status');
+    var respDiv = document.getElementById('wb-response');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    status.textContent = '';
+    respDiv.classList.remove('visible');
+
+    var url = document.getElementById('wb-url').value.trim();
+    var method = document.getElementById('wb-method').value;
+    var payload = {};
+    try { payload = JSON.parse(document.getElementById('wb-payload').value); } catch(e) {}
+
+    var headers = [];
+    document.querySelectorAll('#wb-headers .wb-header-row').forEach(function(row) {
+        var inputs = row.querySelectorAll('input');
+        headers.push({ key: inputs[0].value, value: inputs[1].value });
+    });
+
+    fetch('{% url "ghl_builder" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ url: url, method: method, payload: payload, headers: headers })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.disabled = false;
+        btn.textContent = 'Send Webhook';
+
+        var header = document.getElementById('wb-resp-header');
+        var body = document.getElementById('wb-resp-body');
+        var hdrs = document.getElementById('wb-resp-headers');
+
+        if (data.success) {
+            header.className = 'wb-resp-header ok';
+            header.textContent = 'HTTP ' + data.status + ' — Success';
+        } else {
+            header.className = 'wb-resp-header fail';
+            header.textContent = (data.status ? 'HTTP ' + data.status : 'Error') + ' — ' + (data.error || 'Failed');
+        }
+
+        body.textContent = data.response_body || '(empty response)';
+
+        var hdrLines = '';
+        if (data.response_headers) {
+            Object.keys(data.response_headers).forEach(function(k) {
+                hdrLines += k + ': ' + data.response_headers[k] + '\n';
+            });
+        }
+        hdrs.textContent = hdrLines || '(no headers)';
+        respDiv.classList.add('visible');
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        btn.textContent = 'Send Webhook';
+        status.innerHTML = '<span style="color:#e74c3c;">Network error: ' + err.message + '</span>';
+    });
 }
 
 function testGHL(type) {
