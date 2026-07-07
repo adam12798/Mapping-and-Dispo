@@ -520,13 +520,11 @@ def lead_update(request, pk):
         LeadUpdate.objects.create(lead=lead, user=request.user, text='\n'.join(changes))
 
     if 'disposition' in data:
-        _send_ghl_dispo_webhook(lead, source='crm')
         fire_webhooks('disposition_changed', lead)
 
-    # Send webhook to Go High Level only if appointment datetime actually changed
+    # Send webhook only if appointment datetime actually changed
     new_appt_dt = str(lead.appointment_datetime) if lead.appointment_datetime else ''
     if 'appointment_datetime' in data and new_appt_dt != old_appt_dt:
-        _send_ghl_appt_webhook(lead, pk)
         fire_webhooks('appointment_changed', lead)
 
     if 'rep_id' in data:
@@ -616,7 +614,7 @@ def leads_bulk_update(request):
 
     if 'disposition' in update_kwargs:
         for lead in Lead.objects.filter(id__in=ids):
-            _send_ghl_dispo_webhook(lead, source='bulk')
+            fire_webhooks('disposition_changed', lead)
 
     return JsonResponse({'status': 'ok', 'updated': len(ids)})
 
@@ -1792,7 +1790,7 @@ def apply_manager_sms_update(lead, parsed):
         lead.save()
 
         if action in ('cancel', 'disposition'):
-            _send_ghl_dispo_webhook(lead, source='sms')
+            fire_webhooks('disposition_changed', lead)
 
     return changes
 
@@ -2132,8 +2130,41 @@ def webhook_config_api(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
+import threading
+_webhook_timers = {}
+_webhook_lock = threading.Lock()
+
+WEBHOOK_DELAY = 60
+
+
 def fire_webhooks(trigger, lead):
-    """Fire all active webhook configs matching the given trigger."""
+    """Schedule webhook fire with 60s debounce. Resets timer on repeated calls."""
+    lead_id = lead.id
+    key = (trigger, lead_id)
+
+    with _webhook_lock:
+        if key in _webhook_timers:
+            _webhook_timers[key].cancel()
+
+        timer = threading.Timer(WEBHOOK_DELAY, _do_fire_webhooks, args=(trigger, lead_id))
+        timer.daemon = True
+        _webhook_timers[key] = timer
+        timer.start()
+
+
+def _do_fire_webhooks(trigger, lead_id):
+    """Actually fire webhooks after debounce period."""
+    import django
+    django.setup()
+
+    with _webhook_lock:
+        _webhook_timers.pop((trigger, lead_id), None)
+
+    try:
+        lead = Lead.objects.select_related('rep').get(id=lead_id)
+    except Lead.DoesNotExist:
+        return
+
     configs = WebhookConfig.objects.filter(trigger=trigger, is_active=True)
     for config in configs:
         payload = {}
