@@ -631,9 +631,10 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
         if updated:
             logger.info(f'Updated lead {lead_id} ({lead.homeowner_name}) disposition to {disposition}, notes: {call_notes}')
 
-            lead = await sync_to_async(Lead.objects.filter(id=lead_id).first)()
+            lead = await sync_to_async(Lead.objects.select_related('rep').filter(id=lead_id).first)()
             if lead:
-                await _send_ghl_dispo_webhook_async(lead, lead_id, disposition, source='alfred')
+                from maps.views import fire_webhooks
+                await sync_to_async(fire_webhooks)('disposition_changed', lead)
 
             return {'success': True, 'message': f'Disposition updated for {lead.homeowner_name}'}
         else:
@@ -719,8 +720,11 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
         await sync_to_async(lead.save)()
         logger.info(f'Manager updated lead {lead_id} ({lead.homeowner_name}): {", ".join(changes)}')
 
+        from maps.views import fire_webhooks
         if fn_args.get('disposition'):
-            await _send_ghl_dispo_webhook_async(lead, lead_id, lead.disposition, source='alfred_manager')
+            await sync_to_async(fire_webhooks)('disposition_changed', lead)
+        if fn_args.get('appointment_datetime') or fn_args.get('clear_datetime'):
+            await sync_to_async(fire_webhooks)('appointment_changed', lead)
 
         return {'success': True, 'message': f"Updated {lead.homeowner_name}: {', '.join(changes)}"}
 
