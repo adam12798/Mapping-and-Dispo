@@ -21,7 +21,8 @@ from django.conf import settings
 from django.db.models import Q
 
 from .assignment import auto_assign_leads
-from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant, WebhookConfig
+from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant, WebhookConfig, Organization, OrgSwitchAudit
+from .tenancy import get_current_org_id, org_context
 
 
 GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd'
@@ -162,6 +163,14 @@ def get_user_rep(user):
     return None
 
 
+def get_system_user():
+    """User to attribute automated chatter entries (GHL/SMS updates) to.
+    Must belong to the active org — a superuser from another org supporting
+    this one should never show up as the author of its automation logs."""
+    return User.objects.filter(
+        is_superuser=True, profile__organization_id=get_current_org_id()).first()
+
+
 @manager_required
 def twilio_check(request):
     """Quick check if Twilio env vars are loaded (no secrets exposed)."""
@@ -198,6 +207,62 @@ def login_view(request):
 def logout_view(request):
     logout(request)
     return redirect('/login/')
+
+
+@csrf_exempt
+@require_POST
+@login_required
+def org_switch(request):
+    """Superuser-only: deliberately switch into another organization for
+    support. The switch is stored in the session and written to the audit
+    log. Switching back to your own org clears the session override."""
+    if not request.user.is_superuser:
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        data = {}
+    org_id = data.get('org_id') or request.POST.get('org_id')
+    target = get_object_or_404(Organization, pk=org_id, is_active=True)
+
+    profile = getattr(request.user, 'profile', None)
+    home_org_id = profile.organization_id if profile else None
+    from_org_id = getattr(request, 'organization_id', None)
+
+    if target.id == home_org_id:
+        request.session.pop('active_org_id', None)
+    else:
+        request.session['active_org_id'] = target.id
+
+    OrgSwitchAudit.objects.create(
+        user=request.user,
+        from_organization_id=from_org_id,
+        to_organization_id=target.id,
+        ip_address=(request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+                    or request.META.get('REMOTE_ADDR', '')),
+    )
+    next_url = data.get('next') or request.POST.get('next') or '/'
+    if request.headers.get('Accept', '').startswith('application/json'):
+        return JsonResponse({'status': 'ok', 'organization': target.name})
+    return redirect(next_url)
+
+
+@login_required
+def org_audit(request):
+    """Superuser-only: the org-switch audit trail."""
+    if not request.user.is_superuser:
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+    from zoneinfo import ZoneInfo
+    eastern = ZoneInfo('America/New_York')
+    entries = OrgSwitchAudit.objects.select_related(
+        'user', 'from_organization', 'to_organization')[:200]
+    return JsonResponse({'switches': [{
+        'user': e.user.username,
+        'from': e.from_organization.name if e.from_organization else None,
+        'to': e.to_organization.name if e.to_organization else None,
+        'ip': e.ip_address,
+        'at': e.created_at.astimezone(eastern).strftime('%m/%d/%Y %I:%M %p'),
+    } for e in entries]})
 
 
 @login_required
@@ -1899,7 +1964,8 @@ def ghl_debug_view(request):
     type_filter = request.GET.get('type', '')
     success_filter = request.GET.get('success', '')
     direction_filter = request.GET.get('direction', '')
-    logs = GHLWebhookLog.objects.order_by('-created_at')
+    org_logs = GHLWebhookLog.objects.filter(organization_id=get_current_org_id())
+    logs = org_logs.order_by('-created_at')
     if type_filter:
         logs = logs.filter(webhook_type=type_filter)
     if success_filter == '1':
@@ -1908,15 +1974,16 @@ def ghl_debug_view(request):
         logs = logs.filter(success=False)
     if direction_filter:
         logs = logs.filter(direction=direction_filter)
-    total = GHLWebhookLog.objects.count()
-    success_count = GHLWebhookLog.objects.filter(success=True).count()
-    fail_count = GHLWebhookLog.objects.filter(success=False).count()
-    inbound_count = GHLWebhookLog.objects.filter(direction='inbound').count()
-    outbound_count = GHLWebhookLog.objects.filter(direction='outbound').count()
+    total = org_logs.count()
+    success_count = org_logs.filter(success=True).count()
+    fail_count = org_logs.filter(success=False).count()
+    inbound_count = org_logs.filter(direction='inbound').count()
+    outbound_count = org_logs.filter(direction='outbound').count()
     logs = logs[:100]
 
     app_host = 'sutton-soda.com'
-    api_keys = list(APITenant.objects.filter(is_active=True).values_list('name', 'api_key'))
+    api_keys = list(APITenant.objects.filter(
+        is_active=True, organization_id=get_current_org_id()).values_list('name', 'api_key'))
 
     inbound_endpoints = [
         {'name': 'New Appointment', 'path': '/api/v1/ghl/appointment/', 'method': 'POST',
@@ -1959,6 +2026,7 @@ def ghl_test_api(request):
         return JsonResponse({'error': 'POST only'}, status=405)
     webhook_type = request.POST.get('type', 'disposition')
     log_entry = GHLWebhookLog(
+        organization_id=get_current_org_id(),
         webhook_type='test',
         lead_name='Test Webhook',
         source='test',
@@ -2029,6 +2097,7 @@ def ghl_webhook_builder_api(request):
         return JsonResponse({'error': 'URL is required'}, status=400)
 
     log_entry = GHLWebhookLog(
+        organization_id=get_current_org_id(),
         webhook_type='test',
         lead_name='Builder Test',
         source='builder',
@@ -2089,9 +2158,10 @@ def ghl_webhook_builder_api(request):
 @csrf_exempt
 @manager_required
 def webhook_config_api(request):
-    """CRUD for saved webhook configurations."""
+    """CRUD for saved webhook configurations (current org only)."""
     if request.method == 'GET':
-        configs = WebhookConfig.objects.order_by('-updated_at')
+        configs = WebhookConfig.objects.filter(
+            organization_id=get_current_org_id()).order_by('-updated_at')
         data = [{
             'id': c.id,
             'name': c.name,
@@ -2109,9 +2179,9 @@ def webhook_config_api(request):
         data = json.loads(request.body)
         config_id = data.get('id')
         if config_id:
-            config = WebhookConfig.objects.get(id=config_id)
+            config = WebhookConfig.objects.get(id=config_id, organization_id=get_current_org_id())
         else:
-            config = WebhookConfig()
+            config = WebhookConfig(organization_id=get_current_org_id())
         config.name = data.get('name', 'Untitled')
         config.trigger = data.get('trigger', 'disposition_changed')
         config.url = data.get('url', '')
@@ -2124,7 +2194,8 @@ def webhook_config_api(request):
 
     if request.method == 'DELETE':
         data = json.loads(request.body)
-        WebhookConfig.objects.filter(id=data.get('id')).delete()
+        WebhookConfig.objects.filter(
+            id=data.get('id'), organization_id=get_current_org_id()).delete()
         return JsonResponse({'status': 'deleted'})
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -2138,34 +2209,39 @@ WEBHOOK_DELAY = 60
 
 
 def fire_webhooks(trigger, lead):
-    """Schedule webhook fire with 60s debounce. Resets timer on repeated calls."""
+    """Schedule webhook fire with 60s debounce. Resets timer on repeated calls.
+
+    The timer thread does not inherit the caller's org context, so the
+    lead's organization is captured now and re-activated in the thread."""
     lead_id = lead.id
+    org_id = lead.organization_id or get_current_org_id()
     key = (trigger, lead_id)
 
     with _webhook_lock:
         if key in _webhook_timers:
             _webhook_timers[key].cancel()
 
-        timer = threading.Timer(WEBHOOK_DELAY, _do_fire_webhooks, args=(trigger, lead_id))
+        timer = threading.Timer(WEBHOOK_DELAY, _do_fire_webhooks, args=(trigger, lead_id, org_id))
         timer.daemon = True
         _webhook_timers[key] = timer
         timer.start()
 
 
-def _do_fire_webhooks(trigger, lead_id):
-    """Actually fire webhooks after debounce period."""
+def _do_fire_webhooks(trigger, lead_id, org_id=None):
+    """Actually fire webhooks after debounce period. Only this lead's own
+    organization's webhook configs fire."""
     import django
     django.setup()
 
     with _webhook_lock:
         _webhook_timers.pop((trigger, lead_id), None)
 
-    try:
-        lead = Lead.objects.select_related('rep').get(id=lead_id)
-    except Lead.DoesNotExist:
+    lead = Lead.all_objects.select_related('rep').filter(id=lead_id).first()
+    if lead is None:
         return
+    org_id = lead.organization_id or org_id
 
-    configs = WebhookConfig.objects.filter(trigger=trigger, is_active=True)
+    configs = WebhookConfig.objects.filter(trigger=trigger, is_active=True, organization_id=org_id)
     for config in configs:
         payload = {}
         for field_key in config.fields:
@@ -2182,6 +2258,7 @@ def _do_fire_webhooks(trigger, lead_id):
                 payload[field_key] = str(val)
 
         log_entry = GHLWebhookLog(
+            organization_id=org_id,
             webhook_type=trigger,
             lead=lead,
             lead_name=lead.homeowner_name,
@@ -2272,9 +2349,12 @@ def users_view(request):
 @csrf_exempt
 @manager_required
 def users_api(request):
-    """GET: list users. POST: create user."""
+    """GET: list users. POST: create user. Scoped to the current org —
+    auth User has no org field, so filter through the profile."""
     if request.method == 'GET':
-        users = User.objects.select_related('profile', 'profile__rep').order_by('username')
+        users = User.objects.filter(
+            profile__organization_id=get_current_org_id(),
+        ).select_related('profile', 'profile__rep').order_by('username')
         data = [{
             'id': u.id,
             'username': u.username,
@@ -2310,8 +2390,8 @@ def users_api(request):
 @csrf_exempt
 @manager_required
 def user_update_api(request, pk):
-    """PUT: update user. DELETE: delete user."""
-    user = get_object_or_404(User, pk=pk)
+    """PUT: update user. DELETE: delete user. Current org's users only."""
+    user = get_object_or_404(User, pk=pk, profile__organization_id=get_current_org_id())
 
     if request.method == 'DELETE':
         if user == request.user:
@@ -2450,11 +2530,47 @@ def _match_textblast_claim(body, textblast_leads):
     return None
 
 
+def _resolve_sms_org(from_number):
+    """Which organization does an inbound SMS belong to?
+
+    Known sender (a manager's or rep's phone) wins; anything else — lead
+    forms forwarded from GHL, unknown numbers — goes to the default inbound
+    organization. Deliberate cross-org lookups: the sender's number is the
+    only identity we have before an org is chosen.
+    """
+    if from_number:
+        tail = from_number[-10:]
+        manager = Manager.all_objects.filter(phone_number__icontains=tail).first()
+        if manager and manager.organization_id:
+            return manager.organization_id
+        rep = Rep.all_objects.filter(phone_number__icontains=tail).first()
+        if rep and rep.organization_id:
+            return rep.organization_id
+    return Organization.default_inbound_id()
+
+
 @csrf_exempt
 @require_POST
 def sms_webhook(request):
+    """Twilio webhook — resolves the sender's organization, then handles the
+    message inside that org's context (leads, time off, manager replies)."""
+    from_number = request.POST.get('From', '')
+    org_id = _resolve_sms_org(from_number)
+    if org_id is None:
+        import logging
+        logging.getLogger('sms_webhook').error(
+            f'No organization resolvable for SMS from {from_number}; dropping message')
+        return HttpResponse(
+            '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            content_type='text/xml',
+        )
+    with org_context(org_id):
+        return _handle_sms(request)
+
+
+def _handle_sms(request):
     """Twilio webhook — receives incoming SMS, parses fields, geocodes address, saves as Lead.
-    If sender is a rep, parse as time off request instead."""
+    If sender is a rep, parse as time off request instead. Runs inside org_context."""
     body = request.POST.get('Body', '').strip()
     from_number = request.POST.get('From', '')
 
@@ -2609,7 +2725,7 @@ def sms_webhook(request):
             lead.raw_message = body
             lead.save(update_fields=['cancelled', 'raw_message'])
             LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
-            system_user = User.objects.filter(is_superuser=True).first()
+            system_user = get_system_user()
             if system_user:
                 LeadUpdate.objects.create(lead=lead, user=system_user, text='Appointment cancelled via SMS')
             send_sms(from_number, f"Cancelled: {lead.homeowner_name} appointment has been marked as cancelled.")
@@ -2740,7 +2856,7 @@ def sms_webhook(request):
                 lead.save()
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
                 if changes:
-                    system_user = User.objects.filter(is_superuser=True).first()
+                    system_user = get_system_user()
                     if system_user:
                         LeadUpdate.objects.create(lead=lead, user=system_user, text='GHL update:\n' + '\n'.join(changes))
             else:
@@ -2808,7 +2924,7 @@ def sms_webhook(request):
                     claimed_lead.save(update_fields=['rep', 'textblast_sent_at'])
                     # Log as lead update
                     from django.contrib.auth.models import User
-                    system_user = User.objects.filter(is_superuser=True).first()
+                    system_user = get_system_user()
                     if system_user:
                         LeadUpdate.objects.create(
                             lead=claimed_lead,
@@ -2950,7 +3066,7 @@ def sms_webhook(request):
                 lead.raw_message = body
                 lead.save()
                 if changes:
-                    system_user = User.objects.filter(is_superuser=True).first()
+                    system_user = get_system_user()
                     if system_user:
                         LeadUpdate.objects.create(lead=lead, user=system_user, text='SMS update:\n' + '\n'.join(changes))
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
@@ -3327,7 +3443,18 @@ def api_key_required(view_func):
         tenant.last_used_at = tz.now()
         tenant.save(update_fields=['last_used_at'])
         request.api_tenant = tenant
-        return view_func(request, *args, **kwargs)
+        # API-key requests have no session user, so the org comes from the
+        # tenant itself. Fall back to the default inbound org rather than
+        # silently reading/writing nothing.
+        org_id = tenant.organization_id
+        if org_id is None:
+            org_id = Organization.default_inbound_id()
+            _ghl_logger.warning(
+                f'APITenant "{tenant.name}" has no organization; using default inbound org {org_id}')
+        if org_id is None:
+            return JsonResponse({'error': 'No organization configured'}, status=503)
+        with org_context(org_id):
+            return view_func(request, *args, **kwargs)
     return wrapper
 
 
@@ -3655,7 +3782,7 @@ def _ghl_parse_datetime(raw_dt):
 def _ghl_log_changes(lead, changes):
     if not changes:
         return
-    system_user = User.objects.filter(is_superuser=True).first()
+    system_user = get_system_user()
     if system_user:
         LeadUpdate.objects.create(lead=lead, user=system_user, text='GHL webhook:\n' + '\n'.join(changes))
 
@@ -3676,6 +3803,7 @@ def _ghl_log_inbound(webhook_type, request, lead=None, lead_name='', success=Tru
     elif key_info:
         error_message = key_info
     GHLWebhookLog.objects.create(
+        organization_id=get_current_org_id(),
         direction='inbound',
         webhook_type=webhook_type,
         lead=lead,
@@ -3736,7 +3864,8 @@ def _ghl_normalize_data(data):
 def ghl_webhook_logs_api(request):
     """API endpoint to query webhook log payloads for debugging."""
     limit = min(int(request.GET.get('limit', 20)), 100)
-    logs = GHLWebhookLog.objects.filter(direction='inbound').order_by('-created_at')[:limit]
+    logs = GHLWebhookLog.objects.filter(
+        direction='inbound', organization_id=get_current_org_id()).order_by('-created_at')[:limit]
     result = []
     for log in logs:
         result.append({
@@ -4025,7 +4154,8 @@ def ghl_disposition(request):
 
 @manager_required
 def tenants_view(request):
-    tenants = APITenant.objects.order_by('-created_at')
+    tenants = APITenant.objects.filter(
+        organization_id=get_current_org_id()).order_by('-created_at')
     return render(request, 'maps/tenants.html', {'tenants': tenants, 'active_tab': 'tenants'})
 
 
@@ -4042,6 +4172,7 @@ def tenants_api(request):
             'notes': data.get('notes', ''),
             'allowed_origins': data.get('allowed_origins', ''),
             'rate_limit': data.get('rate_limit', 1000),
+            'organization_id': get_current_org_id(),
         }
         if data.get('slug'):
             kwargs['slug'] = data['slug'].strip()
@@ -4057,7 +4188,7 @@ def tenants_api(request):
 @csrf_exempt
 @manager_required
 def tenant_update_api(request, pk):
-    tenant = get_object_or_404(APITenant, pk=pk)
+    tenant = get_object_or_404(APITenant, pk=pk, organization_id=get_current_org_id())
     if request.method == 'PUT':
         data = json.loads(request.body)
         simple_fields = [

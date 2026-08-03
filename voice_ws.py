@@ -352,6 +352,17 @@ async def get_drive_time(lat1, lng1, lat2, lng2):
     return None
 
 
+def resolve_voice_org_id(rep=None, manager=None):
+    """Explicit org for a voice call: the identified caller's org, else the
+    default inbound org. Called before any scoped query runs."""
+    from maps.models import Organization
+    if rep is not None and rep.organization_id:
+        return rep.organization_id
+    if manager is not None and manager.organization_id:
+        return manager.organization_id
+    return Organization.default_inbound_id()
+
+
 async def get_rep_context(caller_number, reminder_lead_id=''):
     """Look up caller as rep or manager and return appropriate context."""
     import django
@@ -361,6 +372,7 @@ async def get_rep_context(caller_number, reminder_lead_id=''):
     from asgiref.sync import sync_to_async
     from django.db.models import Q
     from maps.models import Rep, Lead, TimeOffRequest, Manager
+    from maps.tenancy import set_current_org
     from datetime import date, datetime, timedelta
 
     if not caller_number:
@@ -368,8 +380,9 @@ async def get_rep_context(caller_number, reminder_lead_id=''):
 
     clean = clean_phone(caller_number)
 
-    # Check if caller is a rep
-    reps = await sync_to_async(list)(Rep.objects.filter(is_active=True))
+    # Identify the caller by phone across all orgs (deliberate cross-org
+    # lookup — the phone number is the only identity available here).
+    reps = await sync_to_async(list)(Rep.all_objects.filter(is_active=True))
     rep = None
     for r in reps:
         r_clean = clean_phone(r.phone_number)
@@ -377,14 +390,17 @@ async def get_rep_context(caller_number, reminder_lead_id=''):
             rep = r
             break
 
-    # Check if caller is a manager
-    managers = await sync_to_async(list)(Manager.objects.all())
+    managers = await sync_to_async(list)(Manager.all_objects.all())
     manager = None
     for m in managers:
         m_clean = clean_phone(m.phone_number)
         if m_clean and m_clean == clean:
             manager = m
             break
+
+    # Everything below runs scoped to the caller's organization.
+    org_id = await sync_to_async(resolve_voice_org_id)(rep, manager)
+    set_current_org(org_id)
 
     now_eastern = datetime.now(ZoneInfo('America/New_York'))
     today = now_eastern.date()
@@ -531,6 +547,11 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
 
     from asgiref.sync import sync_to_async
     from maps.models import Lead
+    from maps.tenancy import set_current_org
+
+    # This coroutine runs in a different task than get_rep_context, so the
+    # org context is not inherited — re-resolve from the identified caller.
+    set_current_org(await sync_to_async(resolve_voice_org_id)(rep, manager))
 
     if fn_name == 'update_disposition':
         homeowner_name = fn_args.get('homeowner_name', '')
@@ -1083,6 +1104,7 @@ async def save_call_and_extract(caller_number, call_sid, transcript, rep=None):
 
     from asgiref.sync import sync_to_async
     from maps.models import VoiceCallLog, Rep, TimeOffRequest
+    from maps.tenancy import set_current_org
     from openai import OpenAI
     from datetime import datetime, date
     import re
@@ -1105,15 +1127,19 @@ async def save_call_and_extract(caller_number, call_sid, transcript, rep=None):
         except Exception as e:
             logger.error(f'Summary generation failed: {e}')
 
-    # Match caller to a rep if not already matched
+    # Match caller to a rep if not already matched (cross-org phone lookup)
     if not rep and caller_number:
         clean = clean_phone(caller_number)
-        reps = await sync_to_async(list)(Rep.objects.filter(is_active=True))
+        reps = await sync_to_async(list)(Rep.all_objects.filter(is_active=True))
         for r in reps:
             r_clean = clean_phone(r.phone_number)
             if r_clean and r_clean == clean:
                 rep = r
                 break
+
+    # Post-call work runs outside the tasks that identified the caller, so
+    # the org context is not inherited — re-resolve it before any writes.
+    set_current_org(await sync_to_async(resolve_voice_org_id)(rep))
 
     # Save call log
     call_log = await sync_to_async(VoiceCallLog.objects.create)(

@@ -3,8 +3,51 @@ import uuid
 from django.contrib.auth.models import User
 from django.db import models
 
+from .tenancy import OrgOwnedModel
 
-class Lead(models.Model):
+
+class Organization(models.Model):
+    """A business using this instance. All owned data rows carry an
+    organization FK; the scoped default managers keep orgs isolated."""
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=100, unique=True)
+    is_active = models.BooleanField(default=True)
+    # Where automation traffic lands when nothing identifies the sender
+    # (unknown SMS sender, API tenant with no org). Exactly one org should
+    # have this set.
+    is_default_inbound = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def default_inbound_id(cls):
+        return (
+            cls.objects.filter(is_default_inbound=True, is_active=True)
+            .values_list('id', flat=True).first()
+        )
+
+
+class OrgSwitchAudit(models.Model):
+    """One row per superuser org switch — support access is deliberate and logged."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='org_switches')
+    from_organization = models.ForeignKey(
+        Organization, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    to_organization = models.ForeignKey(
+        Organization, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    ip_address = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        to_name = self.to_organization.name if self.to_organization else '(own org)'
+        return f"{self.user.username} → {to_name} ({self.created_at:%m/%d %I:%M %p})"
+
+
+class Lead(OrgOwnedModel):
     APPOINTMENT_TYPE_CHOICES = [
         ('solar', 'Solar'),
         ('hvac', 'HVAC'),
@@ -69,7 +112,7 @@ class Lead(models.Model):
         return f"{self.address} ({self.created_at:%m/%d/%Y})"
 
 
-class Rep(models.Model):
+class Rep(OrgOwnedModel):
     SPECIALTY_CHOICES = [
         ('solar', 'Solar'),
         ('hvac', 'HVAC'),
@@ -94,7 +137,7 @@ class Rep(models.Model):
         return self.name
 
 
-class Manager(models.Model):
+class Manager(OrgOwnedModel):
     name = models.CharField(max_length=200)
     phone_number = models.CharField(max_length=20)
 
@@ -102,7 +145,7 @@ class Manager(models.Model):
         return f"{self.name} ({self.phone_number})"
 
 
-class TimeOffRequest(models.Model):
+class TimeOffRequest(OrgOwnedModel):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('approved', 'Approved'),
@@ -128,7 +171,7 @@ class TimeOffRequest(models.Model):
         return f"{self.rep.name} — {self.start_date:%m/%d/%Y} {time_str} ({self.status})"
 
 
-class VoiceCallLog(models.Model):
+class VoiceCallLog(OrgOwnedModel):
     rep = models.ForeignKey(Rep, null=True, blank=True, on_delete=models.SET_NULL, related_name='voice_calls')
     caller_number = models.CharField(max_length=20)
     twilio_call_sid = models.CharField(max_length=64, blank=True)
@@ -141,7 +184,7 @@ class VoiceCallLog(models.Model):
         return f"Voice call from {name} ({self.created_at:%m/%d/%Y %I:%M %p})"
 
 
-class UserProfile(models.Model):
+class UserProfile(OrgOwnedModel):
     ROLE_CHOICES = [
         ('manager', 'Manager'),
         ('rep', 'Rep'),
@@ -171,7 +214,7 @@ class UserProfile(models.Model):
         return [s.strip() for s in self.lead_sources.split(',') if s.strip()]
 
 
-class LeadMessage(models.Model):
+class LeadMessage(OrgOwnedModel):
     DIRECTION_CHOICES = [
         ('inbound', 'Inbound'),
         ('outbound', 'Outbound'),
@@ -182,32 +225,32 @@ class LeadMessage(models.Model):
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
+    class Meta(OrgOwnedModel.Meta):
         ordering = ['created_at']
 
     def __str__(self):
         return f"{self.direction} {self.phone_number}: {self.body[:50]}"
 
 
-class LeadUpdate(models.Model):
+class LeadUpdate(OrgOwnedModel):
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='updates')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='lead_updates')
     text = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
+    class Meta(OrgOwnedModel.Meta):
         ordering = ['created_at']
 
     def __str__(self):
         return f"{self.user.username} on {self.lead} ({self.created_at:%m/%d %I:%M %p})"
 
 
-class RepCountDefault(models.Model):
+class RepCountDefault(OrgOwnedModel):
     time_block = models.CharField(max_length=10, blank=True, default='')
     count = models.IntegerField(default=3)
 
-    class Meta:
-        unique_together = [('time_block',)]
+    class Meta(OrgOwnedModel.Meta):
+        unique_together = [('organization', 'time_block')]
 
     def __str__(self):
         return f"Default rep count ({self.time_block or 'global'}): {self.count}"
@@ -218,7 +261,7 @@ class RepCountDefault(models.Model):
         return obj.count
 
 
-class RepCountOverride(models.Model):
+class RepCountOverride(OrgOwnedModel):
     TIME_BLOCK_CHOICES = [
         ('morning', '9-12 PM'),
         ('midday', '12-3 PM'),
@@ -229,8 +272,8 @@ class RepCountOverride(models.Model):
     time_block = models.CharField(max_length=10, choices=TIME_BLOCK_CHOICES)
     count = models.IntegerField()
 
-    class Meta:
-        unique_together = [('date', 'time_block')]
+    class Meta(OrgOwnedModel.Meta):
+        unique_together = [('organization', 'date', 'time_block')]
 
     def __str__(self):
         return f"{self.date} {self.get_time_block_display()}: {self.count} reps"
@@ -249,6 +292,8 @@ class GHLWebhookLog(models.Model):
         ('outbound', 'Outbound'),
         ('inbound', 'Inbound'),
     ]
+    organization = models.ForeignKey(
+        Organization, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default='outbound')
     webhook_type = models.CharField(max_length=20, choices=WEBHOOK_TYPE_CHOICES)
     lead = models.ForeignKey('Lead', null=True, blank=True, on_delete=models.SET_NULL)
@@ -271,6 +316,11 @@ class GHLWebhookLog(models.Model):
 
 
 class APITenant(models.Model):
+    # Which organization's data this API key reads/writes. Every key must
+    # map to an org — api_key_required falls back to the default inbound
+    # org (with a warning) if this is ever left unset.
+    organization = models.ForeignKey(
+        Organization, null=True, blank=True, on_delete=models.PROTECT, related_name='api_tenants')
     name = models.CharField(max_length=200)
     slug = models.SlugField(max_length=100, unique=True, blank=True)
     api_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
@@ -324,6 +374,8 @@ class APITenant(models.Model):
 
 
 class WebhookConfig(models.Model):
+    organization = models.ForeignKey(
+        Organization, null=True, blank=True, on_delete=models.CASCADE, related_name='webhook_configs')
     TRIGGER_CHOICES = [
         ('disposition_changed', 'Disposition Changed'),
         ('appointment_changed', 'Appointment DateTime Changed'),

@@ -16,6 +16,15 @@ def populate_slugs(apps, schema_editor):
         tenant.save(update_fields=['slug'])
 
 
+def cleanup_partial_state(apps, schema_editor):
+    # Postgres-only leftovers from a previously failed run. Guarded by
+    # vendor so fresh sqlite databases (tests, local dev) can migrate.
+    if schema_editor.connection.vendor != 'postgresql':
+        return
+    schema_editor.execute("DROP INDEX IF EXISTS maps_apitenant_slug_da3ef2f4_like;")
+    schema_editor.execute("ALTER TABLE maps_apitenant DROP COLUMN IF EXISTS slug;")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -23,15 +32,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Clean up any leftover indexes/columns from a previously failed run
-        migrations.RunSQL(
-            "DROP INDEX IF EXISTS maps_apitenant_slug_da3ef2f4_like;",
-            migrations.RunSQL.noop,
-        ),
-        migrations.RunSQL(
-            "ALTER TABLE maps_apitenant DROP COLUMN IF EXISTS slug;",
-            migrations.RunSQL.noop,
-        ),
+        migrations.RunPython(cleanup_partial_state, migrations.RunPython.noop),
         # Add slug as plain CharField first (no _like index)
         migrations.AddField(
             model_name='apitenant',

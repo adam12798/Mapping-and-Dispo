@@ -31,6 +31,20 @@
         <a href="{% url 'provider_crm' %}" class="nav-tab {% if active_tab == 'provider_crm' %}active{% endif %}">My Leads</a>
         {% endif %}
         <div style="margin-left:auto;display:flex;align-items:center;gap:12px;font-family:'Montserrat',sans-serif;">
+            {% if switchable_orgs|length > 1 %}
+            <form method="post" action="{% url 'org_switch' %}" style="margin:0;">
+                <input type="hidden" name="next" value="{{ request.path }}">
+                <select name="org_id" onchange="this.form.submit()"
+                        style="background:#3d5a80;color:#e0fbfc;border:1px solid #98c1d9;border-radius:6px;padding:3px 6px;font-size:12px;font-family:'Montserrat',sans-serif;"
+                        title="Switch organization (logged)">
+                    {% for org in switchable_orgs %}
+                    <option value="{{ org.id }}" {% if current_org and org.id == current_org.id %}selected{% endif %}>{{ org.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            {% elif current_org %}
+            <span style="color:#98c1d9;font-size:12px;opacity:0.8;">{{ current_org.name }}</span>
+            {% endif %}
             <span style="color:#98c1d9;font-size:13px;">{{ request.user.username }}</span>
             <a href="{% url 'logout' %}" class="nav-tab" style="font-size:13px;color:#ee6c4d;">Logout</a>
             {% if is_manager %}

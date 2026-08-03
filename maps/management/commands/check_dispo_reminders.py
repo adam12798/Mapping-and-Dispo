@@ -19,7 +19,8 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from maps.models import Lead
+from maps.models import Lead, Organization
+from maps.tenancy import org_context
 
 logger = logging.getLogger(__name__)
 EASTERN = ZoneInfo('America/New_York')
@@ -75,8 +76,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         now = datetime.now(EASTERN)
-        self._check_dispo_reminders(now)
-        self._check_followup_reminders(now)
+        # The worker has no request user; run each organization's reminders
+        # inside that org's context so scoped queries return its leads.
+        for org in Organization.objects.filter(is_active=True).order_by('id'):
+            with org_context(org.id):
+                self.stdout.write(f'--- {org.name} ---')
+                self._check_dispo_reminders(now)
+                self._check_followup_reminders(now)
         self.stdout.write('Done.')
 
     def _check_dispo_reminders(self, now):

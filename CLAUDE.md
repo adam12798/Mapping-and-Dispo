@@ -46,6 +46,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Voice Inbound**: Webhook at `/voice/answer/` returns TwiML with `<Connect><Stream>` to bridge to OpenAI Realtime API via WebSocket at `/media-stream`
 - Timezone: America/New_York (EST/EDT)
 
+## Multi-Tenancy (Organizations)
+
+- Two businesses share this instance: **Ventana Heating and Cooling** (slug `ventana`, the owner Adam) and **Team Sunshine Construction** (slug `team-sunshine`, a friend's business that owns all pre-tenancy data and is the **default inbound org** for automation traffic).
+- `Organization` model (`maps/models.py`) + org FK on all owned models: Lead, Rep, Manager, TimeOffRequest, VoiceCallLog, LeadMessage, LeadUpdate, RepCountDefault, RepCountOverride, UserProfile (scoped), plus APITenant, WebhookConfig, GHLWebhookLog (plain manager, explicitly filtered).
+- **Fail-closed scoping** (`maps/tenancy.py`): the default manager (`Model.objects`) filters by the org in a contextvar and returns *nothing* when no org is active. `Model.all_objects` is the greppable unscoped escape hatch — only for phone-number identification, org resolution, and backfills. Creates/saves auto-stamp the active org.
+- `maps/middleware.py` sets the org from `request.user.profile.organization` (superusers can override via session org-switch).
+- **Unauthenticated automations resolve an org explicitly before touching data**: SMS webhook (manager phone → rep phone → default inbound org), GHL/v1 API (`api_key_required` uses `APITenant.organization`), voice assistant (`resolve_voice_org_id` in `voice_ws.py` — caller's rep/manager org, else default inbound), reminder worker (loops orgs with `org_context`), webhook timers (`fire_webhooks` captures the lead's org for its thread).
+- **Org-switch**: superusers (Abahou) switch orgs via the nav dropdown → `POST /org/switch/`; every switch is written to `OrgSwitchAudit` (view at `/org/audit/`). This is how the owner supports Team Sunshine.
+- Orphan rows (org NULL) are invisible to everyone; adopt them with `python manage.py backfill_org_orphans --apply`.
+- Tenancy tests live in `maps/tests.py` — run `python manage.py test maps` before touching scoping code.
+
 ## Authentication & Roles
 
 - **Two roles**: Manager (full access) and Rep (read-only own leads)
