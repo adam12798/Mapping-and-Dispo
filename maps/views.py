@@ -1186,6 +1186,14 @@ def send_textblast(leads):
     lines.append('Reply with the # to claim or describe which one (e.g. "I can take the one in Waltham")')
     message = '\n'.join(lines)
 
+    # The blast From number resolves per org (maps/sms_numbers.py): Ventana
+    # sends from its A2P-registered 978. Team Sunshine's blasts go out on the
+    # carrier-filtered 833 — Twilio accepts them but delivery is unreliable,
+    # so TextBlast is effectively OFFLINE for their org. Decided 2026-08-29
+    # (they had used it once, a 2026-06-23 trial with zero claims): their
+    # traffic must not ride Ventana's A2P registration. The follow-up path if
+    # they want TextBlast is their own number + A2P registration — do NOT
+    # route them onto the 978 as a shortcut.
     sent_count = 0
     errors = []
     for rep in eligible_reps:
