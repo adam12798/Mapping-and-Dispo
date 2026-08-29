@@ -32,7 +32,7 @@ def send_sms(to, body):
     url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
     data = urllib.parse.urlencode({
         'To': to,
-        'From': settings.TWILIO_PHONE_NUMBER,
+        'From': settings.TWILIO_SMS_FROM_NUMBER,
         'Body': body,
     }).encode()
     req = urllib.request.Request(url, data=data)

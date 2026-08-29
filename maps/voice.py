@@ -6,6 +6,7 @@ from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from maps.views import manager_required
+from maps.twilio_security import twilio_signature_log_only
 
 
 @manager_required
@@ -161,6 +162,7 @@ def voice_logs(request):
 
 
 @csrf_exempt
+@twilio_signature_log_only
 def voice_answer(request):
     """Twilio Voice webhook — returns TwiML that connects to our WebSocket media stream."""
     host = request.get_host()
@@ -186,6 +188,7 @@ def voice_answer(request):
 
 
 @csrf_exempt
+@twilio_signature_log_only
 def voice_reminder_call(request):
     """Twilio webhook for outbound reminder calls — connects rep to Alfred with lead context."""
     host = request.get_host()

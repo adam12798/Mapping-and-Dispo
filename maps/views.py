@@ -23,6 +23,7 @@ from django.db.models import Q
 from .assignment import auto_assign_leads
 from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant, WebhookConfig, Organization, OrgSwitchAudit
 from .tenancy import get_current_org_id, org_context
+from .twilio_security import twilio_signature_log_only
 
 
 GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd'
@@ -178,6 +179,7 @@ def twilio_check(request):
         'sid_set': bool(settings.TWILIO_ACCOUNT_SID),
         'token_set': bool(settings.TWILIO_AUTH_TOKEN),
         'phone_set': bool(settings.TWILIO_PHONE_NUMBER),
+        'sms_from_set': bool(settings.TWILIO_SMS_FROM_NUMBER),
     })
 
 
@@ -340,7 +342,7 @@ def send_sms(to, body):
     url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
     data = urllib.parse.urlencode({
         'To': to,
-        'From': settings.TWILIO_PHONE_NUMBER,
+        'From': settings.TWILIO_SMS_FROM_NUMBER,
         'Body': body,
     }).encode()
     req = urllib.request.Request(url, data=data)
@@ -1138,7 +1140,7 @@ def send_sms_with_result(to, body, from_number=None):
     url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
     data = urllib.parse.urlencode({
         'To': to,
-        'From': from_number or settings.TWILIO_PHONE_NUMBER,
+        'From': from_number or settings.TWILIO_SMS_FROM_NUMBER,
         'Body': body,
     }).encode()
     req = urllib.request.Request(url, data=data)
@@ -1186,7 +1188,7 @@ def send_textblast(leads):
     sent_count = 0
     errors = []
     for rep in eligible_reps:
-        ok, err = send_sms_with_result(rep.phone_number, message, from_number=settings.TWILIO_PHONE_NUMBER_2)
+        ok, err = send_sms_with_result(rep.phone_number, message)
         if ok:
             sent_count += 1
         else:
@@ -2551,6 +2553,7 @@ def _resolve_sms_org(from_number):
 
 @csrf_exempt
 @require_POST
+@twilio_signature_log_only
 def sms_webhook(request):
     """Twilio webhook — resolves the sender's organization, then handles the
     message inside that org's context (leads, time off, manager replies)."""

@@ -26,12 +26,30 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-rynul5+8h@3^(3@)is*rn#32u*b9cpnw)g%y3_b-$e^n-e@%*!'
+# The insecure fallback only exists so the site stays up if the env var is
+# missing — set SECRET_KEY on Railway (rotating it logs every user out).
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY',
+    'django-insecure-rynul5+8h@3^(3@)is*rn#32u*b9cpnw)g%y3_b-$e^n-e@%*!',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Defaults to False; set DEBUG=True in local .env for development.
+DEBUG = os.environ.get('DEBUG', 'False').strip().lower() in ('1', 'true', 'yes', 'on')
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
+    'ALLOWED_HOSTS',
+    'sutton-soda.com,www.sutton-soda.com,'
+    'lavish-reflection-production-1e5f.up.railway.app,'
+    'healthcheck.railway.app,localhost,127.0.0.1',
+).split(',') if h.strip()]
+# Railway injects its public domain — keep it valid even if the domain changes.
+_railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN', '')
+if _railway_domain and _railway_domain not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(_railway_domain)
+
+# Railway terminates TLS at its proxy and forwards plain HTTP with this header.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
 # Application definition
@@ -132,8 +150,18 @@ USE_TZ = True
 # Twilio
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
+# Toll-free 833 line — Alfred's voice number. Carrier-filtered for SMS, so it
+# is no longer used as an SMS From number (voice calls only).
 TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
-TWILIO_PHONE_NUMBER_2 = os.environ.get('TWILIO_PHONE_NUMBER_2', '+19789244956')
+# 978 local number with approved A2P registration.
+TWILIO_PHONE_NUMBER_2 = os.environ.get('TWILIO_PHONE_NUMBER_2', '')
+# All outbound SMS sends From this number. Falls back to the 833 line only if
+# the 978 env var is missing, so sends never silently stop.
+TWILIO_SMS_FROM_NUMBER = (
+    os.environ.get('TWILIO_SMS_FROM_NUMBER', '')
+    or TWILIO_PHONE_NUMBER_2
+    or TWILIO_PHONE_NUMBER
+)
 
 # OpenAI
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
@@ -161,3 +189,13 @@ LOGOUT_REDIRECT_URL = '/login/'
 # Sessions — stay logged in for 1 week
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 7
 SESSION_SAVE_EVERY_REQUEST = True
+
+# With DEBUG off, Django's default logging drops app-level warnings — send
+# everything WARNING+ to the console so Twilio signature failures
+# (TWILIO_SIG_FAIL) and worker errors show up in Railway logs.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'root': {'handlers': ['console'], 'level': 'WARNING'},
+}

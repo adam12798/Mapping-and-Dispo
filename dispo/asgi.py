@@ -20,7 +20,14 @@ from voice_ws import app as fastapi_app
 
 
 def _run_dispo_reminders():
-    """Background loop that checks for un-dispositioned appointments every 15 minutes."""
+    """Background loop that checks for un-dispositioned appointments every 15 minutes.
+
+    This thread is the ONLY reminder runner in production. Railway runs a
+    single start command per service (the Procfile `web` process); a separate
+    `worker:` process type never ran there, so its Procfile line was removed
+    to kill the duplicate-runner risk. If a dedicated Railway worker service
+    is ever created, delete this thread startup in the same change.
+    """
     import logging
     logger = logging.getLogger('dispo_reminders')
     time.sleep(30)
