@@ -20,6 +20,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from maps.models import Lead, Organization
+from maps.sms_numbers import sms_from_number
 from maps.tenancy import org_context
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def send_sms(to, body):
     url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
     data = urllib.parse.urlencode({
         'To': to,
-        'From': settings.TWILIO_SMS_FROM_NUMBER,
+        'From': sms_from_number(),
         'Body': body,
     }).encode()
     req = urllib.request.Request(url, data=data)

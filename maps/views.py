@@ -24,6 +24,7 @@ from .assignment import auto_assign_leads
 from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant, WebhookConfig, Organization, OrgSwitchAudit
 from .tenancy import get_current_org_id, org_context
 from .twilio_security import twilio_signature_log_only
+from .sms_numbers import sms_from_number
 
 
 GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd'
@@ -342,7 +343,7 @@ def send_sms(to, body):
     url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
     data = urllib.parse.urlencode({
         'To': to,
-        'From': settings.TWILIO_SMS_FROM_NUMBER,
+        'From': sms_from_number(),
         'Body': body,
     }).encode()
     req = urllib.request.Request(url, data=data)
@@ -1140,7 +1141,7 @@ def send_sms_with_result(to, body, from_number=None):
     url = f'https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json'
     data = urllib.parse.urlencode({
         'To': to,
-        'From': from_number or settings.TWILIO_SMS_FROM_NUMBER,
+        'From': from_number or sms_from_number(),
         'Body': body,
     }).encode()
     req = urllib.request.Request(url, data=data)

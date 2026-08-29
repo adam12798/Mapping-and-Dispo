@@ -25,9 +25,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-# The insecure fallback only exists so the site stays up if the env var is
-# missing — set SECRET_KEY on Railway (rotating it logs every user out).
+# ─── SECRET_KEY ──────────────────────────────────────────────────────────────
+# ⚠️  DO NOT set the SECRET_KEY env var on Railway casually. Setting it (or
+# changing it) invalidates every session cookie — ALL users of BOTH orgs
+# (Ventana AND Team Sunshine) are logged out at once, and any outstanding
+# password-reset links die. The env var is DELIBERATELY unset in production:
+# the fallback below is the key production has always signed sessions with,
+# so existing logins survive every deploy. Key rotation is a parked, separate
+# change — it happens only on Adam's explicit go, after warning the reps.
 SECRET_KEY = os.environ.get(
     'SECRET_KEY',
     'django-insecure-rynul5+8h@3^(3@)is*rn#32u*b9cpnw)g%y3_b-$e^n-e@%*!',
@@ -150,13 +155,15 @@ USE_TZ = True
 # Twilio
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
-# Toll-free 833 line — Alfred's voice number. Carrier-filtered for SMS, so it
-# is no longer used as an SMS From number (voice calls only).
+# Toll-free 833 line — Alfred's voice number, and the SMS From number for
+# Team Sunshine (their sends are unchanged by the per-org split below).
 TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
-# 978 local number with approved A2P registration.
+# 978 local number. Its A2P registration belongs to VENTANA — no other org's
+# SMS may ever send from it (enforced in maps/sms_numbers.py).
 TWILIO_PHONE_NUMBER_2 = os.environ.get('TWILIO_PHONE_NUMBER_2', '')
-# All outbound SMS sends From this number. Falls back to the 833 line only if
-# the 978 env var is missing, so sends never silently stop.
+# Ventana's outbound SMS From number. Every other org — Team Sunshine, or any
+# unresolved org context — sends from the 833 line, exactly as before.
+# Per-send resolution: maps/sms_numbers.py::sms_from_number().
 TWILIO_SMS_FROM_NUMBER = (
     os.environ.get('TWILIO_SMS_FROM_NUMBER', '')
     or TWILIO_PHONE_NUMBER_2
