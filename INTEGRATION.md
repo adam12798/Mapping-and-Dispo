@@ -107,7 +107,7 @@ Because the fallback is a raw `getattr` with no validation, **any Lead attribute
 | Rapid edits? | Coalesced. Five disposition changes in 60 seconds produce **one** delivery carrying the final state; intermediate states are never emitted. |
 | Ordering? | Not guaranteed. Each event is an independent timer; two triggers on the same lead can arrive out of order. |
 
-**Design consequence:** this is **at-most-once** delivery with a silent-loss window. The hub must treat Sutton events as *hints*, not as a ledger — reconcile by polling `GET /api/v1/leads/?since=…` on a schedule rather than assuming the event stream is complete. Making delivery durable is gap #9 in §5.
+**Design consequence — SETTLED 2026-08-30: "hint + reconcile".** This is **at-most-once** delivery with a silent-loss window. The hub treats Sutton events as *fast hints*, never as a ledger, and reconciles by polling on a sweep. Do not build the receiver assuming a trustworthy stream. Note that the reconciliation sweep needs a change feed that today's `?since=` does not provide — see §4.2.
 
 ---
 
@@ -118,7 +118,7 @@ Base: `https://sutton-soda.com/api/v1/`. Auth: `Authorization: Bearer <api_key>`
 | Hub need | Endpoint | Status |
 |---|---|---|
 | Read a lead | `GET /api/v1/leads/<id>/` | ✅ **exists** — full record incl. `call_transcript` |
-| List / poll leads | `GET /api/v1/leads/` | ✅ **exists** — filters `date`, `start`, `end`, `rep_id`, `disposition`, `since` (on `created_at`); paginated (`page`, `per_page`, max 100) |
+| List / poll leads | `GET /api/v1/leads/` | ⚠️ **exists, but not a change feed** — filters `date`, `start`, `end`, `rep_id`, `disposition`, `since`; paginated (`page`, `per_page`, max 100). **`since` filters `created_at`, so it misses edits to existing leads** — see §4.2 |
 | Update status (disposition) | `PUT /api/v1/leads/<id>/` | ✅ **exists** |
 | Update follow-up date/time | `PUT` — `follow_up_date`, `follow_up_time` | ✅ **exists** |
 | Update notes | `PUT` — `call_notes`, `appt_notes`, `post_appt_notes` | ✅ **exists** |
@@ -225,15 +225,38 @@ Consequences the hub must design around:
 
 > ### ⚠️ The one schema change Stage C asks of Sutton
 >
-> Add a nullable, indexed column to `Lead`:
+> Add two nullable/defaulted columns to `Lead` in a single migration:
 >
 > ```python
 > hub_customer_id = models.CharField(max_length=100, blank=True, db_index=True)
+> updated_at = models.DateTimeField(auto_now=True, db_index=True)
 > ```
 >
-> This is **one migration** — the only schema change in the integration. It is additive and nullable, so it is safe for Team Sunshine's rows (they simply stay blank). Shipping it also means exposing the field in the v1 serializers (read + writable via PUT) and ideally as a `?hub_customer_id=` filter on the list endpoint, so the hub can resolve its own id → Sutton lead without maintaining a mapping table.
+> Both are additive and safe for Team Sunshine's rows (`hub_customer_id` stays blank; `updated_at` backfills to the migration timestamp). Shipping `hub_customer_id` also means exposing it in the v1 serializers (read + writable via PUT) and ideally as a `?hub_customer_id=` filter on the list endpoint, so the hub resolves its own id → Sutton lead without maintaining a mapping table.
+>
+> `updated_at` is what makes reconciliation work — see §4.2 for why it is required and the trap that will silently defeat it.
 >
 > Note for whoever ships it: Railway runs `manage.py migrate` on deploy, so this migration applies automatically at merge — unlike the hardening branch, this change set will **not** be migration-free.
+
+### 4.2 Why `updated_at` ships with `hub_customer_id` (decided 2026-08-30)
+
+The settled reconciliation model (§1.5) polls Sutton on a sweep to backstop lost webhook events. Today's `?since=` filter targets **`created_at`**, so a sweep sees *newly created* leads and nothing else. The single most important case it misses is **a disposition set on an older lead** — precisely the event reconciliation exists to catch. Without a modified timestamp there is no change feed, only a creation feed.
+
+**⚠️ The trap: `auto_now` fires only on `Model.save()`.** Queryset-level `.update()` writes straight to SQL and silently skips it. Sutton has five such paths on `Lead` today, and one of them is the highest-value event in the whole integration:
+
+| Path | What it writes | Why it matters |
+|---|---|---|
+| `voice_ws.py:649` — Alfred `update_disposition` | `disposition`, `call_notes`, costs, notes | **Alfred is a primary way dispositions get set.** Left unhandled, the flagship event is invisible to the change feed |
+| `views.py:681` — `leads_bulk_update` | disposition, rep, sat, appt type/format, follow-up | Bulk disposition edits also vanish from the feed |
+| `views.py:1224` — `confirm_assignments_api` | `rep_id` | Owner changes from route confirmation |
+| `views.py:1119` — `clear_assignments_api` | `rep=None` | Bulk un-assignment |
+| `views.py:1208` — `send_textblast` | `textblast_sent_at` | Internal stamp; arguably *should not* bump `updated_at` |
+
+Handle these explicitly (add `updated_at=timezone.now()` to each `.update()` call), or use a database trigger, which cannot be bypassed and needs no discipline from future code. **A plain `auto_now` field alone reproduces the same silent-loss hole in a new place** — the change feed would look healthy while quietly missing Alfred's dispositions.
+
+Decide deliberately whether internal stamps (`textblast_sent_at`, the reminder stamps) should count as "updated". Bumping on them makes the hub re-poll leads whose customer-visible state did not change; not bumping keeps the feed meaningful.
+
+**API change must be additive.** Do not silently repoint the existing `since` parameter at `updated_at` — an existing consumer relying on creation semantics would break. Add a new parameter (`updated_since=`) or an explicit mode flag, and leave `since` as it is.
 
 ---
 
@@ -249,8 +272,8 @@ Consequences the hub must design around:
 | 6 | Outbound delivery failures invisible to the hub | 1 filter param | `GET /api/v1/ghl/logs/` hard-codes `direction='inbound'`; add `?direction=` |
 | 7 | v1 PUT writes no chatter entry | ~5 lines | Create a `LeadUpdate` on hub-driven changes so they appear in the audit thread |
 | 8 | `GET /api/v1/reps/` omits SMS-eligibility fields | ~3 lines | Add `textblast_eligible`, `sms_consent`; decide whether inactive reps should be listable |
-| 9 | **`hub_customer_id` column** | **1 migration** + serializer edits | The flagged schema change (§4) |
-| 10 | **At-most-once delivery with a silent-loss window** | Medium | In-process `threading.Timer` loses queued events on restart with no log row. Needs a persisted outbox (or accept it and reconcile by polling `?since=`). Note the same class of fragility already bit the reminder thread — see the DB-connection bug in the project notes |
+| 9 | **`hub_customer_id` + `updated_at` columns** | **1 migration** + serializer edits + 5 `.update()` call sites | The flagged schema change (§4). `updated_at` is required for reconciliation to work at all; the five queryset `.update()` paths must be handled or the change feed silently misses Alfred's dispositions. Add `updated_since=` as a **new** param — don't repoint `since` |
+| 10 | **At-most-once delivery with a silent-loss window** | Medium | In-process `threading.Timer` loses queued events on restart with no log row. **Decided 2026-08-30: accept it and reconcile by polling** (§1.5) rather than building a persisted outbox — which is what makes gap #9 load-bearing. Note the same class of fragility already bit the reminder thread — see the DB-connection bug in the project notes |
 | 11 | **No hub-triggered SMS to a rep** | Medium | New API-key endpoint required. Must respect `sms_consent`, and must send from the per-org number resolved by `maps/sms_numbers.py` (Ventana → 978 A2P; never put hub traffic on the 833) |
 | 12 | `APITenant.rate_limit` not enforced | Medium | Field exists, no enforcement anywhere. A hub bug could hammer the app |
 | 13 | No v1 access to `LeadMessage` / `LeadUpdate` threads | Medium | Only session-authenticated endpoints exist today |
