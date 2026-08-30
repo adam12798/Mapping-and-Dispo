@@ -1,0 +1,259 @@
+# INTEGRATION.md — Sutton ↔ Wednesday (hub) contract
+
+**Status:** Stage C discovery spike. Read-only audit of the code as of commit `255c25b` (2026-08-30), cross-checked against live production data. No code was changed to produce this document.
+
+**Scope:** everything below is scoped to the **Ventana** org (`slug: ventana`, org id 1). Team Sunshine (`slug: team-sunshine`, org id 2, the default inbound org) must be unaffected by any integration built from this document — see [§0 Isolation guarantee](#0-isolation-guarantee).
+
+**Verified against production** (read-only queries, 2026-08-30):
+- Ventana has **zero** `WebhookConfig` rows today. Team Sunshine has two (both active, both pointing at their GHL account).
+- Ventana already has one API key: tenant **"Marketing Canvas"**, `organization = ventana`, last used 2026-08-27.
+- Last config-driven outbound webhook delivery: **2026-07-13** (17 config-sourced deliveries all-time, all HTTP 200). The path is dormant because the triggers haven't occurred, not because it is broken.
+
+---
+
+## 0. Isolation guarantee
+
+How "Team Sunshine is unaffected" is actually enforced, and where that guarantee stops.
+
+**What is org-scoped and therefore safe:**
+
+| Mechanism | Enforcement |
+|---|---|
+| Webhook config rows | `_do_fire_webhooks` filters `WebhookConfig.objects.filter(trigger=…, is_active=True, organization_id=org_id)` where `org_id` comes from `lead.organization_id`. A Ventana lead can only ever fire Ventana's configs. |
+| Webhook firing thread | `fire_webhooks` captures the lead's org **before** spawning the timer thread and re-activates it inside `_do_fire_webhooks`, because thread stacks don't inherit the contextvar. |
+| API key → org | `api_key_required` resolves `APITenant.organization_id` and wraps the whole view in `org_context(org_id)`. |
+| All v1 reads/writes | Every v1 view uses the scoped default manager (`Lead.objects`, `Rep.objects`), which filters on the contextvar and **returns nothing when no org is active** (fail-closed). `get_object_or_404(Lead, pk=…)` is scoped too, so a Ventana key asking for a Team Sunshine lead id gets a 404, not a row. |
+
+**⚠️ The one real cross-org risk — an API key with no organization.** If `APITenant.organization` is `NULL`, `api_key_required` falls back to `Organization.default_inbound_id()`, **which is Team Sunshine**, and logs a warning. A hub key created without an org set would silently read and write Team Sunshine's data. **Any key minted for Wednesday must have `organization = ventana` set at creation and verified after.**
+
+**⚠️ Shared-code risk.** Config *rows* are per-org, but `_do_fire_webhooks` is *shared code*. Adding Ventana webhook configs is zero-risk to Team Sunshine. Changing the payload builder, the debounce, or the delivery mechanism changes Team Sunshine's live webhooks too. **Rule for Stage C: config additions are free; engine changes must be strictly additive and backward-compatible.** In particular, do not "fix" the string-typing described in §1.4 — Team Sunshine's GHL receiver depends on the current format.
+
+**Edge case:** an orphan lead (`organization_id IS NULL`) resolves `org_id = None`, and the config query then matches only configs with a NULL org. None exist today, so orphan leads fire nothing.
+
+**Correction to CLAUDE.md:** it states that GHL webhooks fire from `views.py::lead_update` and `voice_ws.py` via hardcoded URLs. That is no longer true. `_send_ghl_dispo_webhook`, `_send_ghl_appt_webhook` (views.py) and `_send_ghl_dispo_webhook_async` (voice_ws.py) are **defined but never called** — dead code. The hardcoded `GHL_WEBHOOK_URL` constants survive only as preset URLs in the `/ghl-debug/` builder UI. **Every outbound webhook today flows through the org-scoped `WebhookConfig` system**, which is good news for isolation: there is no un-scoped global sender left in the delivery path.
+
+---
+
+## 1. Events OUT (Sutton → hub)
+
+### 1.1 Trigger inventory
+
+Seven trigger types exist (`WebhookConfig.TRIGGER_CHOICES`). What matters is not the type but **which code paths actually call `fire_webhooks`** — several obvious paths call nothing.
+
+| Trigger | Fires from | Does **not** fire from |
+|---|---|---|
+| `disposition_changed` | CRM inline edit (`lead_update`, when `disposition` in payload); bulk update (`leads_bulk_update`); manager SMS update (`apply_manager_sms_update`, on `cancel`/`disposition`); Alfred `update_disposition` and manager `update_lead` | v1 API `PUT /api/v1/leads/<id>/`; `POST /api/v1/ghl/disposition/` |
+| `appointment_changed` | CRM inline edit (only when the datetime actually changed); Alfred `update_lead` | **`ghl_appointment`**, **`ghl_reschedule`**; bulk update; v1 PUT |
+| `lead_created` | **only** `POST /api/v1/leads/create/` | **`ghl_appointment`** (GHL bookings), **inbound SMS** lead creation |
+| `lead_cancelled` | CRM inline edit (when `cancelled` set truthy) | `ghl_cancel`; `ghl_appointment` with status=cancelled; SMS cancel path |
+| `rep_assigned` | CRM inline edit (whenever `rep_id` is in the payload — including clearing it) | bulk update; auto-assign; `confirm_assignments_api`; TextBlast claim |
+| `sat_changed` | CRM inline edit | bulk update |
+| `follow_up_set` | CRM inline edit | bulk update; Alfred's follow-up date writes |
+
+Two structural observations:
+
+- **Bulk edits emit only `disposition_changed`**, even though rep, sat, appointment type/format and follow-up date are all bulk-editable. A manager bulk-assigning 20 leads to a rep emits nothing.
+- **Every inbound GHL path is silent.** `ghl_appointment` creates and updates leads, `ghl_reschedule` moves appointments, `ghl_cancel` cancels them — none call `fire_webhooks`. If Ventana's bookings arrive through GHL, Sutton emits nothing today.
+
+### 1.2 The two events the hub asked for
+
+**"Appointment created / booked" → needs a code change (new call site; the trigger type already exists).**
+
+`lead_created` fires from exactly one place: `POST /api/v1/leads/create/`. If Wednesday creates leads through that endpoint, the event works today. If Ventana's bookings arrive via GHL (`ghl_appointment`) or inbound SMS — the two paths that create real leads in production — **no event fires**. Fixing this is two `fire_webhooks('lead_created', lead)` calls, not a new trigger type.
+
+"Booked" on an *existing* lead (an appointment datetime being set or moved) maps to `appointment_changed`, which likewise doesn't fire from the GHL paths.
+
+**"Disposition set" → works via config today.**
+
+`disposition_changed` fires from every path a human or Alfred actually uses to set a disposition: CRM inline edit, bulk edit, manager SMS, and both Alfred tools. This needs zero code — only a `WebhookConfig` row for Ventana.
+
+### 1.3 Can the payload carry what a hub needs?
+
+Payload fields are chosen per config (`WebhookConfig.fields`, a JSON list of keys). The builder resolves them as: `rep_name` → `lead.rep.name`; `appointment_datetime` → GHL-formatted string; `disposition` → title-cased (`no_sale` → `No_Sale`); **anything else → `getattr(lead, key, '')`**.
+
+Because the fallback is a raw `getattr` with no validation, **any Lead attribute works as a field key**, including ones the UI can't offer:
+
+| Hub need | Field key | Status |
+|---|---|---|
+| Lead id | `id` | ✅ works — but **not selectable in the `/ghl-debug/` builder UI**; must be set via `POST /api/webhook-configs/` (manager auth) or directly in the DB |
+| Homeowner name | `homeowner_name` | ✅ in UI |
+| Phone | `phone_number` | ✅ in UI |
+| Address | `address`, `city`, `state` | ✅ in UI |
+| Appointment time | `appointment_datetime` | ✅ in UI (formatted string, see below) |
+| Rep | `rep_name` ✅ in UI · `rep_id` ✅ works, not in UI | |
+| Source | `source` | ✅ in UI |
+
+**Verdict: works via config today**, with the caveat that `id` and `rep_id` must be configured through the API rather than the UI. Adding them to the UI picker is a two-line template change (`ALL_FIELDS` in `maps/templates/maps/ghl_debug.html`).
+
+### 1.4 Payload gotchas the hub must handle
+
+- **Every value is a string.** `payload[key] = str(val)`. Booleans arrive as Python's `"True"` / `"False"` (capitalized, not JSON `true`/`false`). `None` becomes `""`. So `cancelled` → `"True"`, `sat` → `"True"` / `"False"` / `""`, `latitude` → `"42.3601"`, `id` → `"1234"`.
+- **`disposition` is re-formatted**, not raw: `no_sale` → `No_Sale`, `cpfu` → `Cpfu`. The hub should map from these, not from the raw DB values in §3.
+- **`appointment_datetime` is a formatted local string**, not ISO 8601 (`_format_appt_dt_for_ghl`). The v1 API returns proper ISO — the two surfaces disagree.
+- **No event metadata.** The payload carries no event type, no timestamp, no delivery id. The hub must infer the event from which URL received it (use one URL per trigger), or add a static custom header per config.
+- **No signature.** Outbound webhooks are unsigned. Custom headers are configurable per config, so a static bearer token in a header is the available authentication mechanism.
+
+### 1.5 Delivery guarantees — read this before designing the hub receiver
+
+`fire_webhooks` schedules a **60-second debounced `threading.Timer`** (`WEBHOOK_DELAY = 60`), keyed on `(trigger, lead_id)`. Repeated calls **cancel and reset** the timer.
+
+| Question | Answer |
+|---|---|
+| Retries? | **None.** One attempt, 10-second timeout. |
+| Receiver down / 500s? | Attempt is made, failure is recorded, **event is dropped**. Nothing re-sends it. |
+| Where logged? | A `GHLWebhookLog` row per attempt: `organization_id` stamped, `direction='outbound'` (model default), `webhook_type=<trigger>`, `source='config:<config name>'`, plus URL, payload, `response_status`, `response_body` (2 KB), `success`, `error_message`. |
+| Visible where? | The `/ghl-debug/` page (manager UI) and the database. **Not** via `GET /api/v1/ghl/logs/` — that endpoint hard-filters `direction='inbound'`, so a hub cannot self-serve its own delivery failures. |
+| Process restart? | **Events in the 60s debounce window are lost silently, with no log row at all** — nothing is persisted until the delivery attempt runs. A Railway deploy, crash, or restart during that window drops them. The timer thread is a daemon, so it is killed at exit without running. |
+| Rapid edits? | Coalesced. Five disposition changes in 60 seconds produce **one** delivery carrying the final state; intermediate states are never emitted. |
+| Ordering? | Not guaranteed. Each event is an independent timer; two triggers on the same lead can arrive out of order. |
+
+**Design consequence:** this is **at-most-once** delivery with a silent-loss window. The hub must treat Sutton events as *hints*, not as a ledger — reconcile by polling `GET /api/v1/leads/?since=…` on a schedule rather than assuming the event stream is complete. Making delivery durable is gap #9 in §5.
+
+---
+
+## 2. API IN (hub → Sutton)
+
+Base: `https://sutton-soda.com/api/v1/`. Auth: `Authorization: Bearer <api_key>`, or `X-API-Key: <key>`, or `?api_key=…`. The key is `APITenant.api_key` (a UUID).
+
+| Hub need | Endpoint | Status |
+|---|---|---|
+| Read a lead | `GET /api/v1/leads/<id>/` | ✅ **exists** — full record incl. `call_transcript` |
+| List / poll leads | `GET /api/v1/leads/` | ✅ **exists** — filters `date`, `start`, `end`, `rep_id`, `disposition`, `since` (on `created_at`); paginated (`page`, `per_page`, max 100) |
+| Update status (disposition) | `PUT /api/v1/leads/<id>/` | ✅ **exists** |
+| Update follow-up date/time | `PUT` — `follow_up_date`, `follow_up_time` | ✅ **exists** |
+| Update notes | `PUT` — `call_notes`, `appt_notes`, `post_appt_notes` | ✅ **exists** |
+| Update owner (rep) | `PUT` — `rep_id` | ✅ **exists** |
+| Create a lead | `POST /api/v1/leads/create/` | ✅ **exists** — requires `address`; fires `lead_created` |
+| List reps | `GET /api/v1/reps/` | ⚠️ **exists, missing fields** — active reps only, no way to include inactive; returns id, name, phone, home_address, city, lat/lng, specialty, rating, color, is_active. Omits `textblast_eligible`, `sms_consent` (needed before any hub-triggered SMS) |
+| Trigger an SMS to a rep | — | ❌ **absent** — no v1 endpoint sends SMS. `POST /api/textblast/send/` exists but is session/manager-authenticated, not API-key, and is TextBlast-specific |
+| Stats | `GET /api/v1/stats/` | ✅ exists |
+| Time off | `GET /api/v1/time-off/?date=` | ✅ exists (read-only) |
+| Delivery-log read-back | `GET /api/v1/ghl/logs/` | ⚠️ inbound-only (see §1.5) |
+
+**Behavioural notes on `PUT /api/v1/leads/<id>/` that the hub design depends on:**
+
+- **It fires no webhooks.** A hub-driven disposition change does not emit `disposition_changed`. This conveniently prevents echo loops, but it also means Sutton's other consumers (Team Sunshine's GHL receiver is *not* one of them — different org) never learn about hub-driven changes. Document it as intentional or change it deliberately; don't discover it in production.
+- **It writes no chatter entry.** CRM edits create a `LeadUpdate` row ("Disposition: Follow Up → Sale"); the v1 PUT does not. Hub-driven changes are invisible in the lead's Updates thread — no audit trail of who changed what.
+- Writable fields: `homeowner_name`, `phone_number`, `address`, `city`, `state`, `source`, `tags`, `appointment_type`, `appointment_format`, `appointment_datetime`, `disposition`, `sat`, `follow_up_date`, `follow_up_time`, `call_notes`, `appt_notes`, `call_transcript`, `cancelled`, `monthly_cost`, `total_cost`, `adders`, `post_appt_notes`, and `rep_id`. Not writable: geo (auto-derived on address/city change), all internal stamps.
+- `DELETE` is supported and is a hard delete. Consider not granting the hub a key path to it.
+
+**Auth → org mapping (confirmed):** `api_key_required` looks up the tenant, rejects unknown/inactive keys with 401, stamps `last_used_at`, then runs the entire view inside `org_context(tenant.organization_id)`. Cross-org access is impossible **provided the tenant row has an organization** — see the NULL-org warning in §0. `rate_limit` (default 1000/hr) exists on the model but **is not enforced anywhere**. CORS on `/api/v1/` allows any origin (`CORS_ALLOWED_ORIGIN_REGEXES = ['.*']`); the API key is the only gate.
+
+---
+
+## 3. The Lead field map
+
+Every field on `maps.models.Lead`, classified for a hub-side customer record. **SHARED** = the hub would mirror it. **SUTTON-ONLY** = routing, geo, voice, or internal scheduling state that should not leave Sutton.
+
+### SHARED — identity
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | AutoField (PK) | The join key. Stable, per-instance, not exposed in the builder UI by default (§1.3) |
+| `homeowner_name` | char(200), blank | Free text; blank on SMS-created leads until parsed |
+| `phone_number` | char(20), blank | Not normalized on write; format varies (`+1…`, `(978) …`). Matching uses last-10-digit `icontains` (§4) |
+| `address` | char(500), **required** | Only truly required field on the model |
+| `city` | char(200), blank | |
+| `state` | char(50), blank | Defaults to `MA` on GHL/v1 creation |
+| `source` | char(200), blank | Lead source; also drives provider-portal filtering |
+| `tags` | char(200), blank | Product-type text from GHL; `appointment_type` is auto-computed from it |
+
+### SHARED — appointment
+
+| Field | Type | Notes |
+|---|---|---|
+| `appointment_datetime` | datetime, null | Stored UTC, rendered Eastern. **CRM is the source of truth for appointment times** |
+| `appointment_type` | choice: `solar`/`hvac`/`both`, blank | Blank = unassignable by auto-assign |
+| `appointment_format` | choice: `in_person`/`virtual`, blank | |
+| `rep` | FK → Rep, null | The assigned owner. Serialized as `rep_id` + `rep_name` |
+| `cancelled` | bool, default False | Soft-cancel; cancelled leads stay in the table |
+
+### SHARED — outcome / follow-up
+
+| Field | Type | Notes |
+|---|---|---|
+| `disposition` | choice, blank | 13 values: `sale`, `no_sale`, `follow_up`, `credit_fail`, `cancel_door`, `cpfu`, `rep_no_show`, `no_coverage`, `needs_reschedule`, `incomplete_deal`, `future_contact`, `dq`, `no_show`. Blank = not yet dispositioned (drives reminders) |
+| `sat` | bool, **nullable** | Tri-state: True / False / unknown |
+| `follow_up_date` | date, null | |
+| `follow_up_time` | time, null | |
+| `call_notes` | char(**200**), blank | Alfred's <20-word paraphrase. Short field — hub must truncate |
+| `appt_notes` | text, blank | Pre-appointment notes (from GHL `Notes`) |
+| `post_appt_notes` | text, blank | |
+| `monthly_cost` | char(100), blank | Free text, not numeric (`"$150/mo"`) |
+| `total_cost` | char(100), blank | Free text, not numeric |
+| `adders` | text, blank | |
+
+### SUTTON-ONLY — do not mirror
+
+| Field | Type | Why it stays |
+|---|---|---|
+| `organization` | FK → Organization | Tenancy. Never expose; the hub key implies the org |
+| `latitude` / `longitude` | float, null | Derived by geocoding; recomputed whenever address/city changes |
+| `from_number` | char(20), blank | Twilio sender of the originating SMS — telephony plumbing |
+| `raw_message` | text, blank | Raw inbound SMS body. **Do not repurpose as a spare field** (§4) |
+| `call_transcript` | text, blank | Full Alfred call transcript. Readable via v1 detail; treat as sensitive — it is a verbatim recording of a rep conversation |
+| `created_at` | datetime, auto | Sutton row-creation time, ≠ booking time |
+| `dispo_reminder_sent_at` | datetime, null | Reminder-worker state |
+| `dispo_call_made_at` | datetime, null | Reminder-worker state (Alfred callback) |
+| `follow_up_reminder_sent_at` | datetime, null | Reminder-worker state |
+| `textblast_sent_at` | datetime, null | TextBlast dedupe state |
+
+**Related tables** (not fields, but part of the record a hub might expect): `LeadMessage` (SMS thread, reverse `lead.messages`) and `LeadUpdate` (chatter thread, reverse `lead.updates`). Both are org-scoped, both are readable only through session-authenticated endpoints — **there is no v1 API for either**.
+
+---
+
+## 4. Identity linkage
+
+**Lead identity.** `Lead.id` (integer PK) is the only stable unique identifier. There is no natural key: `phone_number` is not unique or normalized, `homeowner_name` is free text and frequently blank, `address` is the only required field but is not unique (duplicates exist across re-bookings).
+
+**Rep identity.** `Rep.id` is the join key and is what `PUT …/leads/<id>/ {"rep_id": N}` expects. Note that Sutton's own SMS paths match reps by `name__icontains` and by last-10-digit phone — the hub should always use `rep_id`, never name.
+
+**⚠️ Phone dedupe behaviour on the GHL appointment endpoint.** `_ghl_match_lead(name, phone, address)` tries three matches in order, taking the **most recently created** match at each step:
+
+1. `homeowner_name__iexact` **AND** `phone_number__icontains(last 10 digits)`
+2. `homeowner_name__iexact` **AND** `address__icontains`
+3. **`phone_number__icontains(last 10 digits)` alone** — name ignored entirely
+
+Consequences the hub must design around:
+
+- **One phone number = one lead, forever.** A repeat customer booking a second appointment **updates the existing lead in place** (new datetime overwrites the old) rather than creating a second row. `POST /api/v1/ghl/appointment/` is documented as "never creates duplicates" — that is the mechanism. The hub must not assume one booking = one lead.
+- Step 3 ignores the name, so two different people sharing a phone (spouses, a shared household line, an office number) collapse onto one lead.
+- Matching is `icontains` on the last 10 digits, so it is substring-based, not exact-equality — a stored number containing those 10 digits anywhere matches.
+- `POST /api/v1/leads/create/` does **not** dedupe. It creates unconditionally. The two creation endpoints therefore behave oppositely.
+
+**Where a hub-side customer id would live.** There is **no spare field**. `tags` carries product type, `source` carries lead source and drives provider filtering, `raw_message` holds the raw SMS body and is semantically wrong to overload (and would silently corrupt SMS-origin leads). Overloading any of them is not recommended.
+
+> ### ⚠️ The one schema change Stage C asks of Sutton
+>
+> Add a nullable, indexed column to `Lead`:
+>
+> ```python
+> hub_customer_id = models.CharField(max_length=100, blank=True, db_index=True)
+> ```
+>
+> This is **one migration** — the only schema change in the integration. It is additive and nullable, so it is safe for Team Sunshine's rows (they simply stay blank). Shipping it also means exposing the field in the v1 serializers (read + writable via PUT) and ideally as a `?hub_customer_id=` filter on the list endpoint, so the hub can resolve its own id → Sutton lead without maintaining a mapping table.
+>
+> Note for whoever ships it: Railway runs `manage.py migrate` on deploy, so this migration applies automatically at merge — unlike the hardening branch, this change set will **not** be migration-free.
+
+---
+
+## 5. Gaps, ranked by effort (smallest first)
+
+| # | Gap | Effort | Notes |
+|---|---|---|---|
+| 1 | **No Ventana webhook configs exist** | Config only, no deploy | Create `WebhookConfig` rows for `ventana` via `/ghl-debug/` or `POST /api/webhook-configs/`. Zero risk to Team Sunshine |
+| 2 | `id` / `rep_id` not selectable in the builder UI | ~2 lines | Add to `ALL_FIELDS` in `ghl_debug.html`. They already work when set via API |
+| 3 | **`lead_created` doesn't fire for real bookings** | 2 call sites | Add `fire_webhooks('lead_created', lead)` to `ghl_appointment` (new-lead branch) and the SMS creation path. Trigger type already exists |
+| 4 | `appointment_changed` doesn't fire from GHL paths | 2 call sites | `ghl_appointment` (datetime-changed branch) and `ghl_reschedule` |
+| 5 | Bulk edits emit only `disposition_changed` | ~5 lines | Fire `rep_assigned` / `sat_changed` / `follow_up_set` from `leads_bulk_update` for consistency with single edits |
+| 6 | Outbound delivery failures invisible to the hub | 1 filter param | `GET /api/v1/ghl/logs/` hard-codes `direction='inbound'`; add `?direction=` |
+| 7 | v1 PUT writes no chatter entry | ~5 lines | Create a `LeadUpdate` on hub-driven changes so they appear in the audit thread |
+| 8 | `GET /api/v1/reps/` omits SMS-eligibility fields | ~3 lines | Add `textblast_eligible`, `sms_consent`; decide whether inactive reps should be listable |
+| 9 | **`hub_customer_id` column** | **1 migration** + serializer edits | The flagged schema change (§4) |
+| 10 | **At-most-once delivery with a silent-loss window** | Medium | In-process `threading.Timer` loses queued events on restart with no log row. Needs a persisted outbox (or accept it and reconcile by polling `?since=`). Note the same class of fragility already bit the reminder thread — see the DB-connection bug in the project notes |
+| 11 | **No hub-triggered SMS to a rep** | Medium | New API-key endpoint required. Must respect `sms_consent`, and must send from the per-org number resolved by `maps/sms_numbers.py` (Ventana → 978 A2P; never put hub traffic on the 833) |
+| 12 | `APITenant.rate_limit` not enforced | Medium | Field exists, no enforcement anywhere. A hub bug could hammer the app |
+| 13 | No v1 access to `LeadMessage` / `LeadUpdate` threads | Medium | Only session-authenticated endpoints exist today |
+| 14 | Payload typing (all strings, `"True"`/`"False"`, non-ISO datetimes) | **Do not fix** | Changing `_do_fire_webhooks` changes Team Sunshine's live payloads. Handle the coercion hub-side (§1.4) |
+
+**Recommended Stage C slice:** gaps 1–4 deliver both requested events (`appointment created` and `disposition set`) for Ventana with roughly a dozen lines of code plus config, and touch no shared behaviour Team Sunshine depends on. Gap 9 is the migration to schedule deliberately. Gap 10 is the one that decides whether the hub can trust the event stream or must reconcile by polling — answer it before building the receiver, not after.
