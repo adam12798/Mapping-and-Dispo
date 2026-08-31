@@ -34,9 +34,26 @@ def _run_dispo_reminders():
     while True:
         try:
             from django.core.management import call_command
+            from django.db import close_old_connections
+
+            # DATABASE_URL sets conn_max_age, so connections are persistent —
+            # but Django only recycles them on the request_started/finished
+            # signals, which never fire inside a bare thread. Once the server
+            # drops an idle connection, ensure_connection() will not reconnect
+            # (the object exists but is closed) and every later cycle dies with
+            # "connection already closed" until the container restarts.
+            # Observed in production 2026-08-25 -> 2026-08-29.
+            close_old_connections()
             call_command('check_dispo_reminders')
         except Exception as e:
             logger.error(f'Dispo reminder error: {e}')
+            # Drop the (possibly broken) connection so the next cycle dials a
+            # fresh one instead of failing forever.
+            try:
+                from django.db import connections
+                connections.close_all()
+            except Exception:
+                logger.exception('Could not reset DB connections after reminder error')
         time.sleep(900)
 
 

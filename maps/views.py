@@ -24,7 +24,7 @@ from .assignment import auto_assign_leads
 from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant, WebhookConfig, Organization, OrgSwitchAudit
 from .tenancy import get_current_org_id, org_context
 from .twilio_security import twilio_signature_log_only
-from .sms_numbers import sms_from_number
+from .sms_numbers import sms_from_number, textblast_enabled
 
 
 GHL_WEBHOOK_URL = 'https://services.leadconnectorhq.com/hooks/YKmi8a53KJWDRbv2ZnFB/webhook-trigger/92de7dff-cf7a-4727-92f7-b88e26c515cd'
@@ -1121,6 +1121,14 @@ def clear_assignments_api(request):
     return JsonResponse({'status': 'ok', 'cleared': count})
 
 
+TEXTBLAST_DISABLED_MESSAGE = (
+    'TextBlast is disabled for this organization. Blasts would send from the '
+    'carrier-filtered 833 line, and replies to a blast are only handled on that '
+    'number — which is why past blasts produced no claims. Re-enabling requires '
+    'this organization to have its own A2P-registered number.'
+)
+
+
 def get_textblast_rep():
     """Get or create the special TextBlast rep."""
     rep, _ = Rep.objects.get_or_create(
@@ -1161,6 +1169,10 @@ def send_sms_with_result(to, body, from_number=None):
 def send_textblast(leads):
     """Send TextBlast SMS to eligible reps. Returns dict with details."""
     from zoneinfo import ZoneInfo
+
+    # Guarded here rather than only in the view so every caller is covered.
+    if not textblast_enabled():
+        return {'sent': 0, 'errors': [TEXTBLAST_DISABLED_MESSAGE]}
 
     eastern = ZoneInfo('America/New_York')
     now = datetime.now(eastern)
@@ -1233,6 +1245,9 @@ def confirm_assignments_api(request):
 def textblast_send_api(request):
     """Send TextBlast SMS for all un-blasted appointments assigned to TextBlast rep."""
     from zoneinfo import ZoneInfo
+
+    if not textblast_enabled():
+        return JsonResponse({'error': TEXTBLAST_DISABLED_MESSAGE}, status=400)
 
     data = json.loads(request.body) if request.body else {}
     date_str = data.get('date', '')
