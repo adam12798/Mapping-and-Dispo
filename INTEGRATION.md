@@ -276,7 +276,7 @@ Decide deliberately whether internal stamps (`textblast_sent_at`, the reminder s
 | 8 | `GET /api/v1/reps/` omits SMS-eligibility fields | ~3 lines | Add `textblast_eligible`, `sms_consent`; decide whether inactive reps should be listable |
 | 9 | **`hub_customer_id` + `updated_at` columns** | **1 migration** + serializer edits + 5 `.update()` call sites | The flagged schema change (§4). `updated_at` is required for reconciliation to work at all; the five queryset `.update()` paths must be handled or the change feed silently misses Alfred's dispositions. Add `updated_since=` as a **new** param — don't repoint `since` |
 | 10 | **At-most-once delivery with a silent-loss window** | Medium | In-process `threading.Timer` loses queued events on restart with no log row. **Decided 2026-08-30: accept it and reconcile by polling** (§1.5) rather than building a persisted outbox — which is what makes gap #9 load-bearing. Note the same class of fragility already bit the reminder thread — see the DB-connection bug in the project notes |
-| 11 | **No hub-triggered SMS to a rep** | Medium | New API-key endpoint required. Must respect `sms_consent`, and must send from the per-org number resolved by `maps/sms_numbers.py` (Ventana → 978 A2P; never put hub traffic on the 833) |
+| 11 | **No hub-triggered SMS to a rep** | Medium | New API-key endpoint required. Must respect `sms_consent`, and must send from the per-org number resolved by `maps/sms_numbers.py`. **Superseded 2026-09-18:** that is the 833 for every org now, because replies to the 978 never reach Sutton (§6.4) |
 | 12 | `APITenant.rate_limit` not enforced | Medium | Field exists, no enforcement anywhere. A hub bug could hammer the app |
 | 13 | No v1 access to `LeadMessage` / `LeadUpdate` threads | Medium | Only session-authenticated endpoints exist today |
 | 14 | Payload typing (all strings, `"True"`/`"False"`, non-ISO datetimes) | **Do not fix** | Changing `_do_fire_webhooks` changes Team Sunshine's live payloads. Handle the coercion hub-side (§1.4) |
@@ -329,3 +329,26 @@ Decide deliberately whether internal stamps (`textblast_sent_at`, the reminder s
 2. `after_id` is required for correctness. One bulk edit can give many rows the same instant, and a timestamp-only cursor would loop or skip there.
 3. Re-sweep with overlap, for example from `T − 5 minutes` every so often, and dedupe on `(id, updated_at)`. A write's timestamp is taken before it commits, so a row can become visible slightly after a poller has moved past its timestamp.
 4. The first sweep after deploy returns every lead (§6.1 backfill).
+
+### 6.4 SMS numbers: the 978 is reply-routed to MarketingCanvas
+
+**Found 2026-09-18 in the Twilio console:** the 978's inbound goes through its Messaging Service to **MarketingCanvas's** `/api/webhooks/twilio`. The 833's inbound points at Sutton's `/sms/`. So a reply to anything Sutton sends from the 978 never reaches Sutton.
+
+**Rule: the 978 must never be the From on anything that expects an SMS reply into Sutton.** That covers every text Sutton sends: TextBlast (claims are replies), manager time-off notices (APPROVE/DENY), manager-update answers, dispo and follow-up reminders, and consent confirmations. `maps/sms_numbers.py` now sends **every org from the 833**, and `A2P_SMS_ORG_SLUGS` is empty.
+
+History:
+- **Before 2026-08-29:** TextBlast alone sent from the 978, for both orgs. That is where Team Sunshine's 2026-06-23 blast claims would have gone.
+- **2026-08-29 23:30Z (deploy of `649e720` + `64808b2`) until this change:** all of Ventana's SMS went out from the 978.
+- **What was lost in that window: nothing found.** Sutton sent no reply-inviting text from the 978: no reminders, blasts, time-off traffic or consent confirmations are stamped for either org after the switch. MarketingCanvas's logs, continuous across all its deployments since 2026-08-27, record one unmatched inbound from a Sutton rep/manager number (2026-09-14, the owner's own phone, 2 characters). Its data export holds no `sms_in` note, suppression or consent from any of the 35 Sutton rep/manager numbers.
+
+What MarketingCanvas does with a 978 inbound (`server/sms-routes.js`, deployed `aa3f083`):
+- STOP/START/HELP keywords are settled first. They go to MC's own `sms_suppressions` and `sms_consents`, keyed by phone, never to Sutton.
+- A sender matching an MC lead is written to that lead's `lead_notes` as `sms_in`.
+- A sender matching no lead (every Sutton rep) is **not stored in any table**. It is `console.warn`ed to MC's Railway log (sender and the first 120 characters). It is also forwarded by SMS to MC's `NOTIFY_PHONE` (first 800 characters) when Twilio is configured and the sender isn't that phone.
+- The full message is always in **Twilio's own Messaging log** for the 978, which is the authoritative place to recover one.
+
+**The cost of this change:** the 833 is described in this codebase as carrier-filtered (sends accepted, delivery unreliable). That is why Team Sunshine's TextBlast is off. Ventana's texts now ride that number too.
+
+**Durable fix (future work, not built):** MarketingCanvas relays 978 inbounds whose sender matches a Sutton rep or manager on to Sutton's `/sms/` (or a signed Sutton endpoint). Then Ventana can send from its A2P-registered 978 again and still receive replies. Only then should `A2P_SMS_ORG_SLUGS` include `ventana` again.
+
+Related: the public SMS consent page (`sms_consent.html`, part of the 978's A2P filing) tells reps to text START to the 978. That text is handled by MarketingCanvas, not Sutton. Sutton records rep consent only through the manager's checkbox.

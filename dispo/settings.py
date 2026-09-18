@@ -155,15 +155,16 @@ USE_TZ = True
 # Twilio
 TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
 TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
-# Toll-free 833 line — Alfred's voice number, and the SMS From number for
-# Team Sunshine (their sends are unchanged by the per-org split below).
+# Toll-free 833 line — Alfred's voice number, and the SMS From number for every
+# org. Its inbound SMS webhook is Sutton's /sms/.
 TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER', '')
 # 978 local number. Its A2P registration belongs to VENTANA — no other org's
 # SMS may ever send from it (enforced in maps/sms_numbers.py).
 TWILIO_PHONE_NUMBER_2 = os.environ.get('TWILIO_PHONE_NUMBER_2', '')
-# Ventana's outbound SMS From number. Every other org — Team Sunshine, or any
-# unresolved org context — sends from the 833 line, exactly as before.
-# Per-send resolution: maps/sms_numbers.py::sms_from_number().
+# The 978, for orgs listed in maps/sms_numbers.py::A2P_SMS_ORG_SLUGS — currently
+# none: the 978's inbound routes to MarketingCanvas, so replies to it never
+# reach Sutton. Every org sends from the 833 line. Per-send resolution:
+# maps/sms_numbers.py::sms_from_number().
 TWILIO_SMS_FROM_NUMBER = (
     os.environ.get('TWILIO_SMS_FROM_NUMBER', '')
     or TWILIO_PHONE_NUMBER_2

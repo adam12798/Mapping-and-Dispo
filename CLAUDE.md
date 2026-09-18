@@ -125,6 +125,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Geocoding validates MA bounds** (lat 41-43, lng -73.6 to -69.8). Out-of-state results are rejected and retried with city fallback.
 - **CRM is the source of truth** for appointment times — map sidebar always shows CRM time, not computed arrival.
 - **`Lead.updated_at` belongs to a PostgreSQL trigger** (migration 0042), not to Django. Don't set it, and don't add `updated_at=` to `.update()` calls — the trigger already covers every write path, including `.update()` and `save(update_fields=...)`. If you add a new internal bookkeeping stamp to `Lead` that should *not* count as a change for the hub, add it to the trigger's ignored columns in a new migration. See INTEGRATION.md §6.
+- **The 978 must never be the From on anything that expects an SMS reply into Sutton.** Its inbound routes to MarketingCanvas, not `/sms/`, so replies vanish from Sutton's view. Every org sends from the 833 (`maps/sms_numbers.py`, `A2P_SMS_ORG_SLUGS` empty). See INTEGRATION.md §6.4.
 - **Webhook trigger names must be ≤ 20 characters** (`GHLWebhookLog.webhook_type` is `varchar(20)`; a test enforces it).
 - **Inbound GHL paths (`/api/v1/ghl/*`) must never fire `appointment_changed` or `disposition_changed`** — Team Sunshine's live configs on those triggers post to their GHL, so it would echo GHL's own traffic back. Use `lead_created` / `appt_rescheduled`.
 - Local database is empty — all real data lives in Railway's PostgreSQL. Use the live API to check data.
