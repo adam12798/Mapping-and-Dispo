@@ -108,6 +108,19 @@ class Lead(OrgOwnedModel):
     dispo_call_made_at = models.DateTimeField(null=True, blank=True)
     textblast_sent_at = models.DateTimeField(null=True, blank=True)
 
+    # The hub's (Wednesday's) id for this lead's customer, written by the hub
+    # through the v1 API. NULL = not linked. Not unique: one customer can own
+    # several leads (re-bookings, v1 creates that don't dedupe).
+    hub_customer_id = models.CharField(max_length=100, null=True, blank=True, db_index=True)
+    # Change-feed timestamp (v1 ?updated_since=). On PostgreSQL the value is
+    # owned by the maps_lead_updated_at trigger (migration 0042), NOT by
+    # auto_now: queryset .update() and save(update_fields=[...]) both skip
+    # auto_now, and fourteen Lead write paths use one or the other. The trigger
+    # bumps it when any column other than the reminder/TextBlast stamps
+    # actually changes, and otherwise keeps the old value. auto_now stays so
+    # SQLite dev databases still get a value on save().
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
     def __str__(self):
         return f"{self.address} ({self.created_at:%m/%d/%Y})"
 
@@ -384,6 +397,11 @@ class WebhookConfig(models.Model):
         ('rep_assigned', 'Rep Assigned'),
         ('sat_changed', 'SAT Changed'),
         ('follow_up_set', 'Follow-Up Date Set'),
+        # Fired by the inbound GHL paths (ghl_reschedule, ghl_appointment).
+        # Deliberately NOT appointment_changed: Team Sunshine's live config on
+        # that trigger posts to their GHL, and echoing GHL's own reschedules
+        # back to it would be new traffic they never asked for.
+        ('appt_rescheduled', 'Appointment Rescheduled by GHL'),
     ]
     METHOD_CHOICES = [
         ('POST', 'POST'),
