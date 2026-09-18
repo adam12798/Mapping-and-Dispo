@@ -2919,6 +2919,7 @@ def _handle_sms(request):
                     raw_message=body,
                 )
                 LeadMessage.objects.create(lead=new_lead, phone_number=from_number, direction='inbound', body=body)
+                fire_webhooks('lead_created', new_lead)
 
             return HttpResponse(
                 '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
@@ -3116,6 +3117,7 @@ def _handle_sms(request):
                     raw_message=body,
                 )
                 LeadMessage.objects.create(lead=lead, phone_number=from_number, direction='inbound', body=body)
+                fire_webhooks('lead_created', lead)
     except Exception:
         import logging
         logging.getLogger('sms_webhook').exception(f'SMS parse error from {from_number}')
@@ -3938,6 +3940,7 @@ def ghl_appointment(request):
 
     if existing:
         changes = []
+        rescheduled = False
 
         if status == 'cancelled':
             if not existing.cancelled:
@@ -3948,11 +3951,13 @@ def ghl_appointment(request):
         else:
             if existing.cancelled:
                 existing.cancelled = False
+                rescheduled = True
                 changes.append(f'Appointment reconfirmed via GHL (status: {status or "confirmed"})')
 
             if appt_dt and appt_dt != existing.appointment_datetime:
                 old_dt = existing.appointment_datetime
                 existing.appointment_datetime = appt_dt
+                rescheduled = True
                 old_str = old_dt.strftime('%m/%d/%Y %I:%M %p') if old_dt else 'none'
                 new_str = appt_dt.strftime('%m/%d/%Y %I:%M %p')
                 changes.append(f'Appointment datetime updated: {old_str} → {new_str}')
@@ -3985,6 +3990,8 @@ def ghl_appointment(request):
         existing.save()
         if changes:
             _ghl_log_changes(existing, changes)
+        if rescheduled:
+            fire_webhooks('appt_rescheduled', existing)
         return JsonResponse({'status': 'ok', 'id': existing.id, 'updated': bool(changes)})
 
     # No existing lead — create new (only if not a cancellation)
@@ -4016,6 +4023,7 @@ def ghl_appointment(request):
     )
     _ghl_log_changes(lead, [f"New appointment via GHL: {name} at {address}"])
     _ghl_log_inbound('appointment', request, lead=lead, lead_name=name, success=True, response_status=201)
+    fire_webhooks('lead_created', lead)
     return JsonResponse({'status': 'ok', 'id': lead.id}, status=201)
 
 
@@ -4044,6 +4052,8 @@ def ghl_reschedule(request):
     eastern = ZoneInfo('America/New_York')
     new_str = appt_dt.astimezone(eastern).strftime('%m/%d/%Y at %I:%M %p')
     changes.append(f"Rescheduled to {new_str}")
+    # A resend of the time the lead already has is not a reschedule.
+    rescheduled = appt_dt != lead.appointment_datetime or lead.cancelled
     lead.appointment_datetime = appt_dt
 
     if lead.cancelled:
@@ -4065,6 +4075,8 @@ def ghl_reschedule(request):
     lead.save()
     _ghl_log_changes(lead, changes)
     _ghl_log_inbound('reschedule', request, lead=lead, lead_name=name, success=True, response_status=200)
+    if rescheduled:
+        fire_webhooks('appt_rescheduled', lead)
     return JsonResponse({'status': 'ok', 'id': lead.id})
 
 
