@@ -204,6 +204,129 @@ class UpdatedAtTriggerTests(HubBase):
         self.assertNotBumped(lead, before)
 
 
+class ChangeFeedTests(HubBase):
+    """GET /api/v1/leads/?updated_since= — the hub's reconciliation sweep."""
+
+    T0 = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
+
+    def set_updated_at(self, leads, when):
+        # The trigger (rightly) refuses hand-set values, so tests that need
+        # exact timestamps switch it off inside the test's own transaction.
+        ids = [lead.id for lead in leads]
+        if connection.vendor == 'postgresql':
+            with connection.cursor() as cur:
+                # ALTER TABLE refuses while deferred FK checks are pending.
+                cur.execute('SET CONSTRAINTS ALL IMMEDIATE')
+                cur.execute('ALTER TABLE maps_lead DISABLE TRIGGER maps_lead_updated_at')
+                Lead.all_objects.filter(id__in=ids).update(updated_at=when)
+                cur.execute('ALTER TABLE maps_lead ENABLE TRIGGER maps_lead_updated_at')
+        else:
+            Lead.all_objects.filter(id__in=ids).update(updated_at=when)
+
+    def feed(self, key=None, **params):
+        from urllib.parse import urlencode
+        resp = self.api('get', '/api/v1/leads/?' + urlencode(params), key or self.v_key)
+        return resp
+
+    def test_returns_changes_since_the_cursor_oldest_first(self):
+        a, b, c = self.v_leads
+        self.set_updated_at([a], self.T0)
+        self.set_updated_at([c], self.T0 + dt.timedelta(minutes=1))
+        self.set_updated_at([b], self.T0 + dt.timedelta(minutes=2))
+        resp = self.feed(updated_since=(self.T0 + dt.timedelta(seconds=1)).isoformat())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([row['id'] for row in resp.json()['leads']], [c.id, b.id])
+
+    def test_keyset_walk_sees_every_row_once_even_on_ties(self):
+        # One bulk edit can stamp many rows with the same instant; paging by
+        # timestamp alone would loop or skip there. This is the hub's loop.
+        self.set_updated_at(self.v_leads, self.T0)
+        seen, cursor, after_id = [], self.T0.isoformat(), None
+        for _ in range(10):
+            params = {'updated_since': cursor, 'per_page': 1}
+            if after_id:
+                params['after_id'] = after_id
+            rows = self.feed(**params).json()['leads']
+            if not rows:
+                break
+            seen += [row['id'] for row in rows]
+            cursor, after_id = rows[-1]['updated_at'], rows[-1]['id']
+        self.assertEqual(seen, sorted(lead.id for lead in self.v_leads))
+
+    def test_returned_updated_at_round_trips_as_a_cursor(self):
+        lead = self.v_leads[0]
+        self.set_updated_at([lead], self.T0 + dt.timedelta(microseconds=123457))
+        row = self.feed(updated_since=self.T0.isoformat()).json()['leads'][0]
+        again = self.feed(updated_since=row['updated_at'], after_id=row['id']).json()['leads']
+        self.assertNotIn(lead.id, [r['id'] for r in again])
+
+    def test_unencoded_plus_in_the_offset_is_understood(self):
+        self.set_updated_at(self.v_leads, self.T0)
+        resp = self.feed(updated_since='2026-09-01T11:59:00 00:00')  # '+' decoded as a space
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.json()['leads']), 3)
+
+    def test_bad_cursors_are_refused_not_ignored(self):
+        for params in ({'updated_since': '2026-09-01T12:00:00'},      # no offset
+                       {'updated_since': 'yesterday'},
+                       {'after_id': '5'},                              # without updated_since
+                       {'updated_since': self.T0.isoformat(), 'after_id': 'x'}):
+            self.assertEqual(self.feed(**params).status_code, 400, params)
+
+    def test_since_keeps_its_created_at_meaning(self):
+        Lead.all_objects.filter(pk=self.v_leads[0].pk).update(created_at=self.T0 - dt.timedelta(days=30))
+        old = Lead.all_objects.get(pk=self.v_leads[0].pk)
+        old.homeowner_name = 'Edited today'
+        old.save()
+        ids = [row['id'] for row in self.feed(since=self.T0.isoformat()).json()['leads']]
+        self.assertNotIn(old.id, ids)
+        self.assertEqual(ids, sorted(ids, reverse=True))  # still newest-created first
+
+    def test_feed_is_scoped_to_the_keys_org(self):
+        everything = (self.T0 - dt.timedelta(days=1)).isoformat()
+        v_ids = {row['id'] for row in self.feed(updated_since=everything).json()['leads']}
+        s_ids = {row['id'] for row in self.feed(key=self.s_key, updated_since=everything).json()['leads']}
+        self.assertEqual(v_ids, {lead.id for lead in self.v_leads})
+        self.assertEqual(s_ids, {self.s_lead.id})
+
+    def test_list_and_detail_carry_the_new_fields(self):
+        lead = self.v_leads[0]
+        row = self.feed().json()['leads'][0]
+        detail = self.api('get', f'/api/v1/leads/{lead.id}/', self.v_key).json()['lead']
+        for payload in (row, detail):
+            self.assertIn('hub_customer_id', payload)
+            self.assertIsNotNone(dt.datetime.fromisoformat(payload['updated_at']).tzinfo)
+
+
+class HubCustomerIdTests(HubBase):
+    def test_put_sets_and_blank_clears(self):
+        lead = self.v_leads[0]
+        path = f'/api/v1/leads/{lead.id}/'
+        self.assertEqual(self.api('put', path, self.v_key, {'hub_customer_id': ' cus_42 '}).status_code, 200)
+        self.assertEqual(Lead.all_objects.get(pk=lead.pk).hub_customer_id, 'cus_42')
+        self.api('put', path, self.v_key, {'hub_customer_id': ''})
+        self.assertIsNone(Lead.all_objects.get(pk=lead.pk).hub_customer_id)
+
+    def test_too_long_is_refused_and_nothing_saved(self):
+        lead = self.v_leads[0]
+        resp = self.api('put', f'/api/v1/leads/{lead.id}/', self.v_key,
+                        {'hub_customer_id': 'x' * 101, 'homeowner_name': 'Should not stick'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(Lead.all_objects.get(pk=lead.pk).homeowner_name, 'Vera 0')
+
+    def test_filter_and_create(self):
+        with mock.patch('maps.views.geocode', return_value=(42.0, -71.0)), \
+                mock.patch('maps.views.fire_webhooks'):
+            resp = self.api('post', '/api/v1/leads/create/', self.v_key,
+                            {'address': '9 Hub St', 'hub_customer_id': 'cus_9'})
+        self.assertEqual(resp.status_code, 201)
+        rows = self.api('get', '/api/v1/leads/?hub_customer_id=cus_9', self.v_key).json()['leads']
+        self.assertEqual([row['id'] for row in rows], [resp.json()['id']])
+        # Another org's key cannot find it by the hub's id.
+        rows = self.api('get', '/api/v1/leads/?hub_customer_id=cus_9', self.s_key).json()['leads']
+        self.assertEqual(rows, [])
+
+
 def ghl_body(**custom):
     base = {'Name': 'Nina New', 'Phone': '(978) 555-0101', 'Address': '5 Elm St', 'City': 'Lowell',
             'Day and Time': '2026-09-22 10:00 AM', 'Product Type': 'Hvac', 'Meeting Type': 'In Person'}

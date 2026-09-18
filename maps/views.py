@@ -3509,6 +3509,33 @@ def _paginate(queryset, request, default_per_page=50):
 
 # --- V1 API: Leads ---
 
+def _parse_feed_cursor(raw):
+    """updated_since: ISO 8601 with an explicit offset, e.g. an updated_at
+    value this API returned. A naive value is refused rather than guessed —
+    reading UTC as Eastern would move the cursor by hours and skip changes."""
+    raw = raw.strip()
+    # An unencoded '+' in a query string arrives as a space ("…T14:00:00 00:00").
+    if 'T' in raw:
+        raw = raw.replace(' ', '+')
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        raise ValueError('not an ISO 8601 datetime')
+    if dt.tzinfo is None:
+        raise ValueError('must include a UTC offset, e.g. an updated_at value returned by this API')
+    return dt
+
+
+def _clean_hub_customer_id(value):
+    """Returns (value, error). Blank means "not linked" and is stored as NULL."""
+    if value is None:
+        return None, None
+    value = str(value).strip()
+    if len(value) > 100:
+        return None, 'hub_customer_id is longer than 100 characters'
+    return value or None, None
+
+
 @api_key_required
 def v1_leads_list(request):
     from zoneinfo import ZoneInfo
@@ -3538,6 +3565,33 @@ def v1_leads_list(request):
             qs = qs.filter(created_at__gte=since_dt)
         except (ValueError, TypeError):
             pass
+    hub_customer_id = request.GET.get('hub_customer_id')
+    if hub_customer_id:
+        qs = qs.filter(hub_customer_id=hub_customer_id)
+
+    # Change feed. ?since= above keeps its created_at meaning; this is the
+    # additive parameter the hub's reconciliation sweep uses. Walk it as a
+    # keyset, not by page number: send back the last row's updated_at and id
+    # as updated_since/after_id and stay on page 1. after_id breaks ties
+    # between rows written in the same instant (e.g. one bulk edit).
+    updated_since = request.GET.get('updated_since')
+    after_id = request.GET.get('after_id')
+    if after_id and not updated_since:
+        return JsonResponse({'error': 'after_id requires updated_since'}, status=400)
+    if updated_since:
+        try:
+            cursor_dt = _parse_feed_cursor(updated_since)
+        except ValueError as e:
+            return JsonResponse({'error': f'updated_since {e}'}, status=400)
+        if after_id:
+            try:
+                after_id = int(after_id)
+            except ValueError:
+                return JsonResponse({'error': 'after_id must be an integer'}, status=400)
+            qs = qs.filter(Q(updated_at__gt=cursor_dt) | Q(updated_at=cursor_dt, id__gt=after_id))
+        else:
+            qs = qs.filter(updated_at__gte=cursor_dt)
+        qs = qs.order_by('updated_at', 'id')
 
     leads, pagination = _paginate(qs, request)
     data = []
@@ -3571,6 +3625,8 @@ def v1_leads_list(request):
             'post_appt_notes': lead.post_appt_notes,
             'cancelled': lead.cancelled,
             'created_at': lead.created_at.astimezone(eastern).isoformat(),
+            'updated_at': lead.updated_at.astimezone(eastern).isoformat(),
+            'hub_customer_id': lead.hub_customer_id,
         })
     return JsonResponse({'leads': data, 'pagination': pagination})
 
@@ -3612,12 +3668,19 @@ def v1_lead_detail(request, pk):
             'call_transcript': lead.call_transcript,
             'cancelled': lead.cancelled,
             'created_at': lead.created_at.astimezone(eastern).isoformat(),
+            'updated_at': lead.updated_at.astimezone(eastern).isoformat(),
+            'hub_customer_id': lead.hub_customer_id,
         }
         return JsonResponse({'lead': data})
 
     if request.method == 'PUT':
         lead = get_object_or_404(Lead, pk=pk)
         data = json.loads(request.body)
+        if 'hub_customer_id' in data:
+            hub_customer_id, error = _clean_hub_customer_id(data['hub_customer_id'])
+            if error:
+                return JsonResponse({'error': error}, status=400)
+            lead.hub_customer_id = hub_customer_id
         allowed = [
             'homeowner_name', 'phone_number', 'address', 'city', 'state',
             'source', 'tags', 'appointment_type', 'appointment_format',
@@ -3658,7 +3721,11 @@ def v1_lead_create(request):
     data = json.loads(request.body)
     if not data.get('address'):
         return JsonResponse({'error': 'address is required'}, status=400)
+    hub_customer_id, error = _clean_hub_customer_id(data.get('hub_customer_id'))
+    if error:
+        return JsonResponse({'error': error}, status=400)
     lead = Lead(
+        hub_customer_id=hub_customer_id,
         homeowner_name=data.get('homeowner_name', ''),
         phone_number=data.get('phone_number', ''),
         address=data['address'],
