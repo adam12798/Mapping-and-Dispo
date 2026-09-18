@@ -1,8 +1,10 @@
 """Outbound SMS From numbers (maps/sms_numbers.py).
 
-The 978's inbound is routed to MarketingCanvas, so a text Sutton sends from it
-can never be answered into Sutton. Every org sends from the 833, whose inbound
-is Sutton's /sms/.
+Neither number both delivers and hears replies: the 978 delivers but its
+inbound goes to MarketingCanvas; the 833's inbound is Sutton's /sms/ but its
+outbound SMS is disabled. Interim (2026-09-18): Ventana sends from the 978,
+Team Sunshine and unresolved sends stay on the 833, and Team Sunshine's
+traffic never rides Ventana's A2P registration.
 """
 from unittest import mock
 from urllib.parse import parse_qs
@@ -32,21 +34,21 @@ class SmsFromNumberTests(TestCase):
             send(*args)
         return parse_qs(urlopen.call_args.args[0].data.decode())['From'][0]
 
-    def test_every_org_sends_from_the_833(self):
-        self.assertEqual(sms_from_number(self.ventana.id), N833)
-        self.assertEqual(sms_from_number(self.sunshine.id), N833)
-        self.assertEqual(sms_from_number(None), N833)  # no org resolvable
+    def test_numbers_per_org(self):
+        self.assertEqual(sms_from_number(self.ventana.id), N978)
+        self.assertEqual(sms_from_number(self.sunshine.id), N833)  # never Ventana's registration
+        self.assertEqual(sms_from_number(None), N833)  # no org resolvable: never the 978
 
-    def test_ventana_sends_through_every_sender_use_the_833(self):
+    def test_every_sender_follows_the_org(self):
         from maps.management.commands.check_dispo_reminders import send_sms as reminder_sms
         from maps.views import send_sms, send_sms_with_result
-        with org_context(self.ventana):
-            self.assertEqual(self.sent_from(send_sms, '+16175550001', 'hi'), N833)
-            self.assertEqual(self.sent_from(send_sms_with_result, '+16175550001', 'hi'), N833)
-            self.assertEqual(self.sent_from(reminder_sms, '+16175550001', 'hi'), N833)
+        for org, expected in ((self.ventana, N978), (self.sunshine, N833)):
+            with org_context(org):
+                self.assertEqual(self.sent_from(send_sms, '+16175550001', 'hi'), expected)
+                self.assertEqual(self.sent_from(send_sms_with_result, '+16175550001', 'hi'), expected)
+                self.assertEqual(self.sent_from(reminder_sms, '+16175550001', 'hi'), expected)
 
-    def test_ventana_textblast_goes_out_on_the_833(self):
-        # A blast is the text whose replies (the claims) most need to reach /sms/.
+    def test_ventana_textblast_goes_out_on_the_978(self):
         from maps.views import send_textblast
         Rep.all_objects.create(name='V Rep', phone_number='+16175550001', home_address='1 A St',
                                textblast_eligible=True, is_active=True, organization=self.ventana)
@@ -57,4 +59,4 @@ class SmsFromNumberTests(TestCase):
                 urlopen.return_value.read.return_value = b'{}'
                 result = send_textblast([lead])
         self.assertEqual(result['sent'], 1, result)
-        self.assertEqual(parse_qs(urlopen.call_args.args[0].data.decode())['From'][0], N833)
+        self.assertEqual(parse_qs(urlopen.call_args.args[0].data.decode())['From'][0], N978)

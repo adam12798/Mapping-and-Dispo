@@ -1198,13 +1198,14 @@ def send_textblast(leads):
     lines.append('Reply with the # to claim or describe which one (e.g. "I can take the one in Waltham")')
     message = '\n'.join(lines)
 
-    # The blast From number resolves per org (maps/sms_numbers.py), and today
-    # that is the 833 for every org: the claims are replies, and only the
-    # 833's inbound reaches /sms/ (the 978's goes to MarketingCanvas). The 833
-    # is carrier-filtered — Twilio accepts the sends but delivery is
-    # unreliable — which is why TextBlast is switched OFF for Team Sunshine
-    # (decided 2026-08-29; their 2026-06-23 trial drew zero claims). Their
-    # traffic must never ride Ventana's A2P registration on the 978.
+    # The blast From number resolves per org (maps/sms_numbers.py). Ventana's
+    # blasts go out on the 978, which delivers — but the claims are replies,
+    # and the 978's inbound goes to MarketingCanvas, so until a relay exists a
+    # claim never reaches /sms/. The 833 cannot send SMS at all (toll-free
+    # registration never completed; every send Undelivered), which is why
+    # TextBlast is switched OFF for Team Sunshine (decided 2026-08-29; their
+    # 2026-06-23 trial drew zero claims). Their traffic must never ride
+    # Ventana's A2P registration on the 978.
     sent_count = 0
     errors = []
     for rep in eligible_reps:
