@@ -1,6 +1,6 @@
 # INTEGRATION.md — Sutton ↔ Wednesday (hub) contract
 
-**Status:** Stage C discovery spike. Read-only audit of the code as of commit `255c25b` (2026-08-30), cross-checked against live production data. No code was changed to produce this document.
+**Status:** Stage C discovery spike. Read-only audit of the code as of commit `255c25b` (2026-08-30), cross-checked against live production data. No code was changed to produce this document. **The Sutton half was built on branch `hub-integration` (2026-09-18) — see [§6](#6-what-hub-integration-shipped-2026-09-18); where §6 and earlier sections disagree, §6 is current.**
 
 **Scope:** everything below is scoped to the **Ventana** org (`slug: ventana`, org id 1). Team Sunshine (`slug: team-sunshine`, org id 2, the default inbound org) must be unaffected by any integration built from this document — see [§0 Isolation guarantee](#0-isolation-guarantee).
 
@@ -252,6 +252,8 @@ The settled reconciliation model (§1.5) polls Sutton on a sweep to backstop los
 | `views.py:1119` — `clear_assignments_api` | `rep=None` | Bulk un-assignment |
 | `views.py:1208` — `send_textblast` | `textblast_sent_at` | Internal stamp; arguably *should not* bump `updated_at` |
 
+**Correction (2026-09-18): this table is incomplete.** `save(update_fields=[...])` also skips `auto_now` unless `updated_at` is in the list, which adds `ghl_cancel`, `ghl_disposition`, the SMS cancel path, the TextBlast claim, auto-assign (`assignment.py`) and the three reminder stamps. With the orphan backfill command that makes fourteen bypassing writes, not five. This is why the trigger was chosen (§6).
+
 Handle these explicitly (add `updated_at=timezone.now()` to each `.update()` call), or use a database trigger, which cannot be bypassed and needs no discipline from future code. **A plain `auto_now` field alone reproduces the same silent-loss hole in a new place** — the change feed would look healthy while quietly missing Alfred's dispositions.
 
 Decide deliberately whether internal stamps (`textblast_sent_at`, the reminder stamps) should count as "updated". Bumping on them makes the hub re-poll leads whose customer-visible state did not change; not bumping keeps the feed meaningful.
@@ -280,3 +282,50 @@ Decide deliberately whether internal stamps (`textblast_sent_at`, the reminder s
 | 14 | Payload typing (all strings, `"True"`/`"False"`, non-ISO datetimes) | **Do not fix** | Changing `_do_fire_webhooks` changes Team Sunshine's live payloads. Handle the coercion hub-side (§1.4) |
 
 **Recommended Stage C slice:** gaps 1–4 deliver both requested events (`appointment created` and `disposition set`) for Ventana with roughly a dozen lines of code plus config, and touch no shared behaviour Team Sunshine depends on. Gap 9 is the migration to schedule deliberately. Gap 10 is the one that decides whether the hub can trust the event stream or must reconcile by polling — answer it before building the receiver, not after.
+
+**Status 2026-09-18:** gaps 2, 3, 4 and 9 are built on `hub-integration`. Gap 4 uses a new trigger, not `appointment_changed` (§6). Gap 1 is deliberately not done: there is no receiver URL yet, so the branch ships inert.
+
+---
+
+## 6. What `hub-integration` shipped (2026-09-18)
+
+### 6.1 Schema: migration `0042` (the only one)
+
+- `Lead.hub_customer_id` — `varchar(100)`, nullable, indexed, not unique. NULL means not linked; the v1 API stores a blank value as NULL.
+- `Lead.updated_at` — `timestamptz NOT NULL`, indexed. Existing rows are backfilled to the migration's run time, so the hub's first sweep sees every lead once. That is by design: a change feed may over-report, never under-report.
+- **`updated_at` is owned by a PostgreSQL trigger** (`maps_lead_updated_at` → `maps_lead_set_updated_at()`), not by `auto_now`, because fourteen write paths bypass `auto_now` (§4.2 correction). The trigger's rules:
+  - It bumps the value (to `clock_timestamp()`) when **any column changes except** `dispo_reminder_sent_at`, `dispo_call_made_at`, `follow_up_reminder_sent_at` and `textblast_sent_at`. Those are worker and TextBlast bookkeeping, so a reminder or blast does not make the hub re-poll the lead. A TextBlast *claim* still bumps it, because it assigns a rep.
+  - A write that changes nothing keeps the old value. A no-op `save()` or bulk edit is not a change.
+  - The value cannot be set or backdated by hand.
+  - It also fills the column on INSERT. That makes a code-only rollback safe: pre-0042 code can still create leads against the migrated schema (verified).
+  - SQLite dev databases have no trigger; there `auto_now` covers `save()` only.
+- `WebhookConfig.trigger` gains the choice `appt_rescheduled`. This is choices-only and emits no SQL.
+
+### 6.2 Events
+
+| Trigger | New call sites |
+|---|---|
+| `lead_created` | `ghl_appointment` (new-lead branch); inbound SMS: setter-format new lead, and GHL-format `NEW APPOINTMENT`/`SCHEDULED` new lead. **Not** the placeholder row an unmatched `APPOINTMENT CANCELLED` text creates |
+| `appt_rescheduled` (new) | `ghl_reschedule` and `ghl_appointment` (existing lead), when the time actually moved or a cancelled lead came back. A resend of the same time fires nothing |
+
+- **Why a new trigger instead of `appointment_changed`:** Team Sunshine's live config on `appointment_changed` posts to their GHL. Their GHL sent Sutton 304 bookings and 175 cancels through `ghl_appointment` between 2026-08-01 and 2026-09-18, so reusing it would echo GHL's own traffic back to it. `ghl_disposition` already refuses to echo for the same reason. Team Sunshine has no config on either trigger that fires from the new call sites, so they receive nothing new (tested end to end).
+- **Trigger names must be ≤ 20 characters.** Every delivery is logged with `GHLWebhookLog.webhook_type = <trigger>`, a `varchar(20)`. A longer name makes that INSERT fail inside the timer thread after the POST has already gone out, so the audit row is lost. `appointment_rescheduled` did exactly this in local verification before it was renamed. A test now enforces the limit.
+- The engine (`fire_webhooks` / `_do_fire_webhooks`) is **unchanged**. Team Sunshine's two live configs are pinned by a test to the exact bytes the pre-branch engine produced.
+- The builder's field picker has a new **IDs** group: `id`, `rep_id`, `hub_customer_id`.
+- **These paths are still silent** (the change feed covers them): SMS-text reschedules, manager-SMS reschedules, `ghl_cancel`, `ghl_update`, non-disposition bulk edits, auto-assign, v1 `PUT`.
+
+### 6.3 v1 API (additive)
+
+- `GET /api/v1/leads/` and `GET /api/v1/leads/<id>/` add `updated_at` (ISO 8601 with offset, microseconds kept) and `hub_customer_id`.
+- `PUT /api/v1/leads/<id>/` and `POST /api/v1/leads/create/` accept `hub_customer_id` (≤ 100 characters, else 400; blank clears it).
+- `GET /api/v1/leads/?hub_customer_id=X` does an exact match, scoped to the key's org.
+- `GET /api/v1/leads/?updated_since=T[&after_id=N]` is the change feed. `?since=` is untouched and still filters `created_at`.
+  - With `updated_since`, results are ordered by `(updated_at, id)` ascending. Without `after_id` the filter is `updated_at >= T`; with it, the filter is `updated_at > T OR (updated_at = T AND id > N)`.
+  - `T` must carry a UTC offset. A naive or unparseable value is a **400**, not silently ignored, because reading UTC as Eastern would move the cursor by hours. An unencoded `+` that arrives as a space is repaired.
+
+**The polling protocol the hub should use:**
+
+1. Keep a cursor `(T, N)`. Request `?updated_since=T&after_id=N&per_page=100` and **stay on page 1**. Set the cursor to the last row's `(updated_at, id)` and repeat until fewer than 100 rows come back. Do not walk `page=2,3…`: rows that change mid-walk shift the pages and get skipped.
+2. `after_id` is required for correctness. One bulk edit can give many rows the same instant, and a timestamp-only cursor would loop or skip there.
+3. Re-sweep with overlap, for example from `T − 5 minutes` every so often, and dedupe on `(id, updated_at)`. A write's timestamp is taken before it commits, so a row can become visible slightly after a poller has moved past its timestamp.
+4. The first sweep after deploy returns every lead (§6.1 backfill).
