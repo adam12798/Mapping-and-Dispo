@@ -387,15 +387,18 @@ def is_in_massachusetts(lat, lng):
 
 # NOMINATIM'S USAGE POLICY, kept (2026-10-06). It asks for an identifying
 # User-Agent and at most one request a second. Sutton sent "MappingDispo/1.0"
-# and fired its three strategies 0.3 s apart; from about 2026-10-02 every
-# request from the production container came back refused, and a redeploy
-# (new container) brought geocoding back. So: one request a second across the
-# whole process (one uvicorn worker; sync views run in threads, hence the
-# lock), a User-Agent that names the app and, when NOMINATIM_CONTACT_EMAIL is
-# set, who to write to, and a short backoff when Nominatim says slow down.
+# and fired its three strategies 0.3 s apart; from about 2026-10-02 geocoding
+# failed for every lead, and a redeploy (new container) brought it back — most
+# likely Nominatim refusing that container (nothing logged why back then). So:
+# one request a second across the whole process (one uvicorn worker; sync views
+# run in threads, hence the lock), a User-Agent that names the app and, when
+# NOMINATIM_CONTACT_EMAIL is set, who to write to, and a short backoff when
+# Nominatim says slow down — inside a time budget, because geocode() runs in
+# request handlers (Twilio gives up after 15 s, the hub's create after 20 s).
 NOMINATIM_MIN_INTERVAL = 1.0
 NOMINATIM_RETRIES = 2            # after the first try: wait 2 s, then 4 s
 NOMINATIM_MAX_WAIT = 10          # cap on a Retry-After we honour
+NOMINATIM_BUDGET = 20            # no new try or retry after this many seconds in one geocode()
 _nominatim_lock = threading.Lock()
 _nominatim_last = 0.0
 
@@ -415,13 +418,16 @@ def _nominatim_wait():
         _nominatim_last = _time.monotonic()
 
 
-def geocode(address):
+def geocode(address, budget=NOMINATIM_BUDGET):
     """Geocode an address using Nominatim (free, no API key).
 
     Validates results are in Massachusetts. Uses multiple strategies:
     1. Clean query with Massachusetts (strip MA abbreviation first)
     2. Free-text with original address
     3. City-only fallback (returns city center — better than nothing)
+
+    No new request or retry starts once `budget` seconds have gone by, so the
+    slowest call is about budget + one 10 s request.
     """
     import time as _time
     import logging
@@ -430,6 +436,7 @@ def geocode(address):
     # Until this existed every refusal was swallowed, and the log said only
     # that geocoding failed — never why.
     attempts = []
+    deadline = _time.monotonic() + budget
 
     def _retry_delay(attempt, err=None):
         # Nominatim's Retry-After when it gives one (capped), else 2 s, 4 s.
@@ -448,6 +455,9 @@ def geocode(address):
         })
         url = f'https://nominatim.openstreetmap.org/search?{params}'
         for attempt in range(NOMINATIM_RETRIES + 1):
+            if _time.monotonic() >= deadline:
+                attempts.append(f'"{query}": not tried, time budget spent')
+                return None, None
             _nominatim_wait()
             try:
                 req = urllib.request.Request(url, headers={'User-Agent': _nominatim_user_agent()})
@@ -461,8 +471,9 @@ def geocode(address):
                     body = e.read(300).decode('utf-8', 'replace').strip()
                 except Exception:
                     body = ''
-                if e.code in (429, 500, 502, 503, 504) and attempt < NOMINATIM_RETRIES:
-                    delay = _retry_delay(attempt, e)
+                delay = _retry_delay(attempt, e)
+                if (e.code in (429, 500, 502, 503, 504) and attempt < NOMINATIM_RETRIES
+                        and _time.monotonic() + delay < deadline):
                     geo_logger.warning(f'Nominatim HTTP {e.code} for "{query}", retrying in {delay}s: {body!r}')
                     _time.sleep(delay)
                     continue
@@ -472,8 +483,9 @@ def geocode(address):
             except Exception as e:
                 # Timeouts and dropped connections are worth one more try; the
                 # rest are reported as they are.
-                if isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError)) and attempt < NOMINATIM_RETRIES:
-                    delay = _retry_delay(attempt)
+                delay = _retry_delay(attempt)
+                if (isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError))
+                        and attempt < NOMINATIM_RETRIES and _time.monotonic() + delay < deadline):
                     geo_logger.warning(f'Nominatim request failed for "{query}", retrying in {delay}s: {type(e).__name__}: {e}')
                     _time.sleep(delay)
                     continue

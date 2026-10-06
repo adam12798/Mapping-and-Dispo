@@ -1415,6 +1415,12 @@
 
                 var addrCell = document.createElement('td');
                 addrCell.textContent = address || '—';
+                if (row.querySelector('.no-pin')) {
+                    var noPin = document.createElement('span');
+                    noPin.className = 'no-pin';
+                    noPin.textContent = 'No map pin';
+                    addrCell.appendChild(noPin);
+                }
                 tr.appendChild(addrCell);
 
                 var cityCell = document.createElement('td');

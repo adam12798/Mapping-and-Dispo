@@ -184,13 +184,33 @@ class NominatimPolicyTest(SimpleTestCase):
 
     def test_a_timeout_is_retried(self):
         calls = iter([urllib.error.URLError('timed out'), self._ok()])
+        urls = []
         def fake(req, timeout=None):
+            urls.append(req.full_url)
             r = next(calls)
             if isinstance(r, Exception):
                 raise r
             return r
         with mock.patch('urllib.request.urlopen', side_effect=fake), self.assertLogs('geocode', level='WARNING'):
             self.assertEqual(geocode('42 Thomas St, Northbridge, MA'), (42.1, -71.5))
+        self.assertEqual(len(urls), 2)
+        self.assertEqual(urls[0], urls[1], 'the same query again, not the next strategy')
+        self.assertIn(2, self.sleeps)               # the backoff
+
+    def test_retries_stop_at_the_time_budget(self):
+        # Nominatim hanging: every request takes its full 10 s and times out.
+        # geocode() runs inside request handlers (Twilio waits 15 s, the hub's
+        # create 20 s), so it must not keep trying for minutes.
+        def fake(req, timeout=None):
+            self.clock[0] += timeout
+            raise urllib.error.URLError('timed out')
+        start = self.clock[0]
+        with mock.patch('urllib.request.urlopen', side_effect=fake), self.assertLogs('geocode', level='WARNING') as logs:
+            self.assertEqual(geocode('42 Thomas St, Northbridge, MA'), (None, None))
+        elapsed = self.clock[0] - start
+        # the 20 s budget + one 10 s request + one 1 s slot: no slower than before retries
+        self.assertLessEqual(elapsed, 31, elapsed)
+        self.assertTrue(any('time budget spent' in line for line in logs.output), logs.output)
 
 
 from django.test import Client  # noqa: E402
@@ -286,6 +306,32 @@ class RegeocodeMissingTest(TenancyBase):
             Lead.all_objects.filter(pk=lead.pk).update(latitude=41.0, longitude=-70.0)
             return (42.16, -71.66)
         with mock.patch('maps.management.commands.regeocode_missing.geocode', side_effect=fake):
-            self._run('--since', (timezone.now() - timedelta(days=1)).date().isoformat(), '--apply')
+            out = self._run('--since', (timezone.now() - timedelta(days=1)).date().isoformat(), '--apply')
         lead.refresh_from_db()
         self.assertEqual(lead.latitude, 41.0)
+        self.assertIn(f'left lead {lead.id}', out)
+        self.assertNotIn(f'set lead {lead.id}', out, 'not reported as written')
+
+    def test_an_address_edited_meanwhile_is_not_given_the_old_coordinates(self):
+        lead = self._lead(self.ventana, '42 Thomas St', 'Northbridge')
+        def fake(q):
+            # the rep corrects the address; their save's geocode failed
+            Lead.all_objects.filter(pk=lead.pk).update(address='44 Thomas St')
+            return (42.16, -71.66)
+        with mock.patch('maps.management.commands.regeocode_missing.geocode', side_effect=fake):
+            self._run('--since', (timezone.now() - timedelta(days=1)).date().isoformat(), '--apply')
+        lead.refresh_from_db()
+        self.assertIsNone(lead.latitude)
+
+    def test_one_lead_raising_does_not_stop_the_run(self):
+        boom = self._lead(self.ventana, '13 Broken Rd')
+        ok = self._lead(self.ventana, '42 Thomas St', 'Northbridge')
+        def fake(q):
+            if 'Broken' in q:
+                raise RuntimeError('boom')
+            return (42.16, -71.66)
+        with mock.patch('maps.management.commands.regeocode_missing.geocode', side_effect=fake):
+            out = self._run('--since', (timezone.now() - timedelta(days=1)).date().isoformat(), '--apply')
+        ok.refresh_from_db()
+        self.assertEqual(ok.latitude, 42.16)
+        self.assertRegex(out, rf'still failing \d+ \[[^\]]*\b{boom.id}\b')
