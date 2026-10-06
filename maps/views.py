@@ -1,5 +1,7 @@
 import json
+import os
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -383,13 +385,49 @@ def is_in_massachusetts(lat, lng):
     return 41.0 <= lat <= 43.0 and -73.6 <= lng <= -69.8
 
 
-def geocode(address):
+# NOMINATIM'S USAGE POLICY, kept (2026-10-06). It asks for an identifying
+# User-Agent and at most one request a second. Sutton sent "MappingDispo/1.0"
+# and fired its three strategies 0.3 s apart; from about 2026-10-02 geocoding
+# failed for every lead, and a redeploy (new container) brought it back — most
+# likely Nominatim refusing that container (nothing logged why back then). So:
+# one request a second across the whole process (one uvicorn worker; sync views
+# run in threads, hence the lock), a User-Agent that names the app and, when
+# NOMINATIM_CONTACT_EMAIL is set, who to write to, and a short backoff when
+# Nominatim says slow down — inside a time budget, because geocode() runs in
+# request handlers (Twilio gives up after 15 s, the hub's create after 20 s).
+NOMINATIM_MIN_INTERVAL = 1.0
+NOMINATIM_RETRIES = 2            # after the first try: wait 2 s, then 4 s
+NOMINATIM_MAX_WAIT = 10          # cap on a Retry-After we honour
+NOMINATIM_BUDGET = 20            # no new try or retry after this many seconds in one geocode()
+_nominatim_lock = threading.Lock()
+_nominatim_last = 0.0
+
+
+def _nominatim_user_agent():
+    contact = os.environ.get('NOMINATIM_CONTACT_EMAIL', '').strip()
+    return f"Sutton/1.0 (+https://sutton-soda.com{'; ' + contact if contact else ''})"
+
+
+def _nominatim_wait():
+    """Block until a second has passed since the last Nominatim request."""
+    global _nominatim_last
+    with _nominatim_lock:
+        wait = NOMINATIM_MIN_INTERVAL - (_time.monotonic() - _nominatim_last)
+        if wait > 0:
+            _time.sleep(wait)
+        _nominatim_last = _time.monotonic()
+
+
+def geocode(address, budget=NOMINATIM_BUDGET):
     """Geocode an address using Nominatim (free, no API key).
 
     Validates results are in Massachusetts. Uses multiple strategies:
     1. Clean query with Massachusetts (strip MA abbreviation first)
     2. Free-text with original address
     3. City-only fallback (returns city center — better than nothing)
+
+    No new request or retry starts once `budget` seconds have gone by, so the
+    slowest call is about budget + one 10 s request.
     """
     import time as _time
     import logging
@@ -398,20 +436,62 @@ def geocode(address):
     # Until this existed every refusal was swallowed, and the log said only
     # that geocoding failed — never why.
     attempts = []
+    deadline = _time.monotonic() + budget
+
+    def _retry_delay(attempt, err=None):
+        # Nominatim's Retry-After when it gives one (capped), else 2 s, 4 s.
+        try:
+            after = int((err.headers or {}).get('Retry-After', '')) if err is not None else None
+        except (TypeError, ValueError, AttributeError):
+            after = None
+        return min(after if after and after > 0 else 2 ** (attempt + 1), NOMINATIM_MAX_WAIT)
 
     def _nominatim_search(query):
-        try:
-            params = urllib.parse.urlencode({
-                'q': query,
-                'format': 'json',
-                'limit': 1,
-                'countrycodes': 'us',
-            })
-            url = f'https://nominatim.openstreetmap.org/search?{params}'
-            req = urllib.request.Request(url, headers={'User-Agent': 'MappingDispo/1.0'})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                status = getattr(resp, 'status', None)
-                raw = resp.read()
+        params = urllib.parse.urlencode({
+            'q': query,
+            'format': 'json',
+            'limit': 1,
+            'countrycodes': 'us',
+        })
+        url = f'https://nominatim.openstreetmap.org/search?{params}'
+        for attempt in range(NOMINATIM_RETRIES + 1):
+            if _time.monotonic() >= deadline:
+                attempts.append(f'"{query}": not tried, time budget spent')
+                return None, None
+            _nominatim_wait()
+            try:
+                req = urllib.request.Request(url, headers={'User-Agent': _nominatim_user_agent()})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    status = getattr(resp, 'status', None)
+                    raw = resp.read()
+            except urllib.error.HTTPError as e:
+                # A refusal (403 blocked, 429 throttled, ...) is not "no such
+                # address": say so at once, with Nominatim's own words.
+                try:
+                    body = e.read(300).decode('utf-8', 'replace').strip()
+                except Exception:
+                    body = ''
+                delay = _retry_delay(attempt, e)
+                if (e.code in (429, 500, 502, 503, 504) and attempt < NOMINATIM_RETRIES
+                        and _time.monotonic() + delay < deadline):
+                    geo_logger.warning(f'Nominatim HTTP {e.code} for "{query}", retrying in {delay}s: {body!r}')
+                    _time.sleep(delay)
+                    continue
+                geo_logger.warning(f'Nominatim HTTP {e.code} for "{query}": {body!r}')
+                attempts.append(f'"{query}": HTTP {e.code}')
+                return None, None
+            except Exception as e:
+                # Timeouts and dropped connections are worth one more try; the
+                # rest are reported as they are.
+                delay = _retry_delay(attempt)
+                if (isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError))
+                        and attempt < NOMINATIM_RETRIES and _time.monotonic() + delay < deadline):
+                    geo_logger.warning(f'Nominatim request failed for "{query}", retrying in {delay}s: {type(e).__name__}: {e}')
+                    _time.sleep(delay)
+                    continue
+                geo_logger.warning(f'Nominatim request failed for "{query}": {type(e).__name__}: {e}')
+                attempts.append(f'"{query}": {type(e).__name__}')
+                return None, None
             try:
                 results = json.loads(raw)
             except ValueError:
@@ -420,25 +500,19 @@ def geocode(address):
                 geo_logger.warning(f'Nominatim non-JSON reply (HTTP {status}) for "{query}": {raw[:300]!r}')
                 attempts.append(f'"{query}": non-JSON reply (HTTP {status})')
                 return None, None
-            if results:
-                lat, lng = float(results[0]['lat']), float(results[0]['lon'])
-                # Only ever printed when every strategy fails — that is, when
-                # this answer was then rejected as outside Massachusetts.
-                attempts.append(f'"{query}": outside MA ({lat}, {lng})')
-                return lat, lng
-            attempts.append(f'"{query}": no results')
-        except urllib.error.HTTPError as e:
-            # A refusal (403 blocked, 429 throttled, ...) is not "no such
-            # address": say so at once, with Nominatim's own words.
             try:
-                body = e.read(300).decode('utf-8', 'replace').strip()
-            except Exception:
-                body = ''
-            geo_logger.warning(f'Nominatim HTTP {e.code} for "{query}": {body!r}')
-            attempts.append(f'"{query}": HTTP {e.code}')
-        except Exception as e:
-            geo_logger.warning(f'Nominatim request failed for "{query}": {type(e).__name__}: {e}')
-            attempts.append(f'"{query}": {type(e).__name__}')
+                if results:
+                    lat, lng = float(results[0]['lat']), float(results[0]['lon'])
+                    # Only ever printed when every strategy fails — that is,
+                    # when this answer was then rejected as outside MA.
+                    attempts.append(f'"{query}": outside MA ({lat}, {lng})')
+                    return lat, lng
+            except (KeyError, IndexError, TypeError, ValueError) as e:
+                geo_logger.warning(f'Nominatim unreadable result for "{query}": {type(e).__name__}: {e}')
+                attempts.append(f'"{query}": unreadable result')
+                return None, None
+            attempts.append(f'"{query}": no results')
+            return None, None
         return None, None
 
     def _extract_city(addr):
@@ -465,14 +539,10 @@ def geocode(address):
     if lat is not None and is_in_massachusetts(lat, lng):
         return lat, lng
 
-    _time.sleep(0.3)
-
     # Strategy 2: original address as-is
     lat, lng = _nominatim_search(address)
     if lat is not None and is_in_massachusetts(lat, lng):
         return lat, lng
-
-    _time.sleep(0.3)
 
     # Strategy 3: city-only fallback (city center coordinates)
     city = _extract_city(address) or _extract_city(clean_addr)

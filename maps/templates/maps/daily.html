@@ -327,6 +327,10 @@
                 border-color: #3d5a80;
             }
         }
+        /* A lead without coordinates is on no map: say so in words, not only
+           with the red border (2026-10-06). */
+        .no-pin { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 9px;
+                  font-size: 11px; font-weight: 600; color: #b42318; background: #fde8e7; white-space: nowrap; }
     </style>
 {% endblock %}
 
@@ -395,6 +399,7 @@
                     <td data-label="Address">
                         <input type="text" class="crm-input" data-field="address" value="{{ lead.address }}"{% if not lead.latitude %} style="border: 2px solid #e74c3c;" title="Address could not be geocoded — this lead won't appear on the map"{% endif %}>
                         <a class="navigate-btn" href="https://www.google.com/maps/dir/?api=1&destination={{ lead.address|urlencode }},+{{ lead.city|urlencode }},+MA" target="_blank"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4.5 20.3l.7.7L12 18l6.8 3 .7-.7z"/></svg> Navigate</a>
+                        {% if not lead.latitude %}<span class="no-pin" title="Address could not be geocoded — this lead won't appear on the map">No map pin</span>{% endif %}
                     </td>
                     <td data-label="City"><input type="text" class="crm-input" data-field="city" value="{{ lead.city }}"></td>
                     <td data-label="State"><input type="text" class="crm-input" data-field="state" value="{{ lead.state }}"></td>
@@ -677,6 +682,12 @@
             }).then(function(r) { return r.json(); }).then(function(data) {
                 if (data.geocode_failed) {
                     var addrInput = inputEl ? inputEl.closest('tr').querySelector('[data-field="address"]') : null;
+                    if (addrInput && !addrInput.parentNode.querySelector('.no-pin')) {
+                        var pin = document.createElement('span');
+                        pin.className = 'no-pin';
+                        pin.textContent = 'No map pin';
+                        addrInput.parentNode.appendChild(pin);
+                    }
                     if (addrInput) {
                         addrInput.style.border = '2px solid #e74c3c';
                         addrInput.title = 'Address could not be geocoded — this lead won\'t appear on the map';
@@ -687,6 +698,8 @@
                     if (addrInput) {
                         addrInput.style.border = '';
                         addrInput.title = '';
+                        var pin = addrInput.parentNode.querySelector('.no-pin');
+                        if (pin) pin.remove();
                     }
                 }
                 if (data.appointment_type !== undefined) {
@@ -1402,6 +1415,12 @@
 
                 var addrCell = document.createElement('td');
                 addrCell.textContent = address || '—';
+                if (row.querySelector('.no-pin')) {
+                    var noPin = document.createElement('span');
+                    noPin.className = 'no-pin';
+                    noPin.textContent = 'No map pin';
+                    addrCell.appendChild(noPin);
+                }
                 tr.appendChild(addrCell);
 
                 var cityCell = document.createElement('td');
