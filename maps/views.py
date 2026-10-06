@@ -410,9 +410,22 @@ def geocode(address):
             url = f'https://nominatim.openstreetmap.org/search?{params}'
             req = urllib.request.Request(url, headers={'User-Agent': 'MappingDispo/1.0'})
             with urllib.request.urlopen(req, timeout=10) as resp:
-                results = json.loads(resp.read())
+                status = getattr(resp, 'status', None)
+                raw = resp.read()
+            try:
+                results = json.loads(raw)
+            except ValueError:
+                # A 200 that is not JSON — a block or captcha page — is a
+                # refusal too, and its body says so.
+                geo_logger.warning(f'Nominatim non-JSON reply (HTTP {status}) for "{query}": {raw[:300]!r}')
+                attempts.append(f'"{query}": non-JSON reply (HTTP {status})')
+                return None, None
             if results:
-                return float(results[0]['lat']), float(results[0]['lon'])
+                lat, lng = float(results[0]['lat']), float(results[0]['lon'])
+                # Only ever printed when every strategy fails — that is, when
+                # this answer was then rejected as outside Massachusetts.
+                attempts.append(f'"{query}": outside MA ({lat}, {lng})')
+                return lat, lng
             attempts.append(f'"{query}": no results')
         except urllib.error.HTTPError as e:
             # A refusal (403 blocked, 429 throttled, ...) is not "no such

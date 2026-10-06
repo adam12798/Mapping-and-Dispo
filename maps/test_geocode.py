@@ -22,11 +22,13 @@ def _http_error(code, body):
 
 
 class _Resp:
-    def __init__(self, payload):
-        self._payload = payload
+    status = 200
+
+    def __init__(self, payload=None, raw=None):
+        self._raw = raw if raw is not None else json.dumps(payload).encode()
 
     def read(self):
-        return json.dumps(self._payload).encode()
+        return self._raw
 
     def __enter__(self):
         return self
@@ -69,6 +71,22 @@ class GeocodeLogsWhyTest(SimpleTestCase):
         self.assertEqual(len(logs.output), 1, logs.output)
         self.assertIn('no results', logs.output[0])
         self.assertNotIn('HTTP', logs.output[0])
+
+    def test_an_answer_outside_massachusetts_is_reported_as_such(self):
+        # Coordinates came back — they were rejected, not missing. The final
+        # line must say so, not "no results" or "no attempts".
+        with mock.patch('urllib.request.urlopen', return_value=_Resp([{'lat': '40.71', 'lon': '-74.0'}])), \
+                self.assertLogs('geocode', level='WARNING') as logs:
+            self.assertEqual(geocode('12 Main St, Springfield'), (None, None))
+        self.assertIn('outside MA (40.71, -74.0)', logs.output[-1])
+        self.assertNotIn('no attempts', logs.output[-1])
+
+    def test_a_non_json_200_is_logged_with_its_status_and_body(self):
+        page = b'<html><body>Access denied. Captcha required.</body></html>'
+        with mock.patch('urllib.request.urlopen', return_value=_Resp(raw=page)), \
+                self.assertLogs('geocode', level='WARNING') as logs:
+            self.assertEqual(geocode('42 Thomas St, Northbridge, MA 01534'), (None, None))
+        self.assertTrue(any('Nominatim non-JSON reply (HTTP 200)' in line and 'Captcha required' in line for line in logs.output), logs.output)
 
     def test_a_found_address_logs_nothing(self):
         with mock.patch('urllib.request.urlopen', return_value=_Resp([{'lat': '42.1619849', 'lon': '-71.6640266'}])), \
