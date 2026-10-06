@@ -1,5 +1,6 @@
 import json
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -393,6 +394,10 @@ def geocode(address):
     import time as _time
     import logging
     geo_logger = logging.getLogger('geocode')
+    # What each Nominatim call came back with, for the "Geocode failed" line.
+    # Until this existed every refusal was swallowed, and the log said only
+    # that geocoding failed — never why.
+    attempts = []
 
     def _nominatim_search(query):
         try:
@@ -408,8 +413,19 @@ def geocode(address):
                 results = json.loads(resp.read())
             if results:
                 return float(results[0]['lat']), float(results[0]['lon'])
-        except Exception:
-            pass
+            attempts.append(f'"{query}": no results')
+        except urllib.error.HTTPError as e:
+            # A refusal (403 blocked, 429 throttled, ...) is not "no such
+            # address": say so at once, with Nominatim's own words.
+            try:
+                body = e.read(300).decode('utf-8', 'replace').strip()
+            except Exception:
+                body = ''
+            geo_logger.warning(f'Nominatim HTTP {e.code} for "{query}": {body!r}')
+            attempts.append(f'"{query}": HTTP {e.code}')
+        except Exception as e:
+            geo_logger.warning(f'Nominatim request failed for "{query}": {type(e).__name__}: {e}')
+            attempts.append(f'"{query}": {type(e).__name__}')
         return None, None
 
     def _extract_city(addr):
@@ -453,7 +469,7 @@ def geocode(address):
             geo_logger.info(f'Geocode city fallback for "{address}" -> {city}, MA ({city_lat}, {city_lng})')
             return city_lat, city_lng
 
-    geo_logger.warning(f'Geocode failed for "{address}"')
+    geo_logger.warning(f'Geocode failed for "{address}" — ' + ('; '.join(attempts) or 'no attempts'))
     return None, None
 
 
