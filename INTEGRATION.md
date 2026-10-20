@@ -42,7 +42,7 @@ Seven trigger types exist (`WebhookConfig.TRIGGER_CHOICES`). What matters is not
 
 | Trigger | Fires from | Does **not** fire from |
 |---|---|---|
-| `disposition_changed` | CRM inline edit (`lead_update`, when `disposition` in payload); bulk update (`leads_bulk_update`); manager SMS update (`apply_manager_sms_update`, on `cancel`/`disposition`); Alfred `update_disposition` and manager `update_lead` | v1 API `PUT /api/v1/leads/<id>/`; `POST /api/v1/ghl/disposition/` |
+| `disposition_changed` | CRM inline edit (`lead_update`, when `disposition` in payload); bulk update (`leads_bulk_update`); manager SMS update (`apply_manager_sms_update`, on `cancel`/`disposition`); Alfred `update_disposition` and manager `update_lead`; Alfred by text (`POST /api/v1/alfred/text/`, §6.6) | v1 API `PUT /api/v1/leads/<id>/`; `POST /api/v1/ghl/disposition/` |
 | `appointment_changed` | CRM inline edit (only when the datetime actually changed); Alfred `update_lead` | **`ghl_appointment`**, **`ghl_reschedule`**; bulk update; v1 PUT |
 | `lead_created` | **only** `POST /api/v1/leads/create/` | **`ghl_appointment`** (GHL bookings), **inbound SMS** lead creation |
 | `lead_cancelled` | CRM inline edit (when `cancelled` set truthy) | `ghl_cancel`; `ghl_appointment` with status=cancelled; SMS cancel path |
@@ -129,6 +129,7 @@ Base: `https://sutton-soda.com/api/v1/`. Auth: `Authorization: Bearer <api_key>`
 | Stats | `GET /api/v1/stats/` | ✅ exists |
 | Time off | `GET /api/v1/time-off/?date=` | ✅ exists (read-only) |
 | Delivery-log read-back | `GET /api/v1/ghl/logs/` | ⚠️ inbound-only (see §1.5) |
+| A rep's text debrief → the lead | `POST /api/v1/alfred/text/` | ✅ **Ventana keys only** (§6.6) |
 
 **Behavioural notes on `PUT /api/v1/leads/<id>/` that the hub design depends on:**
 
@@ -137,7 +138,7 @@ Base: `https://sutton-soda.com/api/v1/`. Auth: `Authorization: Bearer <api_key>`
 - Writable fields: `homeowner_name`, `phone_number`, `address`, `city`, `state`, `source`, `tags`, `appointment_type`, `appointment_format`, `appointment_datetime`, `disposition`, `sat`, `follow_up_date`, `follow_up_time`, `call_notes`, `appt_notes`, `call_transcript`, `cancelled`, `monthly_cost`, `total_cost`, `adders`, `post_appt_notes`, and `rep_id`. Not writable: geo (auto-derived on address/city change), all internal stamps.
 - `DELETE` is supported and is a hard delete. Consider not granting the hub a key path to it.
 
-**Auth → org mapping (confirmed):** `api_key_required` looks up the tenant, rejects unknown/inactive keys with 401, stamps `last_used_at`, then runs the entire view inside `org_context(tenant.organization_id)`. Cross-org access is impossible **provided the tenant row has an organization** — see the NULL-org warning in §0. `rate_limit` (default 1000/hr) exists on the model but **is not enforced anywhere**. CORS on `/api/v1/` allows any origin (`CORS_ALLOWED_ORIGIN_REGEXES = ['.*']`); the API key is the only gate.
+**Auth → org mapping (confirmed):** `api_key_required` looks up the tenant, rejects unknown/inactive keys with 401, stamps `last_used_at`, then runs the entire view inside `org_context(tenant.organization_id)`. Cross-org access is impossible **provided the tenant row has an organization** — see the NULL-org warning in §0. `rate_limit` (default 1000/hr) exists on the model but **is enforced only on `POST /api/v1/alfred/text/`** (§6.6). CORS on `/api/v1/` allows any origin (`CORS_ALLOWED_ORIGIN_REGEXES = ['.*']`); the API key is the only gate.
 
 ---
 
@@ -364,3 +365,17 @@ What MarketingCanvas does with a 978 inbound (`server/sms-routes.js`, deployed `
 - **Account's third number,** +1 781-675-4628: messaging goes to Wednesday's Supabase (`kaeopyleyvecaaiqbeot`). It has no voice configuration.
 
 Related: the public SMS consent page (`sms_consent.html`, part of the 978's A2P filing) tells reps to text START to the 978. That text is handled by MarketingCanvas, not Sutton. Sutton records rep consent only through the manager's checkbox.
+
+### 6.6 Alfred by text (`maps/alfred_text.py`, migration `0043`)
+
+`POST /api/v1/alfred/text/` reads a rep's text about one appointment with the call-in Alfred's own instructions and fields (`SYSTEM_PROMPT` and `DISPOSITION_TOOL`, imported from `voice_ws.py`, plus a text-mode note), through `gpt-4o-mini`.
+
+- **Ventana's keys only.** A key of any other org, or a key with no org, gets **403** `{"error": "Alfred by text is only for Ventana; this key is not a Ventana key."}` before anything is read, counted or written. (`api_key_required` alone would run a no-org key as Team Sunshine.)
+- **Rate limit per key:** 60 requests an hour, lowered (never raised) by the key's own `rate_limit`. Every request counts, bad ones too. Over it: **429** with `Retry-After`. Counted in `APIRateWindow`.
+- **Body:** `rep_id` or `rep_phone` (an active Ventana rep; both must agree), `lead_id` (a Ventana lead that is the rep's or has no rep), `text` (≤ 1600 characters), and optional `context`: `last_summary`, `last_question`, `empty_fields` (pass back the previous response's `summary`, `next_question` and `still_empty`).
+- **Response:** `set` (the fields written), `summary` (the one-line call note, under 20 words), `next_question` (the first still-empty detail in the call's order — follow-up date, follow-up time, adders, monthly, total, notes — or a clarifying question, or `null`), `appointment_move` (`{date, time}` or `null`), `still_empty`, `understood`.
+- **Never a guess:** a field the model leaves out or gets wrong (unknown disposition, a past or malformed date, a bad time) is not written; Alfred asks about it. An unreadable text writes nothing.
+- **The write is the call's:** the same fields, the call's future_contact rule (a follow_up/cpfu more than 30 days out), and the call's `rep=rep` guard widened to leads with no rep. Each exchange that writes is *added* to `call_transcript`. A rep is never assigned.
+- **A move is not a follow-up.** The appointment itself being moved comes back as `appointment_move` and is **not written** (reps can't reschedule, as on the call). A follow-up date and time are written to `follow_up_date` / `follow_up_time`.
+- **Events:** every write fires `disposition_changed` for the lead's org (debounced 60 s), once the lead has a disposition. Ventana had no disposition configs on 2026-10-20, so nothing is sent anywhere today.
+- **Logged** as a `VoiceCallLog` with `channel='text'`; `/voice/logs/` shows the channel.
