@@ -17,6 +17,10 @@ the way a call does, and answers with what it set and what to ask next.
            "appointment_move": {"date": "YYYY-MM-DD", "time": "HH:MM"} | null,
            "still_empty": [...], "understood": true | false}
 
+Pass back each response's summary, next_question and still_empty as the
+next text's context. The lead must be the rep's (or have no rep), not
+cancelled, and booked between two weeks ago and three days ahead.
+
 The instructions and the field list are voice_ws.py's (imported, not copied),
 with a text-mode note on top. Nothing is guessed: what the model leaves out or
 gets wrong is not written, and Alfred asks about it instead. A follow-up time
@@ -32,7 +36,8 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import Case, F, Q, TextField, Value, When
+from django.db.models.functions import Concat
 from django.http import JsonResponse
 from django.utils import timezone
 
@@ -47,6 +52,10 @@ ORG_SLUG = 'ventana'
 RATE_SCOPE = 'alfred_text'
 TEXTS_PER_HOUR = 60          # per key; a key's own rate_limit lowers it, never raises it
 MAX_TEXT = 1600              # a long SMS
+# Which appointments a text can debrief. The call reaches the rep's own
+# appointments from today to three days out; a text names the lead, so it
+# also reaches the last two weeks (a late debrief, a follow-up that closed).
+DAYS_BACK, DAYS_AHEAD = 14, 3
 MODEL = 'gpt-4o-mini'
 TOOL_NAME = 'read_rep_text'
 
@@ -67,6 +76,8 @@ FOLLOW_UP_DISPOSITIONS = {'follow_up', 'cpfu', 'future_contact'}
 DEAL_DISPOSITIONS = {'sale'} | FOLLOW_UP_DISPOSITIONS
 
 ASK_OUTCOME = 'Did you sit the appointment?'
+ASK_CREDIT = 'Did you run credit?'
+CALL_NOTE_WORDS = 19         # "under 20 words"
 ASK_FOLLOW_UP_TIME = 'And what time on {day}?'
 ASK_MOVE = 'What day and time does the homeowner want instead?'
 ASK_UNREADABLE = "Sorry, I couldn't make that out — how did the appointment with {name} go?"
@@ -76,16 +87,19 @@ TEXT_MODE = """## TEXT MODE — this overrides anything above that assumes a pho
 This is not a call. {rep} has sent you a text message about ONE appointment, already identified below. Don't ask which appointment and don't confirm the homeowner's name. You never write a reply: you always call read_rep_text exactly once with what this text tells you.
 
 - Decide the disposition with the debrief rules above. Set only what the text (with the context below) actually says. Never guess. If you can't tell the outcome, a date or a time, leave that field out and put the one question that would settle it in clarifying_question: the decision tree's next question (e.g. "Did you run credit?") when the outcome isn't settled yet, or a short "didn't catch that" question when the text can't be read. Set understood to false when the text can't be read as anything about this appointment.
-- call_notes is a one-line summary of the appointment under 20 words, the way a manager would jot it: "Needed to talk to wife". When this text adds to the last summary below, fold that in. Give call_notes whenever you set a disposition.
+- call_notes is a one-line summary of the appointment under 20 words, the way a manager would jot it: "Needed to talk to wife". Give call_notes whenever you set a disposition, folding in the call note already on the lead when this text adds to it. Leave call_notes out when the text only answers a detail (adders, the monthly, a date).
+- When the text adds to a detail already on the lead ("also a panel upgrade"), give the whole new value ("Battery, panel upgrade").
 - A follow-up (follow_up_date / follow_up_time) is when to get back to the homeowner after the appointment. The appointment ITSELF being moved — the homeowner asked for another day or time, or the visit is being rebooked — is not a follow-up: put the new day and time in appointment_moved_to_date / appointment_moved_to_time and leave follow_up_date and follow_up_time out. A move is not a disposition.
-- Turn relative dates and times into real ones using "Now" and the appointment below. "Same time" means the appointment's time of day. Dates are YYYY-MM-DD, times HH:MM (24-hour).
+- Turn relative dates and times into real ones using "Now" and the appointment below. "Same time" means the appointment's time of day. Dates are YYYY-MM-DD, times HH:MM (24-hour). Give a date or time only when the rep gave one; never fill one in.
+- If the lead is future_contact and the rep gives a follow-up within a month, set the disposition again (follow_up, or cpfu if credit passed).
 - When the rep says there's nothing for a detail or they don't know it ("no adders", "nothing else"), list it in declined_fields instead of writing "none".
 - A bare answer ("yes", "189", "no") answers Alfred's last question below.
 
 Now: {now}
 Rep: {rep}
 Appointment: {appointment}
-Disposition on the lead now: {disposition}"""
+Disposition on the lead now: {disposition}
+On the lead now: {details}"""
 
 
 # ── The request ───────────────────────────────────────────────────────────
@@ -132,13 +146,14 @@ def _int(value):
         return None
     if isinstance(value, int):
         return value
-    if isinstance(value, str) and value.strip().isdigit():
+    if isinstance(value, str) and re.fullmatch(r'[0-9]{1,18}', value.strip()):
         return int(value.strip())
     return None
 
 
 def _short(value, limit):
-    return value.strip()[:limit] if isinstance(value, str) else ''
+    # PostgreSQL text can't hold NUL, from the rep or from the model.
+    return value.replace('\x00', '').strip()[:limit] if isinstance(value, str) else ''
 
 
 def _parse_body(request):
@@ -161,8 +176,9 @@ def _parse_body(request):
     if rep_id is None and rep_phone is None:
         raise _Refusal(400, 'rep_id or rep_phone is required.')
     text = data.get('text')
-    if not isinstance(text, str) or not text.strip():
+    if not isinstance(text, str) or not _short(text, MAX_TEXT + 1):
         raise _Refusal(400, "text (the rep's message) is required.")
+    text = _short(text, MAX_TEXT + 1)
     if len(text) > MAX_TEXT:
         raise _Refusal(400, f'text is longer than {MAX_TEXT} characters.')
 
@@ -180,7 +196,7 @@ def _parse_body(request):
         'empty_fields': None if empty is None else [f for f in QUESTION_ORDER if f in empty],
     }
     return {'lead_id': lead_id, 'rep_id': _int(rep_id), 'rep_phone': rep_phone,
-            'text': text.strip(), 'context': context}
+            'text': text, 'context': context}
 
 
 def _find_rep(rep_id, rep_phone):
@@ -205,7 +221,7 @@ def _find_rep(rep_id, rep_phone):
     return rep
 
 
-def _find_lead(lead_id, rep):
+def _find_lead(lead_id, rep, now):
     lead = Lead.objects.select_related('rep').filter(id=lead_id).first()
     if lead is None:
         raise _Refusal(404, 'No Ventana lead has that lead_id.')
@@ -214,6 +230,12 @@ def _find_lead(lead_id, rep):
     # the rep's to debrief too; another rep's lead is not.
     if lead.rep_id is not None and lead.rep_id != rep.id:
         raise _Refusal(403, 'That lead is assigned to another rep.')
+    if lead.cancelled:
+        raise _Refusal(409, 'That appointment is cancelled.')
+    today_start = now.astimezone(EASTERN).replace(hour=0, minute=0, second=0, microsecond=0)
+    if lead.appointment_datetime is None or not (
+            today_start - timedelta(days=DAYS_BACK) <= lead.appointment_datetime <= now + timedelta(days=DAYS_AHEAD)):
+        raise _Refusal(409, f'That appointment is not in the last {DAYS_BACK} days or the next {DAYS_AHEAD}.')
     return lead
 
 
@@ -232,6 +254,10 @@ def text_tool():
         ". Only when the debrief rules settle it; leave out while the outcome isn't clear, "
         "and when the text only adds details to an outcome already on the lead.")
     props['call_notes']['description'] += ' A one-line summary, like "Needed to talk to wife".'
+    # On a call Alfred asks until it has them; a text gives what it gives.
+    for field in ('follow_up_date', 'follow_up_time'):
+        props[field]['description'] = props[field]['description'].replace(
+            'Required when disposition is follow_up or cpfu.', 'Only when the rep gave one; never fill one in.')
     props.update({
         'understood': {
             'type': 'boolean',
@@ -277,6 +303,18 @@ def _when(dt_value):
     return f"{local:%A, %B} {local.day}, {local.year} ({local:%Y-%m-%d}) at {local:%I:%M %p} ({local:%H:%M})"
 
 
+def _on_the_lead(lead):
+    def quoted(value):
+        return f'"{value[:300]}"' if value else 'empty'
+    follow_up = ' '.join(x for x in (
+        lead.follow_up_date.isoformat() if lead.follow_up_date else '',
+        lead.follow_up_time.strftime('%H:%M') if lead.follow_up_time else '') if x) or 'empty'
+    sat = {True: 'yes', False: 'no'}.get(lead.sat, 'empty')
+    return (f'call note {quoted(lead.call_notes)}; sat {sat}; follow-up {follow_up}; adders {quoted(lead.adders)}; '
+            f'monthly {quoted(lead.monthly_cost)}; total {quoted(lead.total_cost)}; '
+            f'post-appointment notes {quoted(lead.post_appt_notes)}')
+
+
 def build_messages(rep, lead, text, context, now):
     from voice_ws import SYSTEM_PROMPT
 
@@ -288,7 +326,7 @@ def build_messages(rep, lead, text, context, now):
         appointment += f' ({lead.appointment_type})'
     lines = [TEXT_MODE.format(
         rep=rep.name, now=_when(now) + ', Eastern', appointment=appointment,
-        disposition=lead.disposition or 'none')]
+        disposition=lead.disposition or 'none', details=_on_the_lead(lead))]
     if context['last_summary']:
         lines.append(f"Last summary: {context['last_summary']}")
     if context['last_question']:
@@ -351,7 +389,7 @@ def read_answer(args, lead, today):
 
     disposition = args.get('disposition')
     if disposition is not None:
-        if disposition in _dispositions():
+        if isinstance(disposition, str) and disposition in _dispositions():
             writes['disposition'] = disposition
         else:
             problems.append(('disposition', ASK_OUTCOME))
@@ -384,7 +422,7 @@ def read_answer(args, lead, today):
     notes = _short(args.get('call_notes'), 1000)
     if notes:
         # Lead.call_notes is 200 characters; the call asks for under 20 words.
-        writes['call_notes'] = ' '.join(notes.split()[:20])[:200]
+        writes['call_notes'] = ' '.join(notes.split()[:CALL_NOTE_WORDS])[:200]
 
     if args.get('appointment_moved_to_date') or args.get('appointment_moved_to_time'):
         moved_date = _date(args.get('appointment_moved_to_date'))
@@ -405,18 +443,26 @@ def read_answer(args, lead, today):
             'declined': declined, 'move': move}
 
 
+def _to_ask(disposition):
+    if disposition in FOLLOW_UP_DISPOSITIONS:
+        return QUESTION_ORDER
+    if disposition in DEAL_DISPOSITIONS:
+        return DEAL_FIELDS
+    return []
+
+
 def _still_empty(lead, writes, declined, context):
-    outcome = writes.get('disposition') or lead.disposition
-    if outcome in FOLLOW_UP_DISPOSITIONS:
-        relevant = QUESTION_ORDER
-    elif outcome in DEAL_DISPOSITIONS:
-        relevant = DEAL_FIELDS
-    else:
-        return []
-    asked_for = context['empty_fields']
-    return [f for f in relevant
+    """The details Alfred still asks about, in the call's order: the ones this
+    outcome asks for that are empty on the lead and that the rep hasn't said
+    there's nothing for. The caller's empty_fields (the last response's
+    still_empty) carries those earlier "nothing"s — but only for questions the
+    lead's outcome already asked; ones this text's outcome newly brings in
+    (a first outcome, sale → cpfu) are asked."""
+    asked_before = _to_ask(lead.disposition)
+    carried = context['empty_fields']
+    return [f for f in _to_ask(writes.get('disposition') or lead.disposition)
             if f not in writes and not getattr(lead, f) and f not in declined
-            and (asked_for is None or f in asked_for)]
+            and (carried is None or f in carried or f not in asked_before)]
 
 
 def _ask(field, lead, writes):
@@ -465,7 +511,7 @@ def alfred_text(request):
     try:
         body = _parse_body(request)
         rep = _find_rep(body['rep_id'], body['rep_phone'])
-        lead = _find_lead(body['lead_id'], rep)
+        lead = _find_lead(body['lead_id'], rep, now)
     except _Refusal as refusal:
         return JsonResponse({'error': refusal.error}, status=refusal.status)
     if not settings.OPENAI_API_KEY:
@@ -496,6 +542,10 @@ def alfred_text(request):
             next_question = answer['problems'][0][1]
         elif answer['question']:
             next_question = answer['question']
+        elif not (writes.get('disposition') or lead.disposition) and not answer['move']:
+            # Details but no outcome yet: the decision tree's next question.
+            sat = writes['sat'] if 'sat' in writes else lead.sat
+            next_question = ASK_CREDIT if sat else ASK_OUTCOME
         elif still_empty:
             next_question = _ask(still_empty[0], lead, writes)
         else:
@@ -511,8 +561,12 @@ def alfred_text(request):
             # The call's write: these fields, and the transcript of the
             # debrief. A text debrief comes in pieces, so each exchange is
             # added to the transcript rather than replacing it.
+            # Appended in the UPDATE itself, so two texts at once both keep theirs.
             update = dict(writes)
-            update['call_transcript'] = (lead.call_transcript + '\n\n' if lead.call_transcript else '') + exchange
+            update['call_transcript'] = Case(
+                When(call_transcript='', then=Value(exchange)),
+                default=Concat(F('call_transcript'), Value('\n\n' + exchange)),
+                output_field=TextField())
             updated = Lead.objects.filter(id=lead.id).filter(Q(rep=rep) | Q(rep__isnull=True)).update(**update)
             if not updated:
                 return JsonResponse({'error': 'That lead changed hands just now; nothing was saved.'}, status=409)

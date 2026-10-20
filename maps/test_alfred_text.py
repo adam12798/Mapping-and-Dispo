@@ -12,6 +12,7 @@ import re
 from unittest import mock
 from zoneinfo import ZoneInfo
 
+from django.db import connection
 from django.test import Client, TestCase, override_settings
 
 from . import alfred_text
@@ -234,6 +235,65 @@ class OutcomeTests(AlfredTextBase):
         self.fired.assert_not_called()      # no disposition yet, nothing to announce
 
 
+class ChainTests(AlfredTextBase):
+    """Passing back each response's summary, next_question and still_empty."""
+
+    def chain(self, *texts):
+        out = None
+        for text in texts:
+            context = None if out is None else {'last_summary': out['summary'], 'last_question': out['next_question'],
+                                                'empty_fields': out['still_empty']}
+            out = self.text(text, context=context).json()
+        return out
+
+    def test_an_outcome_settled_later_still_asks_its_questions(self):
+        # "It went fine" leaves the outcome open (still_empty []); the outcome
+        # that follows brings its own questions in.
+        out = self.chain('It went fine, they liked it', 'Sold it!')
+        self.assertEqual(out['next_question'], 'Any adders on this one?')
+        self.model.fixed = {'understood': True, 'disposition': 'follow_up', 'call_notes': 'Wants to think, no credit'}
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='', adders='', monthly_cost='')
+        out = self.chain('It went fine, they liked it', 'no credit, still life')
+        self.assertEqual(out['next_question'], 'When would be a good time to follow up with the homeowner?')
+        self.assertEqual(out['still_empty'], ['follow_up_date', 'follow_up_time', 'adders', 'monthly_cost',
+                                              'total_cost', 'post_appt_notes'])
+
+    def test_an_outcome_that_changes_brings_in_its_questions(self):
+        # A sale's deal questions are under way; it turns out to be a cpfu.
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True, adders='Battery')
+        self.model.fixed = {'understood': True, 'disposition': 'cpfu', 'call_notes': 'Credit passed, not signed'}
+        out = self.text('actually they did not sign yet', context={
+            'last_summary': 'Sold', 'last_question': "What's the monthly looking like?",
+            'empty_fields': ['monthly_cost', 'total_cost', 'post_appt_notes']}).json()
+        self.assertEqual(out['next_question'], 'When would be a good time to follow up with the homeowner?')
+        self.assertEqual(out['still_empty'], ['follow_up_date', 'follow_up_time', 'monthly_cost', 'total_cost',
+                                              'post_appt_notes'])
+
+    def test_a_detail_the_rep_said_nothing_for_is_not_asked_again(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True)
+        out = self.chain('no idea on the total yet')
+        self.assertEqual(out['still_empty'], ['adders', 'monthly_cost', 'post_appt_notes'])
+        out = self.text('battery, about 189 a month', context={
+            'last_summary': '', 'last_question': out['next_question'], 'empty_fields': out['still_empty']}).json()
+        self.assertEqual(out['next_question'], 'Anything else worth noting?')     # not the total again
+
+
+class WindowTests(AlfredTextBase):
+    def test_a_cancelled_appointment_is_refused(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(cancelled=True)
+        r = self.text('Sold it!')
+        self.assertEqual((r.status_code, r.json()['error']), (409, 'That appointment is cancelled.'))
+        self.assertEqual(self.model.calls, [])
+
+    def test_only_recent_appointments(self):
+        for days, status in ((-20, 409), (-14, 200), (3, 200), (4, 409)):
+            Lead.all_objects.filter(pk=self.lead.pk).update(
+                appointment_datetime=NOW.replace(hour=12) + dt.timedelta(days=days), disposition='')
+            self.assertEqual(self.text('Sold it!').status_code, status, days)
+        Lead.all_objects.filter(pk=self.lead.pk).update(appointment_datetime=None)
+        self.assertEqual(self.text('Sold it!').status_code, 409)
+
+
 class DateTests(AlfredTextBase):
     def test_a_time_days_out(self):
         out = self.text('Follow up, no credit run, call him Friday at 2').json()
@@ -330,7 +390,56 @@ class NeverGuessTests(AlfredTextBase):
         self.model.fixed = {'understood': True, 'disposition': 'no_sale', 'sat': True,
                             'call_notes': ' '.join(['word'] * 40)}
         out = self.text('long story').json()
-        self.assertEqual(len(out['set']['call_notes'].split()), 20)
+        self.assertEqual(len(out['set']['call_notes'].split()), 19)     # under 20
+
+    def test_details_with_no_outcome_ask_for_the_outcome(self):
+        self.model.fixed = {'understood': True, 'call_notes': 'Nice couple'}
+        self.assertEqual(self.text('nice couple').json()['next_question'], 'Did you sit the appointment?')
+        self.model.fixed = {'understood': True, 'sat': True}
+        self.assertEqual(self.text('sat with them').json()['next_question'], 'Did you run credit?')
+        self.model.fixed = {'understood': True, 'declined_fields': ['adders']}
+        self.assertEqual(self.text('no adders').json()['next_question'], 'Did you run credit?')   # sat is on the lead now
+
+    def test_a_disposition_that_is_not_a_string(self):
+        self.model.fixed = {'understood': True, 'disposition': ['sale'], 'sat': True}
+        r = self.text('sold')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()['next_question'], 'Did you sit the appointment?')
+        self.assertEqual(self.fresh().disposition, '')
+
+    def test_nul_characters_are_dropped(self):
+        self.model.fixed = {'understood': True, 'disposition': 'no_sale', 'sat': True, 'call_notes': 'Dead\x00 deal'}
+        r = self.text('dead\x00 deal')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.fresh().call_notes, 'Dead deal')
+        self.assertNotIn('\x00', self.fresh().call_transcript)
+
+    def test_the_tool_never_asks_the_model_to_fill_a_date(self):
+        props = alfred_text.text_tool()['function']['parameters']['properties']
+        for field in ('follow_up_date', 'follow_up_time'):
+            self.assertNotIn('Required', props[field]['description'])
+            self.assertIn('never fill one in', props[field]['description'])
+
+    def test_the_model_sees_what_is_on_the_lead(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True, call_notes='Sold',
+                                                        adders='Battery', monthly_cost='$189')
+        self.model.fixed = {'understood': True, 'adders': 'Battery, panel upgrade'}
+        out = self.text('also a panel upgrade').json()
+        self.assertEqual(out['set'], {'adders': 'Battery, panel upgrade'})
+        self.assertIn('On the lead now: call note "Sold"; sat yes; follow-up empty; adders "Battery"; '
+                      'monthly "$189"; total empty; post-appointment notes empty',
+                      self.model.calls[0]['messages'][0]['content'])
+        self.assertEqual(self.fresh().call_notes, 'Sold')
+
+    def test_two_texts_at_once_both_keep_their_transcript(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(call_transcript='Earlier call')
+        # Another text on this lead lands while the model is reading this one.
+        self.model.side_effect = lambda: Lead.all_objects.filter(pk=self.lead.pk).update(
+            call_transcript='Earlier call\n\n[Text] the other text')
+        self.text('Sold it!')
+        transcript = self.fresh().call_transcript
+        self.assertTrue(transcript.startswith('Earlier call\n\n[Text] the other text\n\n[Text 10/20 09:00 PM] Val Rep: Sold it!'),
+                        transcript)
 
     def test_a_failed_model_call_saves_nothing(self):
         self.model.raises = RuntimeError('timeout')
@@ -377,6 +486,7 @@ class OrgLockTests(AlfredTextBase):
         # (Team Sunshine); the endpoint refuses it instead.
         r = self.text('Sold it!', tenant=self.legacy_tenant, rep_id=self.s_rep.id, lead_id=self.s_lead.id)
         self.assertRefusedUntouched(r)
+        self.assertFalse(APIRateWindow.objects.exists())
 
     def test_no_key_or_a_dead_key(self):
         r = Client().post(URL, data='{}', content_type='application/json')
@@ -409,7 +519,10 @@ class OrgLockTests(AlfredTextBase):
                      json.dumps({'lead_id': self.lead.id, 'text': 'x'}),
                      json.dumps({'rep_id': self.v_rep.id, 'lead_id': self.lead.id, 'text': '  '}),
                      json.dumps({'rep_id': self.v_rep.id, 'lead_id': self.lead.id, 'text': 'x' * 1601}),
-                     json.dumps({'rep_id': self.v_rep.id, 'lead_id': self.lead.id, 'text': 'x', 'context': []})):
+                     json.dumps({'rep_id': self.v_rep.id, 'lead_id': self.lead.id, 'text': 'x', 'context': []}),
+                     json.dumps({'rep_id': self.v_rep.id, 'lead_id': '²', 'text': 'x'}),
+                     json.dumps({'rep_id': '٣', 'lead_id': self.lead.id, 'text': 'x'}),
+                     json.dumps({'rep_id': self.v_rep.id, 'lead_id': self.lead.id, 'text': '\x00'})):
             r = Client().post(URL, data=body, content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {key}')
             self.assertEqual(r.status_code, 400, body[:60])
         self.assertEqual(self.model.calls, [])
@@ -466,6 +579,16 @@ class SameAsTheCallTests(AlfredTextBase):
     def test_voice_logs_stay_voice(self):
         log = VoiceCallLog.all_objects.create(rep=self.v_rep, caller_number='6175550001', organization=self.ventana)
         self.assertEqual(VoiceCallLog.all_objects.get(pk=log.pk).channel, 'voice')
+
+    def test_old_code_can_still_log_a_call(self):
+        # Mid-deploy, the old container's INSERT names no channel column; the
+        # database default fills it.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'INSERT INTO maps_voicecalllog (caller_number, twilio_call_sid, transcript, summary, created_at, '
+                'organization_id) VALUES (%s, %s, %s, %s, %s, %s)',
+                ['6175550001', 'CA1', '', '', NOW, self.ventana.id])
+        self.assertEqual(VoiceCallLog.all_objects.get(twilio_call_sid='CA1').channel, 'voice')
 
 
 class RealCompletionTests(TestCase):
