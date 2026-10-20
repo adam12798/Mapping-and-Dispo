@@ -8,9 +8,10 @@ the way a call does, and answers with what it set and what to ask next.
       "lead_id": 345,                // the Sutton lead
       "text": "sold it, battery",    // the rep's text
       "context": {                   // optional, from the previous exchange
-        "last_summary": "Sold, credit passed",
-        "last_question": "Any adders on this one?",
-        "empty_fields": ["adders", "monthly_cost", "total_cost", "post_appt_notes"]
+        "last_summary": "Wants to compare quotes",
+        "last_question": "When would be a good time to follow up with the homeowner?",
+        "empty_fields": ["follow_up_date", "follow_up_time", "adders", "monthly_cost",
+                         "total_cost", "post_appt_notes"]   // the last still_empty, as given
       }
     }
     → 200 {"set": {...}, "summary": "...", "next_question": "..." | null,
@@ -77,6 +78,7 @@ DEAL_DISPOSITIONS = {'sale'} | FOLLOW_UP_DISPOSITIONS
 
 ASK_OUTCOME = 'Did you sit the appointment?'
 ASK_CREDIT = 'Did you run credit?'
+ASK_NOT_SAT = 'Was the homeowner not home, or did they cancel at the door?'
 CALL_NOTE_WORDS = 19         # "under 20 words"
 ASK_FOLLOW_UP_TIME = 'And what time on {day}?'
 ASK_MOVE = 'What day and time does the homeowner want instead?'
@@ -152,8 +154,12 @@ def _int(value):
 
 
 def _short(value, limit):
-    # PostgreSQL text can't hold NUL, from the rep or from the model.
-    return value.replace('\x00', '').strip()[:limit] if isinstance(value, str) else ''
+    # PostgreSQL text can't hold NUL, and UTF-8 can't hold a lone surrogate
+    # (half an emoji, cut by a JavaScript slice) — from the rep or the model.
+    if not isinstance(value, str):
+        return ''
+    value = value.encode('utf-8', 'replace').decode('utf-8')
+    return value.replace('\x00', '').strip()[:limit]
 
 
 def _parse_body(request):
@@ -233,9 +239,12 @@ def _find_lead(lead_id, rep, now):
     if lead.cancelled:
         raise _Refusal(409, 'That appointment is cancelled.')
     today_start = now.astimezone(EASTERN).replace(hour=0, minute=0, second=0, microsecond=0)
-    if lead.appointment_datetime is None or not (
-            today_start - timedelta(days=DAYS_BACK) <= lead.appointment_datetime <= now + timedelta(days=DAYS_AHEAD)):
-        raise _Refusal(409, f'That appointment is not in the last {DAYS_BACK} days or the next {DAYS_AHEAD}.')
+    earliest, latest = today_start - timedelta(days=DAYS_BACK), now + timedelta(days=DAYS_AHEAD)
+    appointment_in = lead.appointment_datetime is not None and earliest <= lead.appointment_datetime <= latest
+    # A follow-up that comes due closes the deal long after the appointment.
+    follow_up_in = lead.follow_up_date is not None and earliest.date() <= lead.follow_up_date <= latest.date()
+    if not (appointment_in or follow_up_in):
+        raise _Refusal(409, f'Neither the appointment nor a follow-up is in the last {DAYS_BACK} days or the next {DAYS_AHEAD}.')
     return lead
 
 
@@ -252,7 +261,8 @@ def text_tool():
     del props['homeowner_name']
     props['disposition']['description'] += (
         ". Only when the debrief rules settle it; leave out while the outcome isn't clear, "
-        "and when the text only adds details to an outcome already on the lead.")
+        "and when the text only adds details to an outcome already on the lead — except a future_contact "
+        "lead given a follow-up within a month: set it again (follow_up, or cpfu if credit passed).")
     props['call_notes']['description'] += ' A one-line summary, like "Needed to talk to wife".'
     # On a call Alfred asks until it has them; a text gives what it gives.
     for field in ('follow_up_date', 'follow_up_time'):
@@ -438,6 +448,13 @@ def read_answer(args, lead, today):
     follow_up_date = writes.get('follow_up_date')
     if follow_up_date and outcome in ('follow_up', 'cpfu') and follow_up_date > today + timedelta(days=30):
         writes['disposition'] = 'future_contact'
+    # The other way, a future_contact lead coming back within the month is a
+    # follow_up or a cpfu — which one is the rep's to say, not ours.
+    if follow_up_date and outcome == 'future_contact' and 'disposition' not in writes \
+            and follow_up_date <= today + timedelta(days=30):
+        del writes['follow_up_date']
+        writes.pop('follow_up_time', None)
+        problems.append(('disposition', ASK_CREDIT))
 
     return {'writes': writes, 'problems': problems, 'understood': True, 'question': question,
             'declined': declined, 'move': move}
@@ -545,7 +562,7 @@ def alfred_text(request):
         elif not (writes.get('disposition') or lead.disposition) and not answer['move']:
             # Details but no outcome yet: the decision tree's next question.
             sat = writes['sat'] if 'sat' in writes else lead.sat
-            next_question = ASK_CREDIT if sat else ASK_OUTCOME
+            next_question = {True: ASK_CREDIT, False: ASK_NOT_SAT}.get(sat, ASK_OUTCOME)
         elif still_empty:
             next_question = _ask(still_empty[0], lead, writes)
         else:

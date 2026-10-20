@@ -293,6 +293,12 @@ class WindowTests(AlfredTextBase):
         Lead.all_objects.filter(pk=self.lead.pk).update(appointment_datetime=None)
         self.assertEqual(self.text('Sold it!').status_code, 409)
 
+    def test_a_follow_up_coming_due_long_after_the_appointment(self):
+        for follow_up, status in ((dt.date(2026, 10, 20), 200), (dt.date(2026, 10, 1), 409), (None, 409)):
+            Lead.all_objects.filter(pk=self.lead.pk).update(
+                appointment_datetime=APPOINTMENT - dt.timedelta(days=40), disposition='cpfu', follow_up_date=follow_up)
+            self.assertEqual(self.text('Sold it!').status_code, status, follow_up)
+
 
 class DateTests(AlfredTextBase):
     def test_a_time_days_out(self):
@@ -309,6 +315,27 @@ class DateTests(AlfredTextBase):
         out = self.text('follow up in two months').json()
         self.assertEqual(out['set']['disposition'], 'future_contact')
         self.assertEqual(out['set']['follow_up_date'], '2026-12-19')
+
+    def test_a_near_follow_up_on_a_future_contact_lead_asks_the_outcome(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='future_contact',
+                                                        follow_up_date=dt.date(2027, 1, 15))
+        self.model.fixed = {'understood': True, 'follow_up_date': '2026-10-23', 'follow_up_time': '10:00'}
+        out = self.text('actually call her friday at 10').json()
+        self.assertEqual(out['next_question'], 'Did you run credit?')
+        self.assertNotIn('follow_up_date', out['set'])
+        lead = self.fresh()
+        self.assertEqual((lead.disposition, lead.follow_up_date), ('future_contact', dt.date(2027, 1, 15)))
+        # With the outcome, it is written.
+        self.model.fixed = {'understood': True, 'disposition': 'cpfu', 'follow_up_date': '2026-10-23',
+                            'follow_up_time': '10:00'}
+        out = self.text('credit passed, call her friday at 10').json()
+        self.assertEqual((out['set']['disposition'], out['set']['follow_up_date']), ('cpfu', '2026-10-23'))
+
+    def test_a_follow_up_lead_with_no_date_is_asked_the_date(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='follow_up', sat=True)
+        self.model.fixed = {'understood': True, 'adders': 'Battery'}
+        out = self.text('battery').json()
+        self.assertEqual(out['next_question'], 'When would be a good time to follow up with the homeowner?')
 
     def test_a_later_date_turns_an_earlier_follow_up_into_future_contact(self):
         Lead.all_objects.filter(pk=self.lead.pk).update(disposition='follow_up')
@@ -399,6 +426,16 @@ class NeverGuessTests(AlfredTextBase):
         self.assertEqual(self.text('sat with them').json()['next_question'], 'Did you run credit?')
         self.model.fixed = {'understood': True, 'declined_fields': ['adders']}
         self.assertEqual(self.text('no adders').json()['next_question'], 'Did you run credit?')   # sat is on the lead now
+
+    def test_a_rep_who_did_not_sit_is_asked_what_happened(self):
+        self.model.fixed = {'understood': True, 'sat': False}
+        self.assertEqual(self.text('no').json()['next_question'],
+                         'Was the homeowner not home, or did they cancel at the door?')
+
+    def test_half_an_emoji_is_not_an_error(self):
+        r = self.text('Sold it! \ud83d')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIn('Val Rep: Sold it! ?', self.fresh().call_transcript)
 
     def test_a_disposition_that_is_not_a_string(self):
         self.model.fixed = {'understood': True, 'disposition': ['sale'], 'sat': True}
