@@ -185,16 +185,25 @@ class TimeOffRequest(OrgOwnedModel):
 
 
 class VoiceCallLog(OrgOwnedModel):
+    CHANNEL_CHOICES = [
+        ('voice', 'Voice call'),
+        ('text', 'Text (Alfred by text)'),
+    ]
+
     rep = models.ForeignKey(Rep, null=True, blank=True, on_delete=models.SET_NULL, related_name='voice_calls')
     caller_number = models.CharField(max_length=20)
     twilio_call_sid = models.CharField(max_length=64, blank=True)
+    # A database default too, so a voice call that ends while a deploy is
+    # rolling out (old code, new column) still saves.
+    channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES, default='voice', db_default='voice')
     transcript = models.TextField(blank=True)
     summary = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         name = self.rep.name if self.rep else self.caller_number
-        return f"Voice call from {name} ({self.created_at:%m/%d/%Y %I:%M %p})"
+        kind = 'Text' if self.channel == 'text' else 'Voice call'
+        return f"{kind} from {name} ({self.created_at:%m/%d/%Y %I:%M %p})"
 
 
 class UserProfile(OrgOwnedModel):
@@ -384,6 +393,23 @@ class APITenant(models.Model):
             'color_text_muted': self.color_text_muted,
             'font_family': self.font_family,
         }
+
+
+class APIRateWindow(models.Model):
+    """Requests one API key made to one rate-limited endpoint in one clock
+    hour. A row per (key, scope, hour); old hours are pruned as new ones open."""
+    tenant = models.ForeignKey(APITenant, on_delete=models.CASCADE, related_name='rate_windows')
+    scope = models.CharField(max_length=40)
+    window_start = models.DateTimeField()
+    count = models.IntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['tenant', 'scope', 'window_start'], name='api_rate_window_unique'),
+        ]
+
+    def __str__(self):
+        return f'{self.tenant.name} {self.scope} {self.window_start:%Y-%m-%d %H:00}: {self.count}'
 
 
 class WebhookConfig(models.Model):

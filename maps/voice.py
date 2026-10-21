@@ -154,6 +154,7 @@ def voice_logs(request):
             'rep': log.rep.name if log.rep else None,
             'caller_number': log.caller_number,
             'call_sid': log.twilio_call_sid,
+            'channel': log.channel,
             'transcript': log.transcript[:500] if log.transcript else '',
             'summary': log.summary,
             'created_at': str(log.created_at),
