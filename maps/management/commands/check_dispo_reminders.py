@@ -7,6 +7,11 @@ Flow:
   - 3 hours after appointment: SMS reminder to rep
   - 4 hours after appointment (1 hr after SMS): outbound call via Alfred
   - Skips reps who are currently in another appointment (window: -1hr to +2hr)
+
+An organization whose reps Wednesday's rep loop reminds instead
+(Organization.reminders_by_wednesday, L12; off by default) gets none of
+these: no SMS, no call, no follow-up reminder. Its run only lists the ids of
+the leads it would have reminded, so the skip can be seen in the log.
 """
 import base64
 import json
@@ -82,20 +87,28 @@ class Command(BaseCommand):
         for org in Organization.objects.filter(is_active=True).order_by('id'):
             with org_context(org.id):
                 self.stdout.write(f'--- {org.name} ---')
+                if org.reminders_by_wednesday:
+                    self._report_skipped(now)
+                    continue
                 self._check_dispo_reminders(now, alfred_declines=org.alfred_declines)
                 self._check_followup_reminders(now)
         self.stdout.write('Done.')
 
-    def _check_dispo_reminders(self, now, alfred_declines=False):
-        # No SMS or calls after 9pm Eastern
-        if now.hour >= 21:
-            self.stdout.write('Past 9pm — skipping dispo reminders.')
-            return
+    def _report_skipped(self, now):
+        # L12: Wednesday's rep loop reminds this organization's reps. Nothing
+        # is sent or written; the leads Sutton would have reminded are listed
+        # by id (never a name or a number).
+        dispo = list(self._overdue_dispo_leads(now).values_list('id', flat=True))
+        followup = list(self._followup_leads_due(now).values_list('id', flat=True))
+        self.stdout.write(
+            'Reminders by Wednesday (L12): Sutton sends none for this organization. '
+            f'Would have reminded — dispo: {dispo or "none"}; follow-up: {followup or "none"}'
+        )
 
+    def _overdue_dispo_leads(self, now):
         three_hours_ago = now - timedelta(hours=3)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        overdue_leads = Lead.objects.filter(
+        return Lead.objects.filter(
             appointment_datetime__isnull=False,
             appointment_datetime__gte=today_start,
             appointment_datetime__lte=three_hours_ago,
@@ -105,6 +118,25 @@ class Command(BaseCommand):
             rep__is_active=True,
             rep__phone_number__gt='',
         ).select_related('rep')
+
+    def _followup_leads_due(self, now):
+        return Lead.objects.filter(
+            follow_up_date=now.date(),
+            follow_up_reminder_sent_at__isnull=True,
+            disposition__in=('follow_up', 'cpfu'),
+            cancelled=False,
+            rep__isnull=False,
+            rep__is_active=True,
+            rep__phone_number__gt='',
+        ).select_related('rep')
+
+    def _check_dispo_reminders(self, now, alfred_declines=False):
+        # No SMS or calls after 9pm Eastern
+        if now.hour >= 21:
+            self.stdout.write('Past 9pm — skipping dispo reminders.')
+            return
+
+        overdue_leads = self._overdue_dispo_leads(now)
 
         if not overdue_leads.exists():
             self.stdout.write('No overdue dispo leads found.')
@@ -154,18 +186,9 @@ class Command(BaseCommand):
             self.stdout.write('Past 9pm — skipping follow-up reminders.')
             return
 
-        today = now.date()
         current_time = now.time()
 
-        followup_leads = Lead.objects.filter(
-            follow_up_date=today,
-            follow_up_reminder_sent_at__isnull=True,
-            disposition__in=('follow_up', 'cpfu'),
-            cancelled=False,
-            rep__isnull=False,
-            rep__is_active=True,
-            rep__phone_number__gt='',
-        ).select_related('rep')
+        followup_leads = self._followup_leads_due(now)
 
         if not followup_leads.exists():
             self.stdout.write('No follow-up reminders due.')
