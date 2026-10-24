@@ -7,10 +7,19 @@ reps, and Sutton's reminder worker sends them nothing.
 
 It touches that one column (Organization.reminders_by_wednesday) of that one
 organization and nothing else; it prints what it was and what it is now.
+
+Turning it OFF hands reminders back to Sutton, which catches up at its next
+run (every 15 minutes): every lead due a reminder today is reminded at once.
+So turn Wednesday's rep loop off first, and prefer doing it after 9 PM New
+York. "off" prints the ids of the leads Sutton's next run would remind.
 """
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from django.core.management.base import BaseCommand, CommandError
 
 from maps.models import Organization
+from maps.tenancy import org_context
 
 
 class Command(BaseCommand):
@@ -33,3 +42,11 @@ class Command(BaseCommand):
             f"{org.name}: reminders_by_wednesday was {'on' if before else 'off'}, "
             f"now {'on' if org.reminders_by_wednesday else 'off'}"
         )
+        if before and not org.reminders_by_wednesday:
+            from maps.management.commands.check_dispo_reminders import Command as Reminders
+            with org_context(org.id):
+                dispo, followup = Reminders().due_ids(datetime.now(ZoneInfo('America/New_York')))
+            self.stdout.write(
+                "Sutton's next reminder run will remind — "
+                f'dispo: {dispo or "none"}; follow-up: {followup or "none"}'
+            )

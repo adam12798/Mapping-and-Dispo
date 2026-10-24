@@ -94,15 +94,25 @@ class Command(BaseCommand):
                 self._check_followup_reminders(now)
         self.stdout.write('Done.')
 
+    def due_ids(self, now):
+        """The ids of this organization's leads a reminder is due for now — an
+        overdue disposition with its call not yet made, or a follow-up due
+        today — before the 9 PM cutoff (the in-appointment check aside)."""
+        if now.hour >= 21:
+            return [], []
+        dispo = list(self._overdue_dispo_leads(now).filter(dispo_call_made_at__isnull=True)
+                     .values_list('id', flat=True))
+        followup = list(self._followup_leads_due(now).values_list('id', flat=True))
+        return dispo, followup
+
     def _report_skipped(self, now):
         # L12: Wednesday's rep loop reminds this organization's reps. Nothing
-        # is sent or written; the leads Sutton would have reminded are listed
-        # by id (never a name or a number).
-        dispo = list(self._overdue_dispo_leads(now).values_list('id', flat=True))
-        followup = list(self._followup_leads_due(now).values_list('id', flat=True))
+        # is sent or written; the leads due a reminder are listed by id (never
+        # a name or a number).
+        dispo, followup = self.due_ids(now)
         self.stdout.write(
             'Reminders by Wednesday (L12): Sutton sends none for this organization. '
-            f'Would have reminded — dispo: {dispo or "none"}; follow-up: {followup or "none"}'
+            f'Due, not sent — dispo: {dispo or "none"}; follow-up: {followup or "none"}'
         )
 
     def _overdue_dispo_leads(self, now):

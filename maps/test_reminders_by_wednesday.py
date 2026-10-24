@@ -8,6 +8,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 
 from .models import Lead, Organization
 from .tests import TenancyBase
@@ -55,22 +56,34 @@ class RemindersByWednesdayTests(TenancyBase):
         self.assertEqual(sorted(sms), ['6175550002', '6175550002'])  # Team Sunshine's, unchanged
         self.assertEqual(calls, [])
         self.assertIn('Reminders by Wednesday (L12): Sutton sends none for this organization. '
-                      f'Would have reminded — dispo: [{self.v_lead.id}]; follow-up: [{v_follow.id}]', out)
+                      f'Due, not sent — dispo: [{self.v_lead.id}]; follow-up: [{v_follow.id}]', out)
         # nothing is written on a skipped lead
         v = Lead.all_objects.get(id=self.v_lead.id)
         self.assertIsNone(v.dispo_reminder_sent_at)
         self.assertIsNone(Lead.all_objects.get(id=v_follow.id).follow_up_reminder_sent_at)
         ventana_part = out.split('--- Team Sunshine')[0]
-        for name in ('Follow Up', 'Vera Ventana'):
-            self.assertNotIn(name, ventana_part)  # ids only, never a name
+        for word in ('Follow Up', 'Vera Ventana', 'V Rep', '6175550001', '6175551111'):
+            self.assertNotIn(word, ventana_part)  # ids only, never a name or a number
 
     def test_on_also_skips_the_alfred_call(self):
         Organization.objects.filter(id=self.ventana.id).update(reminders_by_wednesday=True)
         for lead in (self.v_lead, self.s_lead):
             Lead.all_objects.filter(id=lead.id).update(
                 dispo_reminder_sent_at=datetime(2026, 11, 2, 13, 0, tzinfo=EASTERN))
-        _sms, calls, _out = self.run_worker()
+        _sms, calls, out = self.run_worker()
         self.assertEqual(calls, [self.s_lead.id])
+        self.assertIsNone(Lead.all_objects.get(id=self.v_lead.id).dispo_call_made_at)
+        # its SMS went at 13:00 and its call is still due: listed
+        self.assertIn(f'Due, not sent — dispo: [{self.v_lead.id}]', out)
+        # both done: nothing is due
+        Lead.all_objects.filter(id=self.v_lead.id).update(dispo_call_made_at=datetime(2026, 11, 2, 14, 0, tzinfo=EASTERN))
+        self.assertIn('Due, not sent — dispo: none', self.run_worker()[2])
+
+    def test_on_after_9pm_lists_nothing_due(self):
+        Organization.objects.filter(id=self.ventana.id).update(reminders_by_wednesday=True)
+        sms, calls, out = self.run_worker(at=datetime(2026, 11, 2, 21, 5, tzinfo=EASTERN))
+        self.assertIn('Due, not sent — dispo: none; follow-up: none', out)
+        self.assertEqual((sms, calls), ([], []))  # Team Sunshine's own 9 PM cutoff, as before
 
     def test_the_switch_command_touches_one_column_of_one_org(self):
         out = StringIO()
@@ -81,5 +94,9 @@ class RemindersByWednesdayTests(TenancyBase):
         out = StringIO()
         call_command('wednesday_reminders', 'ventana', stdout=out)
         self.assertIn('was on, now on', out.getvalue())
-        call_command('wednesday_reminders', 'ventana', 'off', stdout=StringIO())
+        out = StringIO()
+        call_command('wednesday_reminders', 'ventana', 'off', stdout=out)
         self.assertFalse(Organization.objects.get(id=self.ventana.id).reminders_by_wednesday)
+        self.assertIn("Sutton's next reminder run will remind — dispo:", out.getvalue())
+        with self.assertRaises(CommandError):
+            call_command('wednesday_reminders', 'nobody', 'on', stdout=StringIO())
