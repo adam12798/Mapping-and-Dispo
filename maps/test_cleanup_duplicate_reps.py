@@ -8,7 +8,8 @@ from unittest import mock
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
-from django.core.management.base import CommandError
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from .models import Lead, Rep, TimeOffRequest, UserProfile, VoiceCallLog
 from .tests import TenancyBase
@@ -41,6 +42,14 @@ class CleanupBase(TenancyBase):
         call_command('cleanup_duplicate_reps', *args, stdout=out)
         return out.getvalue()
 
+    def refused(self, *args):
+        """Run expecting a refusal: it is printed to stdout and the command exits 1."""
+        out = StringIO()
+        with self.assertRaises(SystemExit) as cm:
+            call_command('cleanup_duplicate_reps', *args, stdout=out)
+        self.assertEqual(cm.exception.code, 1)
+        return out.getvalue()
+
     def ids(self, org):
         return set(Rep.all_objects.filter(organization=org).values_list('id', flat=True))
 
@@ -62,6 +71,13 @@ class DryRunTests(CleanupBase):
         self.assertIn('nothing deleted', out)
         self.assertEqual(self.ids(self.ventana), before_v)
         self.assertEqual(self.ids(self.sunshine), before_s)
+
+    def test_a_dry_run_writes_nothing_anywhere(self):
+        with CaptureQueriesContext(connection) as ctx:
+            self.run_cmd()
+        writes = [q['sql'] for q in ctx.captured_queries
+                  if q['sql'].lstrip().upper().startswith(('INSERT', 'UPDATE', 'DELETE'))]
+        self.assertEqual(writes, [])
 
     def test_no_full_number_in_the_output(self):
         out = self.run_cmd()
@@ -100,8 +116,8 @@ class ApplyTests(CleanupBase):
     def test_refuses_and_changes_nothing_if_team_sunshines_count_would_change(self):
         before_v = self.ids(self.ventana)
         with mock.patch('maps.management.commands.cleanup_duplicate_reps.sunshine_count', side_effect=[10, 9]):
-            with self.assertRaisesRegex(CommandError, "Team Sunshine's rep count would change"):
-                self.run_cmd('--apply')
+            out = self.refused('--apply')
+        self.assertIn("REFUSED: Team Sunshine's rep count would change (10 → 9); nothing deleted", out)
         self.assertEqual(self.ids(self.ventana), before_v)
 
     def test_refuses_if_a_reference_appears_before_the_delete(self):
@@ -114,6 +130,37 @@ class ApplyTests(CleanupBase):
             # the listing pass reads the truth; the re-check under the lock sees a new lead
             return real(rep) if calls['n'] <= 4 else [('maps.Lead.rep', 1)]
         with mock.patch('maps.management.commands.cleanup_duplicate_reps.references', side_effect=late):
-            with self.assertRaisesRegex(CommandError, 'gained a reference'):
-                self.run_cmd('--apply')
+            out = self.refused('--apply')
+        self.assertIn('gained a reference during the run; nothing deleted', out)
         self.assertEqual(self.ids(self.ventana), before_v)
+
+    def test_refuses_a_delete_that_would_cascade(self):
+        # the reference check blinded: the cascade check alone stops the delete
+        off = TimeOffRequest.all_objects.create(rep=self.v_pat, start_date=date(2026, 11, 2), organization=self.ventana)
+        before_v = self.ids(self.ventana)
+        with mock.patch('maps.management.commands.cleanup_duplicate_reps.references', return_value=[]):
+            out = self.refused('--apply')
+        self.assertIn('the delete would cascade into other rows', out)
+        self.assertEqual(self.ids(self.ventana), before_v)
+        self.assertTrue(TimeOffRequest.all_objects.filter(id=off.id).exists())
+
+    def test_refuses_if_a_row_changed_after_it_was_listed(self):
+        from maps.management.commands import cleanup_duplicate_reps as cmd
+        real = cmd.candidates
+        before_v, before_s = self.ids(self.ventana), self.ids(self.sunshine)
+        for change in ({'is_active': True}, {'organization': self.sunshine}):
+            def listed_then_changed(ventana, sunshine, change=change):
+                rows = real(ventana, sunshine)
+                Rep.all_objects.filter(id=self.v_pat.id).update(**change)
+                return rows
+            with mock.patch.object(cmd, 'candidates', side_effect=listed_then_changed):
+                out = self.refused('--apply')
+            self.assertIn('a row changed during the run', out)
+            Rep.all_objects.filter(id=self.v_pat.id).update(is_active=False, organization=self.ventana)
+        self.assertEqual(self.ids(self.ventana), before_v)
+        self.assertEqual(self.ids(self.sunshine), before_s)
+
+    def test_references_walk_the_same_relations_a_delete_does(self):
+        from django.db.models.deletion import get_candidate_relations_to_delete
+        labels = sorted(f'{r.related_model._meta.label}.{r.field.name}' for r in get_candidate_relations_to_delete(Rep._meta))
+        self.assertEqual(labels, ['maps.Lead.rep', 'maps.TimeOffRequest.rep', 'maps.UserProfile.rep', 'maps.VoiceCallLog.rep'])
