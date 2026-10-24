@@ -8,7 +8,9 @@ class OrganizationAdmin(admin.ModelAdmin):
     """Superusers only, and only Alfred's per-organization switch: turning
     `alfred_declines` on makes Alfred decline that organization's callers
     (maps/alfred_org.py). Nothing else about an organization is edited here,
-    none is added or deleted. Django's admin log records each change."""
+    none is added or deleted. Django's admin log records each change. The
+    admin site itself also requires is_staff; an account without it uses
+    `python manage.py alfred_declines <slug> on|off` instead."""
     list_display = ('name', 'slug', 'is_active', 'is_default_inbound', 'alfred_declines')
     fields = ('name', 'slug', 'is_active', 'is_default_inbound', 'alfred_declines')
     readonly_fields = ('name', 'slug', 'is_active', 'is_default_inbound')

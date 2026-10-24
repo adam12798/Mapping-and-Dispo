@@ -352,6 +352,30 @@ async def get_drive_time(lat1, lng1, lat2, lng2):
     return None
 
 
+async def _session_org(caller_number, reminder_lead_id, org_id):
+    """maps/alfred_org.session_org, from the stream's event loop."""
+    import django
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
+    django.setup()
+    from asgiref.sync import sync_to_async
+    from maps.alfred_org import session_org
+    return await sync_to_async(session_org)(caller_number, reminder_lead_id, org_id)
+
+
+async def _strict_mode():
+    import django
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
+    django.setup()
+    from asgiref.sync import sync_to_async
+    from maps.alfred_org import strict_mode
+    return await sync_to_async(strict_mode)()
+
+
+def _log_decline(kind, number, result):
+    from maps.alfred_org import log_decline
+    log_decline(kind, number, result)
+
+
 def fixed_org_id(value):
     """The organization a call was fixed to when it was answered (the
     stream's orgId parameter, maps/alfred_org.py), or None: no organization
@@ -846,6 +870,8 @@ async def media_stream(ws: WebSocket):
     call_sid = ''
     reminder_lead_id = ''
     call_org_id = None  # fixed at answer time when an organization asks Alfred to decline (maps/alfred_org.py)
+    started = False     # the stream's start event arrived
+    refused = False     # the stream refused the call (maps/alfred_org.py session_org)
     transcript_parts = []
     openai_ws = None
     session_ready = asyncio.Event()
@@ -866,7 +892,7 @@ async def media_stream(ws: WebSocket):
 
         async def forward_twilio_to_openai():
             """Forward audio from Twilio to OpenAI."""
-            nonlocal stream_sid, caller_number, call_sid, reminder_lead_id, rep_context, call_org_id
+            nonlocal stream_sid, caller_number, call_sid, reminder_lead_id, rep_context, call_org_id, started, refused
             try:
                 while True:
                     data = await ws.receive_text()
@@ -879,7 +905,18 @@ async def media_stream(ws: WebSocket):
                         caller_number = custom.get('callerNumber', '')
                         reminder_lead_id = custom.get('reminderLeadId', '')
                         call_org_id = fixed_org_id(custom.get('orgId', ''))
+                        started = True
                         logger.info(f'Stream started: sid={stream_sid}, call={call_sid}, caller={caller_number}, reminder={reminder_lead_id}')
+
+                        # While an organization asks Alfred to decline, the
+                        # stream checks the call's organization once more before
+                        # any lookup, and refuses it if it does not hold.
+                        session = await _session_org(caller_number, reminder_lead_id, call_org_id)
+                        if session['decline']:
+                            refused = True
+                            _log_decline('stream', caller_number, session)
+                            break
+                        call_org_id = session['org_id']
 
                         # Look up caller (rep or manager) and their appointments
                         rep_context = await get_rep_context(caller_number, reminder_lead_id=reminder_lead_id,
@@ -1113,7 +1150,12 @@ async def media_stream(ws: WebSocket):
             await openai_ws.close()
         logger.info('Media stream connection closed')
 
-        # Post-call: always save call log
+        # Post-call: always save call log — except, while an organization asks
+        # Alfred to decline, for a call the stream refused or that never
+        # started: it writes nothing in any organization's tables.
+        if refused or (not started and await _strict_mode()):
+            logger.info('Call not saved: refused, or it never started')
+            return
         full_transcript = '\n'.join(transcript_parts)
         logger.info(f'Call ended. Caller: {caller_number}, SID: {call_sid}, transcript parts: {len(transcript_parts)}')
         logger.info(f'Transcript: {full_transcript[:300] if full_transcript else "(empty)"}')

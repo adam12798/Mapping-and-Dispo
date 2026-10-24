@@ -18,7 +18,9 @@ class Organization(models.Model):
     is_default_inbound = models.BooleanField(default=False)
     # Alfred (the voice assistant) politely declines this organization's
     # callers and makes no reminder calls for it. Off by default: nothing
-    # changes until a superuser turns it on (Django admin). While any active
+    # changes until it is turned on — `python manage.py alfred_declines
+    # <slug> on`, or the Django admin for a superuser who is also staff
+    # (is_staff: Django's admin requires it). While any active
     # organization has it on, every call's organization is resolved strictly
     # at answer time (maps/alfred_org.py).
     alfred_declines = models.BooleanField(default=False)

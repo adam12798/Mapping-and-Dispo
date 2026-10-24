@@ -19,10 +19,17 @@ answer time, before Alfred says a word:
 
 The organization fixed here travels with the call (a stream parameter), and
 the call session uses it for everything it reads and writes — it is never
-re-resolved mid-call. A reminder call (the worker's outbound call about one
-lead) belongs to that lead's organization. A declined call reaches neither
-the AI nor the database: nothing is read, written or logged in any
-organization's tables.
+re-resolved mid-call. The stream checks it once more when it starts
+(session_org): a stream with no orgId, or one whose organization no longer
+answers or no longer matches the caller, is refused before any lookup. A
+reminder call (the worker's outbound call about one lead) belongs to that
+lead's organization. Resolving a call reads only the phone numbers and
+organizations of reps and managers (and a reminder lead's organization); a
+declined call reaches neither the AI nor any organization's tables — nothing
+is written.
+
+While no organization declines, voice_answer makes this one query
+(strict_mode) and nothing else changes.
 """
 import logging
 
@@ -70,14 +77,17 @@ def resolve_caller(caller_number):
     clean = clean_phone(caller_number)
     org_ids = set()
     if clean:
+        # Only the phone number and the organization of each person is read.
         org_ids = {
-            r.organization_id for r in Rep.all_objects.filter(is_active=True, organization__isnull=False)
-            if clean_phone(r.phone_number) == clean
+            org_id for org_id, phone in Rep.all_objects.filter(is_active=True, organization__isnull=False)
+            .values_list('organization_id', 'phone_number')
+            if clean_phone(phone) == clean
         }
         if not org_ids:
             org_ids = {
-                m.organization_id for m in Manager.all_objects.filter(organization__isnull=False)
-                if clean_phone(m.phone_number) == clean
+                org_id for org_id, phone in Manager.all_objects.filter(organization__isnull=False)
+                .values_list('organization_id', 'phone_number')
+                if clean_phone(phone) == clean
             }
     if len(org_ids) > 1:
         return {'org_id': None, 'decline': 'both_orgs'}
@@ -97,6 +107,21 @@ def resolve_reminder(lead_id):
     if org_id is None or not _answers(org_id):
         return {'org_id': org_id, 'decline': 'org_declines'}
     return {'org_id': org_id, 'decline': None}
+
+
+def session_org(caller_number, reminder_lead_id, org_id):
+    """The stream's own check when it starts. While no organization declines:
+    {'org_id': org_id as given, 'decline': None, 'strict': False} — the call
+    runs as it always has. Otherwise the call is resolved again exactly as it
+    was answered; it is refused when that declines, or when the stream's
+    orgId (from the answer's TwiML) is missing or names another organization —
+    a stream opened without our TwiML, or one answered before the switch moved."""
+    if not strict_mode():
+        return {'org_id': org_id, 'decline': None, 'strict': False}
+    result = resolve_reminder(reminder_lead_id) if reminder_lead_id else resolve_caller(caller_number)
+    if not result['decline'] and result['org_id'] != org_id:
+        result = {'org_id': result['org_id'], 'decline': 'org_unconfirmed'}
+    return {**result, 'strict': True}
 
 
 def log_decline(kind, number, result):

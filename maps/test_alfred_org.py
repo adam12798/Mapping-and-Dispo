@@ -141,6 +141,42 @@ class StrictResolutionTests(AlfredBase):
         self.assertEqual(sent, [self.v_lead.id])
 
 
+class StreamCheckTests(AlfredBase):
+    """The stream checks the call's organization once more when it starts
+    (session_org): while an organization declines, a stream with no orgId,
+    or a different one, is refused; with none declining, it is passed through."""
+
+    def test_with_none_declining_the_stream_runs_as_before(self):
+        from .alfred_org import session_org
+        self.assertEqual(session_org(f'+1{BOTH}', '', None), {'org_id': None, 'decline': None, 'strict': False})
+        self.assertEqual(session_org(f'+1{S_ONLY}', '', 7), {'org_id': 7, 'decline': None, 'strict': False})
+
+    def test_strict_the_stream_must_match_the_answer(self):
+        from .alfred_org import session_org
+        self.decline_sunshine()
+        ok = session_org(f'+1{V_ONLY}', '', self.ventana.id)
+        self.assertEqual((ok['org_id'], ok['decline'], ok['strict']), (self.ventana.id, None, True))
+        self.assertEqual(session_org(f'+1{V_ONLY}', '', None)['decline'], 'org_unconfirmed')  # no orgId
+        self.assertEqual(session_org(f'+1{V_ONLY}', '', self.sunshine.id)['decline'], 'org_unconfirmed')
+        self.assertEqual(session_org(f'+1{BOTH}', '', self.ventana.id)['decline'], 'both_orgs')
+        self.assertEqual(session_org(f'+1{S_ONLY}', '', self.sunshine.id)['decline'], 'org_declines')
+        self.assertEqual(session_org(f'+1{V_ONLY}', str(self.v_lead.id), self.ventana.id)['decline'], None)
+        self.assertEqual(session_org(f'+1{S_ONLY}', str(self.s_lead.id), self.sunshine.id)['decline'], 'org_declines')
+
+    def test_the_call_log_is_written_in_the_fixed_org(self):
+        import voice_ws
+        token = set_current_org(None)
+        try:
+            with mock.patch.object(voice_ws, 'OPENAI_API_KEY', 'sk-test-not-used'):
+                async_to_sync(voice_ws.save_call_and_extract)(f'+1{BOTH}', 'CA00000000000000000000000000000001', '',
+                                                              org_id=self.ventana.id)
+        finally:
+            reset_current_org(token)
+        log = VoiceCallLog.all_objects.get(twilio_call_sid='CA00000000000000000000000000000001')
+        self.assertEqual(log.organization_id, self.ventana.id)
+        self.assertEqual(log.rep_id, self.v_both.id)
+
+
 class SwitchTests(TestCase):
     def test_the_command_sets_one_column_of_one_org(self):
         out = StringIO()
@@ -167,6 +203,16 @@ class SwitchTests(TestCase):
         request.user = staff
         self.assertFalse(model_admin.has_module_permission(request))
         self.assertFalse(model_admin.has_change_permission(request))
+
+    def test_a_superuser_without_is_staff_uses_the_command(self):
+        """Django's admin site requires is_staff: such an account is sent to
+        the admin login — which is why the command exists."""
+        User.objects.create_user('owner2', password='pw', is_superuser=True)
+        client = Client()
+        client.login(username='owner2', password='pw')
+        response = client.get('/admin/maps/organization/')
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/admin/login/', response['Location'])
 
 
 def run_worker(test):
