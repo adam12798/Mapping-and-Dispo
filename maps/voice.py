@@ -5,6 +5,9 @@ import websockets
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
+from xml.sax.saxutils import escape
+
+from maps.alfred_org import decline_text, log_decline, resolve_caller, resolve_reminder, strict_mode
 from maps.views import manager_required
 from maps.twilio_security import twilio_signature_log_only
 
@@ -175,16 +178,37 @@ def voice_answer(request):
     caller = request.POST.get('From', '') or request.GET.get('From', '')
     call_sid = request.POST.get('CallSid', '') or request.GET.get('CallSid', '')
 
+    # Alfred answers only the organizations that have not asked it to
+    # decline (maps/alfred_org.py). While none has, this is skipped and the
+    # call is connected exactly as before.
+    org_param = ''
+    if strict_mode():
+        result = resolve_caller(caller)
+        if result['decline']:
+            log_decline('inbound', caller, result)
+            return _declined(result)
+        org_param = f'\n            <Parameter name="orgId" value="{result["org_id"]}" />'
+
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
         <Stream url="{protocol}://{host}/media-stream">
             <Parameter name="callerNumber" value="{caller}" />
-            <Parameter name="callSid" value="{call_sid}" />
+            <Parameter name="callSid" value="{call_sid}" />{org_param}
         </Stream>
     </Connect>
 </Response>"""
 
+    return HttpResponse(twiml, content_type='text/xml')
+
+
+def _declined(result):
+    """TwiML for a call Alfred declines: one polite sentence, then hang up."""
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say>{escape(decline_text(result))}</Say>
+    <Hangup />
+</Response>"""
     return HttpResponse(twiml, content_type='text/xml')
 
 
@@ -201,13 +225,23 @@ def voice_reminder_call(request):
     call_sid = request.POST.get('CallSid', '') or request.GET.get('CallSid', '')
     lead_id = request.GET.get('lead_id', '')
 
+    # A reminder call belongs to its lead's organization (maps/alfred_org.py),
+    # fixed here; skipped while no organization asks Alfred to decline.
+    org_param = ''
+    if strict_mode():
+        result = resolve_reminder(lead_id)
+        if result['decline']:
+            log_decline('reminder', caller, result)
+            return _declined(result)
+        org_param = f'\n            <Parameter name="orgId" value="{result["org_id"]}" />'
+
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
         <Stream url="{protocol}://{host}/media-stream">
             <Parameter name="callerNumber" value="{caller}" />
             <Parameter name="callSid" value="{call_sid}" />
-            <Parameter name="reminderLeadId" value="{lead_id}" />
+            <Parameter name="reminderLeadId" value="{lead_id}" />{org_param}
         </Stream>
     </Connect>
 </Response>"""

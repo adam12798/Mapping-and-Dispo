@@ -82,11 +82,11 @@ class Command(BaseCommand):
         for org in Organization.objects.filter(is_active=True).order_by('id'):
             with org_context(org.id):
                 self.stdout.write(f'--- {org.name} ---')
-                self._check_dispo_reminders(now)
+                self._check_dispo_reminders(now, alfred_declines=org.alfred_declines)
                 self._check_followup_reminders(now)
         self.stdout.write('Done.')
 
-    def _check_dispo_reminders(self, now):
+    def _check_dispo_reminders(self, now, alfred_declines=False):
         # No SMS or calls after 9pm Eastern
         if now.hour >= 21:
             self.stdout.write('Past 9pm — skipping dispo reminders.')
@@ -138,6 +138,12 @@ class Command(BaseCommand):
 
             sms_age = now - lead.dispo_reminder_sent_at
             if sms_age >= timedelta(hours=1) and not lead.dispo_call_made_at:
+                # Alfred declines this organization (Organization.alfred_declines,
+                # maps/alfred_org.py): it makes no reminder call for it. The SMS
+                # above is unchanged; nothing is written for the skipped call.
+                if alfred_declines:
+                    self.stdout.write(f'  No call (Alfred declines this organization) re: lead {lead.id}')
+                    continue
                 self.stdout.write(f'  CALL → {rep.name} re: {lead.homeowner_name}')
                 make_outbound_call(rep.phone_number, lead.id)
                 lead.dispo_call_made_at = now
