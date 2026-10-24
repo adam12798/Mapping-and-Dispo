@@ -161,6 +161,12 @@ class ApplyTests(CleanupBase):
         self.assertEqual(self.ids(self.sunshine), before_s)
 
     def test_references_walk_the_same_relations_a_delete_does(self):
-        from django.db.models.deletion import get_candidate_relations_to_delete
-        labels = sorted(f'{r.related_model._meta.label}.{r.field.name}' for r in get_candidate_relations_to_delete(Rep._meta))
+        from django.db.models import deletion
+        from maps.management.commands import cleanup_duplicate_reps as cmd
+        labels = sorted(f'{r.related_model._meta.label}.{r.field.name}'
+                        for r in deletion.get_candidate_relations_to_delete(Rep._meta))
         self.assertEqual(labels, ['maps.Lead.rep', 'maps.TimeOffRequest.rep', 'maps.UserProfile.rep', 'maps.VoiceCallLog.rep'])
+        with mock.patch.object(cmd, 'get_candidate_relations_to_delete',
+                               wraps=deletion.get_candidate_relations_to_delete) as walked:
+            self.assertEqual(cmd.references(self.v_kim), [('maps.Lead.rep', 1)])
+        walked.assert_called_once_with(Rep._meta)
