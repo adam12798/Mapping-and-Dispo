@@ -910,12 +910,15 @@ async def media_stream(ws: WebSocket):
 
                         # While an organization asks Alfred to decline, the
                         # stream checks the call's organization once more before
-                        # any lookup, and refuses it if it does not hold.
+                        # any lookup, and refuses it if it does not hold. The
+                        # call counts as refused until the check returns: if it
+                        # raises, nothing is written.
+                        refused = True
                         session = await _session_org(caller_number, reminder_lead_id, call_org_id)
                         if session['decline']:
-                            refused = True
                             _log_decline('stream', caller_number, session)
                             break
+                        refused = False
                         call_org_id = session['org_id']
 
                         # Look up caller (rep or manager) and their appointments
