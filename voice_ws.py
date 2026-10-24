@@ -1152,18 +1152,24 @@ async def media_stream(ws: WebSocket):
 
         # Post-call: always save call log — except, while an organization asks
         # Alfred to decline, for a call the stream refused or that never
-        # started: it writes nothing in any organization's tables.
-        if refused or (not started and await _strict_mode()):
-            logger.info('Call not saved: refused, or it never started')
-            return
-        full_transcript = '\n'.join(transcript_parts)
-        logger.info(f'Call ended. Caller: {caller_number}, SID: {call_sid}, transcript parts: {len(transcript_parts)}')
-        logger.info(f'Transcript: {full_transcript[:300] if full_transcript else "(empty)"}')
+        # started: it writes nothing in any organization's tables. (A failed
+        # check skips the save: nothing is written on a doubt.)
         try:
-            await save_call_and_extract(caller_number, call_sid, full_transcript, rep=rep_context.get('rep'),
-                                        org_id=call_org_id)
+            skip = refused or (not started and await _strict_mode())
         except Exception as e:
-            logger.error(f'Failed to save call log: {e}')
+            logger.error(f'Could not check whether to save the call log: {e}')
+            skip = True
+        if skip:
+            logger.info('Call not saved: refused, never started, or unchecked')
+        else:
+            full_transcript = '\n'.join(transcript_parts)
+            logger.info(f'Call ended. Caller: {caller_number}, SID: {call_sid}, transcript parts: {len(transcript_parts)}')
+            logger.info(f'Transcript: {full_transcript[:300] if full_transcript else "(empty)"}')
+            try:
+                await save_call_and_extract(caller_number, call_sid, full_transcript, rep=rep_context.get('rep'),
+                                            org_id=call_org_id)
+            except Exception as e:
+                logger.error(f'Failed to save call log: {e}')
 
 
 async def save_call_and_extract(caller_number, call_sid, transcript, rep=None, org_id=None):
