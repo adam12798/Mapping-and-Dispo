@@ -12,6 +12,7 @@ import re
 from unittest import mock
 from zoneinfo import ZoneInfo
 
+from django.core import signing
 from django.db import connection
 from django.test import Client, TestCase, override_settings
 
@@ -362,7 +363,9 @@ class DateTests(AlfredTextBase):
         self.assertIsNone(out['next_question'])
         self.assertNothingWritten(before)
         self.fired.assert_not_called()
-        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 1)
+        # the ruling (l): nothing at all — not even the text's call log — until the rep confirms
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 0)
+        self.assertTrue(out['pending']['token'])
 
     def test_a_move_with_no_time_asks_for_one(self):
         self.model.fixed = {'understood': True, 'appointment_moved_to_date': '2026-10-22'}
@@ -640,7 +643,7 @@ class RealCompletionTests(TestCase):
         with mock.patch('openai.OpenAI', fake):
             args = alfred_text._complete([{'role': 'user', 'content': 'Sold it!'}], tool)
         self.assertEqual(args, {'understood': True, 'disposition': 'sale'})
-        fake.assert_called_once_with(api_key='sk-test', timeout=20, max_retries=1)
+        fake.assert_called_once_with(api_key='sk-test', timeout=20, max_retries=0)  # the ruling (n): no client retry
         kwargs = fake.return_value.chat.completions.create.call_args.kwargs
         self.assertEqual(kwargs['model'], 'gpt-4o-mini')
         self.assertEqual(kwargs['tools'], [tool])
@@ -676,3 +679,178 @@ class WebhookTests(AlfredTextBase):
                          {'id': str(self.lead.id), 'disposition': 'Sale',
                           'call_notes': 'Sold, credit passed and all contracts signed'})
         self.assertEqual(GHLWebhookLog.objects.filter(webhook_type='disposition_changed').count(), 1)
+
+
+class PendingMoveTests(AlfredTextBase):
+    """The owner's ruling (l), 2026-10-25: a text whose answer contains an
+    appointment move writes nothing; the whole exchange waits in a signed
+    token, applied exactly once when the rep confirms the move."""
+
+    MOVE = {'understood': True, 'disposition': 'cancel_door', 'sat': False,
+            'call_notes': 'Did not sit, wants another day', 'appointment_moved_to_date': '2026-10-22',
+            'appointment_moved_to_time': '18:00'}
+
+    def confirm(self, token, **body):
+        body = {'rep_id': self.v_rep.id, 'lead_id': self.lead.id, 'confirm_move': token, **body}
+        return Client().post(URL, data=json.dumps(body), content_type='application/json',
+                             HTTP_AUTHORIZATION=f'Bearer {self.v_tenant.api_key}')
+
+    def pending(self):
+        self.model.fixed = dict(self.MOVE)
+        return self.text("didn't sit, they cancelled, wants Thursday at 6").json()
+
+    def test_a_move_with_an_outcome_writes_nothing_and_returns_the_whole_exchange_pending(self):
+        before = self.fresh()
+        out = self.pending()
+        self.assertEqual(out['set'], {})
+        self.assertEqual(out['appointment_move'], {'date': '2026-10-22', 'time': '18:00'})
+        self.assertEqual(out['pending']['set'], {'disposition': 'cancel_door', 'sat': False,
+                                                 'call_notes': 'Did not sit, wants another day'})
+        self.assertEqual(out['pending']['expires_at'], (NOW + dt.timedelta(hours=72)).isoformat())
+        self.assertNothingWritten(before)
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 0)
+        self.fired.assert_not_called()
+
+    def test_the_confirmation_applies_the_exchange_once(self):
+        before = self.fresh()
+        token = self.pending()['pending']['token']
+        out = self.confirm(token).json()
+        self.assertEqual((out['confirmed'], out['already_applied']), (True, False))
+        self.assertEqual(out['set'], {'disposition': 'cancel_door', 'sat': False, 'call_notes': 'Did not sit, wants another day'})
+        self.assertEqual(out['appointment_move'], {'date': '2026-10-22', 'time': '18:00'})
+        lead = self.fresh()
+        self.assertEqual((lead.disposition, lead.sat, lead.call_notes), ('cancel_door', False, 'Did not sit, wants another day'))
+        self.assertIn("Val Rep: didn't sit, they cancelled, wants Thursday at 6", lead.call_transcript)
+        self.assertEqual(lead.appointment_datetime, before.appointment_datetime)  # a move is never written
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 1)
+        self.fired.assert_called_once()
+        # sent again: nothing more
+        again = self.confirm(token).json()
+        self.assertEqual((again['already_applied'], again['set']), (True, {}))
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 1)
+        self.assertEqual(self.fresh().call_transcript.count("wants Thursday at 6"), 1)
+        self.fired.assert_called_once()
+
+    def test_a_move_alone_confirms_its_exchange_into_the_call_log(self):
+        self.model.fixed = {'understood': True, 'appointment_moved_to_date': '2026-10-22', 'appointment_moved_to_time': '18:00'}
+        token = self.text('Homeowner asked to move it to Thursday at 6').json()['pending']['token']
+        out = self.confirm(token).json()
+        self.assertEqual((out['set'], out['confirmed']), ({}, True))
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 1)
+        self.assertEqual(self.confirm(token).json()['already_applied'], True)
+
+    def test_a_token_from_elsewhere_applies_nothing(self):
+        before = self.fresh()
+        self.assertEqual(self.confirm('not-a-token').status_code, 400)
+        forged = signing.dumps({'v': 1, 'lead': self.lead.id, 'rep': self.v_rep.id, 'writes': {'disposition': 'sale'},
+                                'exchange': 'x', 'summary': 'x', 'move': None}, salt='another.salt', compress=True)
+        self.assertEqual(self.confirm(forged).status_code, 400)
+        token = self.pending()['pending']['token']
+        self.assertEqual(self.confirm(token, rep_id=self.v_rep2.id).status_code, 409)  # another rep's confirmation
+        self.assertNothingWritten(before)
+
+    def test_a_token_for_another_lead_or_rep_is_refused(self):
+        token = self.pending()['pending']['token']
+        Lead.all_objects.filter(id=self.others_lead.id).update(rep=None)
+        res = self.confirm(token, lead_id=self.others_lead.id)
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 0)
+
+    def test_an_expired_token_is_refused(self):
+        token = self.pending()['pending']['token']
+        with mock.patch('maps.alfred_text.PENDING_MAX_AGE', -1):
+            res = self.confirm(token)
+        self.assertEqual(res.status_code, 410)
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 0)
+
+    def test_a_tampered_payload_is_refused(self):
+        token = signing.dumps({'v': 1, 'lead': self.lead.id, 'rep': self.v_rep.id, 'writes': {'appointment_datetime': 'x'},
+                               'exchange': 'x', 'summary': 'x', 'move': None},
+                              salt=alfred_text.PENDING_SALT, compress=True)
+        self.assertEqual(self.confirm(token).status_code, 400)  # a field a text cannot write
+
+    # ── the review of (l): the token is checked as if untrusted ──
+
+    def sign(self, **over):
+        payload = {'v': 2, 'pid': '0123456789abcdef', 'lead': self.lead.id, 'rep': self.v_rep.id,
+                   'issued': NOW.isoformat(), 'writes': {}, 'exchange': 'x', 'summary': 'x',
+                   'move': {'date': '2026-10-22', 'time': '18:00'}, 'next_question': None, 'still_empty': [], **over}
+        return signing.dumps(payload, key=alfred_text._pending_key(), salt=alfred_text.PENDING_SALT, compress=True)
+
+    def test_a_token_signed_with_secret_key_is_refused(self):
+        payload = {'v': 2, 'pid': '0123456789abcdef', 'lead': self.lead.id, 'rep': self.v_rep.id, 'issued': NOW.isoformat(),
+                   'writes': {'disposition': 'sale'}, 'exchange': 'x', 'summary': 'x',
+                   'move': {'date': '2026-10-22', 'time': '18:00'}, 'next_question': None, 'still_empty': []}
+        forged = signing.dumps(payload, salt=alfred_text.PENDING_SALT, compress=True)   # SECRET_KEY, the right salt
+        self.assertEqual(self.confirm(forged).status_code, 400)
+        self.assertEqual(self.fresh().disposition, '')
+
+    def test_bad_values_under_the_real_key_are_refused(self):
+        before = self.fresh()
+        for over in ({'writes': {'disposition': 'zzz'}}, {'writes': {'call_notes': 'x' * 201}},
+                     {'writes': {'sat': 'yes'}}, {'writes': {'follow_up_date': '2026-13-40'}},
+                     {'writes': {'follow_up_time': '6pm'}}, {'writes': {'adders': 7}}, {'writes': {'appointment_datetime': 'x'}},
+                     {'v': 1}, {'pid': 'nope'}, {'move': {'date': '2026-10-22'}}, {'still_empty': ['not_a_field']},
+                     {'exchange': ''}, {'summary': 'x' * 301}, {'issued': 'yesterday'}):
+            self.assertEqual(self.confirm(self.sign(**over)).status_code, 400, over)
+        self.assertNothingWritten(before)
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 0)
+
+    def test_text_with_a_confirmation_is_refused(self):
+        token = self.pending()['pending']['token']
+        self.assertEqual(self.confirm(token, text='and it went fine').status_code, 400)
+        self.assertEqual(self.confirm('x' * (alfred_text.PENDING_TOKEN_MAX + 1)).status_code, 400)
+        self.assertEqual(self.confirm(123).status_code, 400)
+
+    def test_a_newer_text_since_the_move_refuses_the_confirmation(self):
+        token = self.pending()['pending']['token']
+        self.model.fixed = {'understood': True, 'disposition': 'sale', 'sat': True, 'call_notes': 'Sold after all'}
+        self.text('sold it after all')
+        res = self.confirm(token)
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(self.fresh().disposition, 'sale')   # the newer answer stands
+
+    def test_the_confirmation_hands_back_what_to_ask_next(self):
+        self.model.fixed = {'understood': True, 'disposition': 'follow_up', 'sat': True, 'call_notes': 'Wants to think',
+                            'appointment_moved_to_date': '2026-10-22', 'appointment_moved_to_time': '18:00'}
+        out = self.text('follow up, and move it to thursday at 6').json()
+        confirmed = self.confirm(out['pending']['token']).json()
+        self.assertEqual((confirmed['next_question'], confirmed['still_empty']), (out['next_question'], out['still_empty']))
+        self.assertTrue(confirmed['still_empty'])
+
+    def test_a_confirmation_counts_against_the_rate_limit_and_never_calls_the_model(self):
+        token = self.pending()['pending']['token']
+        calls = len(self.model.calls)
+        with mock.patch('maps.alfred_text.TEXTS_PER_HOUR', 1):
+            self.assertEqual(self.confirm(token).status_code, 429)
+        self.assertEqual(len(self.model.calls), calls)
+        with override_settings(OPENAI_API_KEY='', ALFRED_PENDING_KEY='own-key'):
+            own = self.sign(writes={'sat': False})
+            self.assertEqual(self.confirm(own).status_code, 200)   # no model, no OpenAI key needed with its own key
+        with override_settings(OPENAI_API_KEY='', ALFRED_PENDING_KEY=''):
+            self.assertEqual(self.confirm(own).status_code, 503)
+        self.assertEqual(len(self.model.calls), calls)
+
+    def test_a_lead_that_changed_hands_before_the_confirmation_is_refused(self):
+        token = self.pending()['pending']['token']
+        Lead.all_objects.filter(id=self.lead.id).update(rep=self.v_rep2)
+        self.assertEqual(self.confirm(token).status_code, 403)   # _find_lead: now another rep's
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 0)
+
+    def test_a_replay_after_a_newer_text_still_reads_already_applied(self):
+        token = self.pending()['pending']['token']
+        self.assertEqual(self.confirm(token).json()['already_applied'], False)
+        self.model.fixed = {'understood': True, 'post_appt_notes': 'Called back later'}
+        self.text('called back later')
+        self.assertEqual(self.confirm(token).json()['already_applied'], True)   # not 409: it was applied
+
+    def test_secret_key_fallbacks_never_sign_a_confirmation(self):
+        payload = {'v': 2, 'pid': '0123456789abcdef', 'lead': self.lead.id, 'rep': self.v_rep.id, 'issued': NOW.isoformat(),
+                   'writes': {'disposition': 'sale'}, 'exchange': 'x', 'summary': 'x',
+                   'move': {'date': '2026-10-22', 'time': '18:00'}, 'next_question': None, 'still_empty': []}
+        old = 'an-old-public-key'
+        forged = signing.dumps(payload, key=old, salt=alfred_text.PENDING_SALT, compress=True)
+        with override_settings(SECRET_KEY_FALLBACKS=[old]):
+            self.assertEqual(self.confirm(forged).status_code, 400)
+        self.assertEqual(self.fresh().disposition, '')
+
