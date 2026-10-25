@@ -24,6 +24,11 @@ class Organization(models.Model):
     # organization has it on, every call's organization is resolved strictly
     # at answer time (maps/alfred_org.py).
     alfred_declines = models.BooleanField(default=False)
+    # L12: Wednesday's rep loop reminds this organization's reps, so Sutton's
+    # reminder worker (check_dispo_reminders) sends it no SMS, no Alfred call
+    # and no follow-up reminder. Off by default: nothing changes until it is
+    # turned on — `python manage.py wednesday_reminders <slug> on`.
+    reminders_by_wednesday = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
