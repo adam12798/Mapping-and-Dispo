@@ -41,7 +41,9 @@ SECRET_KEY = os.environ.get(
 # Alfred by text signs a pending move's exchange with this (maps/alfred_text.py).
 # Unset, it signs with a key derived from OPENAI_API_KEY — never SECRET_KEY,
 # whose production fallback is public. Setting it invalidates only pending
-# move confirmations (72 h tokens), nothing else.
+# move confirmations (72 h tokens), nothing else. Set it in production: unset,
+# a new OpenAI key voids every pending confirmation (each then reads as "not a
+# token Alfred returned").
 ALFRED_PENDING_KEY = os.environ.get('ALFRED_PENDING_KEY', '')
 
 # SECURITY WARNING: don't run with debug turned on in production!

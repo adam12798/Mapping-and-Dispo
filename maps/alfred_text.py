@@ -590,13 +590,17 @@ def _deserialize(data):
     return out
 
 
+class _OtherLeadOrRep(Exception):
+    """A pending token for another lead or rep."""
+
+
 def _pending_from(data, lead, rep):
     """A pending token's payload, checked as if untrusted. ValueError when it
     is not one this endpoint issues."""
     if not isinstance(data, dict) or data.get('v') != 2:
         raise ValueError('version')
     if data.get('lead') != lead.id or data.get('rep') != rep.id:
-        raise LookupError('another lead or rep')
+        raise _OtherLeadOrRep()
     pid, exchange, summary = data.get('pid'), data.get('exchange'), data.get('summary')
     if not (isinstance(pid, str) and re.fullmatch(r'[0-9a-f]{16}', pid)):
         raise ValueError('pid')
@@ -665,14 +669,15 @@ def _confirm_move(token, rep, lead):
                             status=503)
     bad = JsonResponse({'error': 'confirm_move is not a token Alfred returned; nothing was saved.'}, status=400)
     try:
-        data = signing.loads(token, key=key, salt=PENDING_SALT, max_age=PENDING_MAX_AGE)
+        # fallback_keys=[]: never SECRET_KEY_FALLBACKS (an old SECRET_KEY kept there would be the public one).
+        data = signing.loads(token, key=key, fallback_keys=[], salt=PENDING_SALT, max_age=PENDING_MAX_AGE)
     except signing.SignatureExpired:
         return JsonResponse({'error': 'That move confirmation has expired; nothing was saved.'}, status=410)
     except signing.BadSignature:
         return bad
     try:
         p = _pending_from(data, lead, rep)
-    except LookupError:
+    except _OtherLeadOrRep:
         return JsonResponse({'error': 'That confirmation is for another lead or rep; nothing was saved.'}, status=409)
     except (KeyError, TypeError, ValueError):
         return bad

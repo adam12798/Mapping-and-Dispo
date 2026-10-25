@@ -834,6 +834,23 @@ class PendingMoveTests(AlfredTextBase):
     def test_a_lead_that_changed_hands_before_the_confirmation_is_refused(self):
         token = self.pending()['pending']['token']
         Lead.all_objects.filter(id=self.lead.id).update(rep=self.v_rep2)
-        self.assertIn(self.confirm(token).status_code, (403, 409))
+        self.assertEqual(self.confirm(token).status_code, 403)   # _find_lead: now another rep's
         self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 0)
+
+    def test_a_replay_after_a_newer_text_still_reads_already_applied(self):
+        token = self.pending()['pending']['token']
+        self.assertEqual(self.confirm(token).json()['already_applied'], False)
+        self.model.fixed = {'understood': True, 'post_appt_notes': 'Called back later'}
+        self.text('called back later')
+        self.assertEqual(self.confirm(token).json()['already_applied'], True)   # not 409: it was applied
+
+    def test_secret_key_fallbacks_never_sign_a_confirmation(self):
+        payload = {'v': 2, 'pid': '0123456789abcdef', 'lead': self.lead.id, 'rep': self.v_rep.id, 'issued': NOW.isoformat(),
+                   'writes': {'disposition': 'sale'}, 'exchange': 'x', 'summary': 'x',
+                   'move': {'date': '2026-10-22', 'time': '18:00'}, 'next_question': None, 'still_empty': []}
+        old = 'an-old-public-key'
+        forged = signing.dumps(payload, key=old, salt=alfred_text.PENDING_SALT, compress=True)
+        with override_settings(SECRET_KEY_FALLBACKS=[old]):
+            self.assertEqual(self.confirm(forged).status_code, 400)
+        self.assertEqual(self.fresh().disposition, '')
 

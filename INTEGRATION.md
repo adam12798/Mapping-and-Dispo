@@ -392,7 +392,8 @@ Related: the public SMS consent page (`sms_consent.html`, part of the 978's A2P 
     - 503 with no signing key;
     - the usual lead checks (403 reassigned; 409 cancelled, out of the window, or changed hands). Confirm a move before pushing the new appointment to Sutton: a new time more than 3 days out fails the window check.
   - **Rate limit and model:** a confirmation counts toward the 60/hour limit. The model is not called.
-  - **The signing key:** `ALFRED_PENDING_KEY` when set; otherwise a key derived from `OPENAI_API_KEY`. `SECRET_KEY` is never used, because its production fallback is public. Everything in a token is checked again, as if untrusted, before it is written.
+  - **The signing key:** `ALFRED_PENDING_KEY` when set; otherwise a key derived from `OPENAI_API_KEY`. `SECRET_KEY` is never used, and neither is `SECRET_KEY_FALLBACKS`, because the production fallback is public. Set `ALFRED_PENDING_KEY` in production: without it, a new OpenAI key voids every pending confirmation. Everything in a token is checked again, as if untrusted, before it is written.
+  - **Only newer texts are detected.** The 409 sees text call logs only. A voice debrief, a v1 `PUT` or a manager's edit made after the move was asked is not detected, and a confirmation overwrites it.
   - **The token is signed, not encrypted.** Whoever holds it can read the rep's text and the deal details, so it never goes in a URL or a text message.
   - Every other response carries `pending: null`.
 - **No client retry** (ruling (n)): the OpenAI client runs `max_retries=0`, so a reply the caller's own timeout gave up on is never read late.
