@@ -79,8 +79,30 @@ class StrictResolutionTests(AlfredBase):
         self.assertIn('<Connect>', body)
         self.assertIn(f'<Parameter name="orgId" value="{self.ventana.id}" />', body)
 
-    def test_a_phone_in_both_orgs_is_declined_and_logged_never_guessed(self):
-        self.assertEqual(resolve_caller(f'+1{BOTH}')['decline'], 'both_orgs')
+    def test_a_phone_in_both_orgs_is_the_one_org_alfred_answers(self):
+        # the owner's ruling (2026-10-24): Team Sunshine declines, Ventana answers — Ventana's call
+        self.assertEqual(resolve_caller(f'+1{BOTH}'), {'org_id': self.ventana.id, 'decline': None})
+        body = self.answer(BOTH).content.decode()
+        self.assertIn('<Connect>', body)
+        self.assertIn(f'<Parameter name="orgId" value="{self.ventana.id}" />', body)
+        # and the other way round
+        Organization.objects.filter(id=self.sunshine.id).update(alfred_declines=False)
+        Organization.objects.filter(id=self.ventana.id).update(alfred_declines=True)
+        self.assertEqual(resolve_caller(f'+1{BOTH}'), {'org_id': self.sunshine.id, 'decline': None})
+
+    def test_a_phone_in_both_orgs_where_neither_answers_is_declined(self):
+        Organization.objects.filter(id=self.ventana.id).update(alfred_declines=True)
+        self.assertEqual(resolve_caller(f'+1{BOTH}'), {'org_id': None, 'decline': 'org_declines'})
+        with self.assertLogs('maps.alfred_org', level='WARNING') as logs:
+            body = self.answer(BOTH).content.decode()
+        self.assertIn(f'<Say>{DECLINE_ORG}</Say>', body)
+        self.assertNotIn('<Connect>', body)
+        self.assertIn('reason=org_declines', logs.output[0])
+
+    def test_a_phone_in_several_orgs_that_answer_is_declined_and_logged_never_guessed(self):
+        third = Organization.objects.create(name='Third Org', slug='third-org')
+        Rep.all_objects.create(name='Both T', phone_number=BOTH, home_address='5 E St', organization=third)
+        self.assertEqual(resolve_caller(f'+1{BOTH}'), {'org_id': None, 'decline': 'both_orgs'})
         with self.assertLogs('maps.alfred_org', level='WARNING') as logs:
             body = self.answer(BOTH).content.decode()
         self.assertIn(f'<Say>{DECLINE_BOTH}</Say>', body)
@@ -89,6 +111,8 @@ class StrictResolutionTests(AlfredBase):
         self.assertIn('reason=both_orgs', logs.output[0])
         self.assertIn('caller=…0009', logs.output[0])
         self.assertNotIn(BOTH, logs.output[0])
+        # no Team Sunshine row was touched to decide it
+        self.assertEqual(Rep.all_objects.get(id=self.s_both.id).organization_id, self.sunshine.id)
 
     def test_an_unknown_phone_is_the_default_inbound_orgs_and_it_declines(self):
         self.assertEqual(resolve_caller(f'+1{UNKNOWN}'), {'org_id': self.sunshine.id, 'decline': 'org_declines'})
@@ -104,11 +128,11 @@ class StrictResolutionTests(AlfredBase):
         Manager.all_objects.create(name='V Mgr', phone_number='6175550077', organization=self.ventana)
         self.assertEqual(resolve_caller('+16175550077'), {'org_id': self.ventana.id, 'decline': None})
         Manager.all_objects.create(name='S Mgr', phone_number='6175550077', organization=self.sunshine)
-        self.assertEqual(resolve_caller('+16175550077')['decline'], 'both_orgs')
+        self.assertEqual(resolve_caller('+16175550077'), {'org_id': self.ventana.id, 'decline': None})
 
     def test_a_declined_call_writes_nothing(self):
         before = VoiceCallLog.all_objects.count()
-        for caller in (BOTH, UNKNOWN, S_ONLY):
+        for caller in (UNKNOWN, S_ONLY):
             self.answer(caller)
         self.assertEqual(VoiceCallLog.all_objects.count(), before)
 
@@ -158,7 +182,8 @@ class StreamCheckTests(AlfredBase):
         self.assertEqual((ok['org_id'], ok['decline'], ok['strict']), (self.ventana.id, None, True))
         self.assertEqual(session_org(f'+1{V_ONLY}', '', None)['decline'], 'org_unconfirmed')  # no orgId
         self.assertEqual(session_org(f'+1{V_ONLY}', '', self.sunshine.id)['decline'], 'org_unconfirmed')
-        self.assertEqual(session_org(f'+1{BOTH}', '', self.ventana.id)['decline'], 'both_orgs')
+        self.assertEqual(session_org(f'+1{BOTH}', '', self.ventana.id)['decline'], None)  # the one org that answers
+        self.assertEqual(session_org(f'+1{BOTH}', '', self.sunshine.id)['decline'], 'org_unconfirmed')
         self.assertEqual(session_org(f'+1{S_ONLY}', '', self.sunshine.id)['decline'], 'org_declines')
         self.assertEqual(session_org(f'+1{V_ONLY}', str(self.v_lead.id), self.ventana.id)['decline'], None)
         self.assertEqual(session_org(f'+1{S_ONLY}', str(self.s_lead.id), self.sunshine.id)['decline'], 'org_declines')

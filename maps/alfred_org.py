@@ -10,8 +10,10 @@ answer time, before Alfred says a word:
 
   * the caller's phone is looked up among active reps (then, when no rep
     matches, among managers), across all organizations;
-  * a phone that belongs to people in more than one organization is declined
-    politely and logged — Alfred never guesses which business it is;
+  * a phone that belongs to people in more than one organization is that
+    organization's when exactly one of them has Alfred enabled (active, not
+    declining — the owner's ruling of 2026-10-24); when none or several do,
+    the call is declined politely and logged — Alfred never guesses;
   * a phone that matches nobody belongs to the default inbound organization,
     as it always has;
   * the organization found is declined politely, and logged, when it has
@@ -90,7 +92,12 @@ def resolve_caller(caller_number):
                 if clean_phone(phone) == clean
             }
     if len(org_ids) > 1:
-        return {'org_id': None, 'decline': 'both_orgs'}
+        # More than one organization: the one with Alfred enabled, when it is
+        # the only one; none enabled, or several, is declined.
+        answering = sorted(o for o in org_ids if _answers(o))
+        if len(answering) == 1:
+            return {'org_id': answering[0], 'decline': None}
+        return {'org_id': None, 'decline': 'org_declines' if not answering else 'both_orgs'}
     org_id = next(iter(org_ids)) if org_ids else Organization.default_inbound_id()
     if org_id is None or not _answers(org_id):
         return {'org_id': org_id, 'decline': 'org_declines'}
