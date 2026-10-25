@@ -30,8 +30,12 @@ exchange, exactly once, by sending the token back:
            "still_empty": [], "understood": true, "pending": null, "confirmed": true,
            "already_applied": false}
 
-A token is good for 72 hours, for its own lead and rep; sent again, it applies
-nothing ("already_applied": true).
+A token is good for 72 hours, for its own lead and rep, and only while no
+newer text of the lead's has been read; sent again, it applies nothing
+("already_applied": true). It is signed (ALFRED_PENDING_KEY, else a key derived
+from the OpenAI key), not encrypted: whoever holds it can read the rep's text
+and the details, so it never goes in a URL or a text message. Everything in it
+is checked again as if untrusted before anything is written.
 
 Pass back each response's summary, next_question and still_empty as the
 next text's context. The lead must be the rep's (or have no rep), not
@@ -44,9 +48,11 @@ and the appointment itself being moved come back as different fields; a move
 is returned, never written — reps can't reschedule (the call says so too).
 """
 import copy
+import hashlib
 import json
 import logging
 import re
+import secrets
 from datetime import date, datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -77,6 +83,19 @@ MODEL = 'gpt-4o-mini'
 # The ruling (l): an unconfirmed move's exchange waits in a signed token.
 PENDING_SALT = 'maps.alfred_text.pending_move'
 PENDING_MAX_AGE = 72 * 3600     # seconds
+PENDING_TOKEN_MAX = 32000       # characters; a 1600-character text in any script fits
+
+
+def _pending_key():
+    """The key pending tokens are signed with: ALFRED_PENDING_KEY when set,
+    else one derived from the OpenAI key — a production secret, unlike
+    SECRET_KEY's public fallback. None without either."""
+    own = getattr(settings, 'ALFRED_PENDING_KEY', '') or ''
+    if own:
+        return own
+    if settings.OPENAI_API_KEY:
+        return hashlib.sha256(f'{PENDING_SALT}:{settings.OPENAI_API_KEY}'.encode()).hexdigest()
+    return None
 TOOL_NAME = 'read_rep_text'
 
 # What Alfred still asks after the outcome, in the call's order. The deal
@@ -203,8 +222,10 @@ def _parse_body(request):
     confirm = data.get('confirm_move')
     if confirm is not None:
         # The rep confirmed a move to Wednesday: apply the exchange its token holds.
-        if not isinstance(confirm, str) or not confirm.strip() or len(confirm) > 8000:
+        if not isinstance(confirm, str) or not confirm.strip() or len(confirm) > PENDING_TOKEN_MAX:
             raise _Refusal(400, 'confirm_move must be the pending token Alfred returned.')
+        if data.get('text') is not None or data.get('context') is not None:
+            raise _Refusal(400, 'Send confirm_move alone, with no text or context.')
         return {'lead_id': lead_id, 'rep_id': _int(rep_id), 'rep_phone': rep_phone,
                 'text': None, 'context': None, 'confirm_move': confirm.strip()}
     text = data.get('text')
@@ -534,22 +555,74 @@ def _serialize(writes):
 
 
 def _deserialize(data):
-    """_serialize's inverse, for a pending exchange's writes: only the fields
-    a text can write, each of its own type; anything else refuses."""
+    """_serialize's inverse, for a pending exchange's writes — checked as if
+    untrusted: only the fields a text can write, each of its own type and
+    within the limits read_answer keeps; anything else refuses."""
     allowed = {'disposition', 'sat', 'follow_up_date', 'follow_up_time', 'call_notes', *FIELD_LIMITS}
     if not isinstance(data, dict) or not set(data) <= allowed:
         raise ValueError('not a pending exchange')
-    out = dict(data)
-    if 'follow_up_date' in out:
-        out['follow_up_date'] = date.fromisoformat(out['follow_up_date'])
-    if 'follow_up_time' in out:
-        out['follow_up_time'] = datetime.strptime(out['follow_up_time'], '%H:%M').time()
-    if 'sat' in out and not isinstance(out['sat'], bool):
-        raise ValueError('sat is not a boolean')
+    out = {}
+    for field, value in data.items():
+        if field == 'disposition':
+            if not isinstance(value, str) or value not in _dispositions():
+                raise ValueError('disposition')
+            out[field] = value
+        elif field == 'sat':
+            if not isinstance(value, bool):
+                raise ValueError('sat')
+            out[field] = value
+        elif field == 'follow_up_date':
+            out[field] = date.fromisoformat(value) if isinstance(value, str) else None
+            if out[field] is None:
+                raise ValueError('follow_up_date')
+        elif field == 'follow_up_time':
+            if not isinstance(value, str) or not re.fullmatch(r'\d{2}:\d{2}', value):
+                raise ValueError('follow_up_time')
+            out[field] = datetime.strptime(value, '%H:%M').time()
+        elif field == 'call_notes':
+            if not isinstance(value, str) or not value or len(value) > 200 or len(value.split()) > CALL_NOTE_WORDS:
+                raise ValueError('call_notes')
+            out[field] = value
+        else:
+            if not isinstance(value, str) or not value or len(value) > FIELD_LIMITS[field]:
+                raise ValueError(field)
+            out[field] = value
     return out
 
 
-def _write_exchange(lead, rep, writes, exchange, summary):
+def _pending_from(data, lead, rep):
+    """A pending token's payload, checked as if untrusted. ValueError when it
+    is not one this endpoint issues."""
+    if not isinstance(data, dict) or data.get('v') != 2:
+        raise ValueError('version')
+    if data.get('lead') != lead.id or data.get('rep') != rep.id:
+        raise LookupError('another lead or rep')
+    pid, exchange, summary = data.get('pid'), data.get('exchange'), data.get('summary')
+    if not (isinstance(pid, str) and re.fullmatch(r'[0-9a-f]{16}', pid)):
+        raise ValueError('pid')
+    if not (isinstance(exchange, str) and 0 < len(exchange) <= 2 * MAX_TEXT + 1000):
+        raise ValueError('exchange')
+    if not (isinstance(summary, str) and len(summary) <= 300):
+        raise ValueError('summary')
+    issued = datetime.fromisoformat(data['issued']) if isinstance(data.get('issued'), str) else None
+    if issued is None or issued.tzinfo is None:
+        raise ValueError('issued')
+    move = data.get('move')
+    if not (isinstance(move, dict) and set(move) == {'date', 'time'} and isinstance(move['date'], str)
+            and isinstance(move['time'], str) and re.fullmatch(r'\d{2}:\d{2}', move['time'])):
+        raise ValueError('move')
+    date.fromisoformat(move['date'])
+    nq, still = data.get('next_question'), data.get('still_empty')
+    if not (nq is None or (isinstance(nq, str) and len(nq) <= 300)):
+        raise ValueError('next_question')
+    if not (isinstance(still, list) and all(isinstance(f, str) and f in QUESTION_ORDER for f in still)):
+        raise ValueError('still_empty')
+    return {'pid': pid, 'writes': _deserialize(data.get('writes')), 'exchange': exchange, 'summary': summary,
+            'issued': issued, 'move': {'date': move['date'], 'time': move['time']},
+            'next_question': nq, 'still_empty': list(still)}
+
+
+def _write_exchange(lead, rep, writes, exchange, summary, log_suffix=''):
     """The call's write — these fields, the exchange added to the transcript —
     and the text's call log, in one transaction. False when the lead changed
     hands meanwhile (nothing is written)."""
@@ -567,7 +640,7 @@ def _write_exchange(lead, rep, writes, exchange, summary):
                 return False
         VoiceCallLog.objects.create(
             rep=rep, caller_number=_phone_digits(rep.phone_number)[:20], channel='text',
-            transcript=f"Lead #{lead.id} ({lead.homeowner_name or 'no name'})\n{exchange}",
+            transcript=f"Lead #{lead.id} ({lead.homeowner_name or 'no name'})\n{exchange}{log_suffix}",
             summary=summary,
         )
     return True
@@ -586,37 +659,43 @@ def _after_write(lead, rep, writes):
 def _confirm_move(token, rep, lead):
     """The rep confirmed the move (ruling (l)): apply the exchange the token
     holds, exactly once."""
+    key = _pending_key()
+    if key is None:
+        return JsonResponse({'error': 'Alfred is not configured (no key to check a confirmation); nothing was saved.'},
+                            status=503)
+    bad = JsonResponse({'error': 'confirm_move is not a token Alfred returned; nothing was saved.'}, status=400)
     try:
-        data = signing.loads(token, salt=PENDING_SALT, max_age=PENDING_MAX_AGE)
+        data = signing.loads(token, key=key, salt=PENDING_SALT, max_age=PENDING_MAX_AGE)
     except signing.SignatureExpired:
         return JsonResponse({'error': 'That move confirmation has expired; nothing was saved.'}, status=410)
     except signing.BadSignature:
-        return JsonResponse({'error': 'confirm_move is not a token Alfred returned; nothing was saved.'}, status=400)
+        return bad
     try:
-        if not isinstance(data, dict) or data.get('v') != 1:
-            raise ValueError('not a pending exchange')
-        writes = _deserialize(data.get('writes'))
-        exchange, summary, move = data['exchange'], data['summary'], data['move']
-    except (KeyError, TypeError, ValueError):
-        return JsonResponse({'error': 'confirm_move is not a token Alfred returned; nothing was saved.'}, status=400)
-    if data.get('lead') != lead.id or data.get('rep') != rep.id:
+        p = _pending_from(data, lead, rep)
+    except LookupError:
         return JsonResponse({'error': 'That confirmation is for another lead or rep; nothing was saved.'}, status=409)
+    except (KeyError, TypeError, ValueError):
+        return bad
+    marker = f'\n[move confirmed · {p["pid"]}]'
     stamp = f'Lead #{lead.id} '
+    done = {'summary': p['summary'], 'next_question': p['next_question'], 'appointment_move': p['move'],
+            'still_empty': p['still_empty'], 'understood': True, 'pending': None, 'confirmed': True}
     with transaction.atomic():
-        # One confirmation at a time per lead; the call log is the record that it was applied.
+        # One confirmation at a time per lead; its call log is the record that it was applied.
         Lead.objects.select_for_update().filter(id=lead.id).first()
-        if VoiceCallLog.objects.filter(channel='text', transcript__startswith=stamp,
-                                       transcript__endswith=f'\n{exchange}').exists():
-            return JsonResponse({'set': {}, 'summary': summary, 'next_question': None, 'appointment_move': move,
-                                 'still_empty': [], 'understood': True, 'pending': None,
-                                 'confirmed': True, 'already_applied': True})
-        if not _write_exchange(lead, rep, writes, exchange, summary):
+        logs = VoiceCallLog.objects.filter(channel='text', transcript__startswith=stamp, created_at__gte=p['issued'])
+        if logs.filter(transcript__endswith=marker).exists():
+            return JsonResponse({'set': {}, **done, 'already_applied': True})
+        # A newer text of this lead's was read meanwhile: applying the older
+        # exchange now would overwrite it. Nothing is written.
+        if logs.exists():
+            return JsonResponse({'error': 'The lead has a newer text since this move was asked; nothing was saved.'},
+                                status=409)
+        if not _write_exchange(lead, rep, p['writes'], p['exchange'], p['summary'], log_suffix=marker):
             return JsonResponse({'error': 'That lead changed hands just now; nothing was saved.'}, status=409)
-    if writes:
-        _after_write(lead, rep, writes)
-    return JsonResponse({'set': _serialize(writes), 'summary': summary, 'next_question': None,
-                         'appointment_move': move, 'still_empty': [], 'understood': True, 'pending': None,
-                         'confirmed': True, 'already_applied': False})
+    if p['writes']:
+        _after_write(lead, rep, p['writes'])
+    return JsonResponse({'set': _serialize(p['writes']), **done, 'already_applied': False})
 
 
 # ── The endpoint ──────────────────────────────────────────────────────────
@@ -693,9 +772,14 @@ def alfred_text(request):
         # The whole exchange waits in a signed token, applied on the rep's
         # confirmation (confirm_move).
         pending_set = _serialize(writes)
-        token = signing.dumps({'v': 1, 'lead': lead.id, 'rep': rep.id, 'writes': pending_set,
-                               'exchange': exchange, 'summary': summary, 'move': answer['move']},
-                              salt=PENDING_SALT, compress=True)
+        if _pending_key() is None:      # never signed with SECRET_KEY (its production fallback is public)
+            return JsonResponse({'error': 'Alfred is not configured (no key to hold a move); nothing was saved.'},
+                                status=503)
+        token = signing.dumps({'v': 2, 'pid': secrets.token_hex(8), 'lead': lead.id, 'rep': rep.id,
+                               'issued': now.isoformat(), 'writes': pending_set, 'exchange': exchange,
+                               'summary': summary, 'move': answer['move'], 'next_question': next_question,
+                               'still_empty': still_empty},
+                              key=_pending_key(), salt=PENDING_SALT, compress=True)
         return JsonResponse({
             'set': {},
             'summary': summary,

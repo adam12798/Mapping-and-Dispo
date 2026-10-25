@@ -38,6 +38,12 @@ SECRET_KEY = os.environ.get(
     'django-insecure-rynul5+8h@3^(3@)is*rn#32u*b9cpnw)g%y3_b-$e^n-e@%*!',
 )
 
+# Alfred by text signs a pending move's exchange with this (maps/alfred_text.py).
+# Unset, it signs with a key derived from OPENAI_API_KEY — never SECRET_KEY,
+# whose production fallback is public. Setting it invalidates only pending
+# move confirmations (72 h tokens), nothing else.
+ALFRED_PENDING_KEY = os.environ.get('ALFRED_PENDING_KEY', '')
+
 # SECURITY WARNING: don't run with debug turned on in production!
 # Defaults to False; set DEBUG=True in local .env for development.
 DEBUG = os.environ.get('DEBUG', 'False').strip().lower() in ('1', 'true', 'yes', 'on')

@@ -769,3 +769,71 @@ class PendingMoveTests(AlfredTextBase):
                               salt=alfred_text.PENDING_SALT, compress=True)
         self.assertEqual(self.confirm(token).status_code, 400)  # a field a text cannot write
 
+    # ── the review of (l): the token is checked as if untrusted ──
+
+    def sign(self, **over):
+        payload = {'v': 2, 'pid': '0123456789abcdef', 'lead': self.lead.id, 'rep': self.v_rep.id,
+                   'issued': NOW.isoformat(), 'writes': {}, 'exchange': 'x', 'summary': 'x',
+                   'move': {'date': '2026-10-22', 'time': '18:00'}, 'next_question': None, 'still_empty': [], **over}
+        return signing.dumps(payload, key=alfred_text._pending_key(), salt=alfred_text.PENDING_SALT, compress=True)
+
+    def test_a_token_signed_with_secret_key_is_refused(self):
+        payload = {'v': 2, 'pid': '0123456789abcdef', 'lead': self.lead.id, 'rep': self.v_rep.id, 'issued': NOW.isoformat(),
+                   'writes': {'disposition': 'sale'}, 'exchange': 'x', 'summary': 'x',
+                   'move': {'date': '2026-10-22', 'time': '18:00'}, 'next_question': None, 'still_empty': []}
+        forged = signing.dumps(payload, salt=alfred_text.PENDING_SALT, compress=True)   # SECRET_KEY, the right salt
+        self.assertEqual(self.confirm(forged).status_code, 400)
+        self.assertEqual(self.fresh().disposition, '')
+
+    def test_bad_values_under_the_real_key_are_refused(self):
+        before = self.fresh()
+        for over in ({'writes': {'disposition': 'zzz'}}, {'writes': {'call_notes': 'x' * 201}},
+                     {'writes': {'sat': 'yes'}}, {'writes': {'follow_up_date': '2026-13-40'}},
+                     {'writes': {'follow_up_time': '6pm'}}, {'writes': {'adders': 7}}, {'writes': {'appointment_datetime': 'x'}},
+                     {'v': 1}, {'pid': 'nope'}, {'move': {'date': '2026-10-22'}}, {'still_empty': ['not_a_field']},
+                     {'exchange': ''}, {'summary': 'x' * 301}, {'issued': 'yesterday'}):
+            self.assertEqual(self.confirm(self.sign(**over)).status_code, 400, over)
+        self.assertNothingWritten(before)
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 0)
+
+    def test_text_with_a_confirmation_is_refused(self):
+        token = self.pending()['pending']['token']
+        self.assertEqual(self.confirm(token, text='and it went fine').status_code, 400)
+        self.assertEqual(self.confirm('x' * (alfred_text.PENDING_TOKEN_MAX + 1)).status_code, 400)
+        self.assertEqual(self.confirm(123).status_code, 400)
+
+    def test_a_newer_text_since_the_move_refuses_the_confirmation(self):
+        token = self.pending()['pending']['token']
+        self.model.fixed = {'understood': True, 'disposition': 'sale', 'sat': True, 'call_notes': 'Sold after all'}
+        self.text('sold it after all')
+        res = self.confirm(token)
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(self.fresh().disposition, 'sale')   # the newer answer stands
+
+    def test_the_confirmation_hands_back_what_to_ask_next(self):
+        self.model.fixed = {'understood': True, 'disposition': 'follow_up', 'sat': True, 'call_notes': 'Wants to think',
+                            'appointment_moved_to_date': '2026-10-22', 'appointment_moved_to_time': '18:00'}
+        out = self.text('follow up, and move it to thursday at 6').json()
+        confirmed = self.confirm(out['pending']['token']).json()
+        self.assertEqual((confirmed['next_question'], confirmed['still_empty']), (out['next_question'], out['still_empty']))
+        self.assertTrue(confirmed['still_empty'])
+
+    def test_a_confirmation_counts_against_the_rate_limit_and_never_calls_the_model(self):
+        token = self.pending()['pending']['token']
+        calls = len(self.model.calls)
+        with mock.patch('maps.alfred_text.TEXTS_PER_HOUR', 1):
+            self.assertEqual(self.confirm(token).status_code, 429)
+        self.assertEqual(len(self.model.calls), calls)
+        with override_settings(OPENAI_API_KEY='', ALFRED_PENDING_KEY='own-key'):
+            own = self.sign(writes={'sat': False})
+            self.assertEqual(self.confirm(own).status_code, 200)   # no model, no OpenAI key needed with its own key
+        with override_settings(OPENAI_API_KEY='', ALFRED_PENDING_KEY=''):
+            self.assertEqual(self.confirm(own).status_code, 503)
+        self.assertEqual(len(self.model.calls), calls)
+
+    def test_a_lead_that_changed_hands_before_the_confirmation_is_refused(self):
+        token = self.pending()['pending']['token']
+        Lead.all_objects.filter(id=self.lead.id).update(rep=self.v_rep2)
+        self.assertIn(self.confirm(token).status_code, (403, 409))
+        self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 0)
+

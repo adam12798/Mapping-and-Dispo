@@ -378,13 +378,22 @@ Related: the public SMS consent page (`sms_consent.html`, part of the 978's A2P 
 - **Never a guess:** a field the model leaves out or gets wrong (unknown disposition, a past or malformed date, a bad time) is not written; Alfred asks about it. An unreadable text writes nothing. Details with no outcome yet get the decision tree's question ("Did you sit the appointment?", then "Did you run credit?", or for a rep who didn't sit, "Was the homeowner not home, or did they cancel at the door?"). A near follow-up on a future_contact lead with no new outcome is not written; Alfred asks "Did you run credit?" (follow_up or cpfu is the rep's to say). The model sees what is already on the lead, so it can add to a detail rather than replace it.
 - **The write is the call's:** the same fields, the call's future_contact rule (a follow_up/cpfu more than 30 days out), and the call's `rep=rep` guard widened to leads with no rep. Each exchange that writes is *added* to `call_transcript` (inside the UPDATE, so two texts at once both keep theirs). A rep is never assigned.
 - **A move is not a follow-up.** The appointment itself being moved comes back as `appointment_move` and is **not written** (reps can't reschedule, as on the call). A follow-up date and time are written to `follow_up_date` / `follow_up_time`.
-- **A text with a move writes nothing until the rep confirms it** (the owner's ruling (l), 2026-10-25). While the answer contains an unconfirmed move:
-  - `set` is `{}`, and no call log is written;
-  - `pending` carries the whole exchange in a signed token (Django signing, salt `maps.alfred_text.pending_move`): `{token, set (what it would write), expires_at}`.
-  - When the rep confirms the move, the caller sends `{rep_id | rep_phone, lead_id, confirm_move: <token>}`, with no `text`. That applies exactly what the token holds: the fields, the exchange added to `call_transcript`, the call log and the webhooks.
-  - The response is `{set, summary, next_question: null, appointment_move, still_empty: [], understood: true, pending: null, confirmed: true, already_applied}`.
-  - Sent again, the token applies nothing (`already_applied: true`). The call log is the record, checked under a lock on the lead.
-  - **Refusals:** a token is good for 72 hours (410 after), only for its own lead and rep (409), and only if this endpoint signed it (400). The model is not called on a confirmation.
+- **A text with a move writes nothing until the rep confirms it** (the owner's ruling (l), 2026-10-25).
+  - **While the answer contains an unconfirmed move:** `set` is `{}`, no call log is written, and no webhook fires. `pending` carries the whole exchange in a signed token: `{token, set (what it would write), expires_at}`.
+  - **Confirming:** when the rep confirms the move, the caller sends `{rep_id | rep_phone, lead_id, confirm_move: <token>}` and nothing else. Text or context alongside it is refused with 400.
+    - The confirmation applies exactly what the token holds: the fields, the call log, and the webhooks. When the token carries fields, it also adds the exchange to `call_transcript`; a move alone adds the call log only.
+    - The response is `{set, summary, next_question, appointment_move, still_empty, understood: true, pending: null, confirmed: true, already_applied}`.
+    - `next_question` and `still_empty` are the pending answer's own. Pass them back as the next text's context, as usual.
+  - **Exactly once:** sent again, the token applies nothing (`already_applied: true`). The call log stamped with the token's id is the record, checked under a lock on the lead.
+  - **Refusals:**
+    - 410 after 72 hours;
+    - 409 for another lead or rep, or when a newer text of the lead's was read after the move was asked (applying the older exchange would overwrite it);
+    - 400 for a token this endpoint did not sign, or one whose contents fail the checks;
+    - 503 with no signing key;
+    - the usual lead checks (403 reassigned; 409 cancelled, out of the window, or changed hands). Confirm a move before pushing the new appointment to Sutton: a new time more than 3 days out fails the window check.
+  - **Rate limit and model:** a confirmation counts toward the 60/hour limit. The model is not called.
+  - **The signing key:** `ALFRED_PENDING_KEY` when set; otherwise a key derived from `OPENAI_API_KEY`. `SECRET_KEY` is never used, because its production fallback is public. Everything in a token is checked again, as if untrusted, before it is written.
+  - **The token is signed, not encrypted.** Whoever holds it can read the rep's text and the deal details, so it never goes in a URL or a text message.
   - Every other response carries `pending: null`.
 - **No client retry** (ruling (n)): the OpenAI client runs `max_retries=0`, so a reply the caller's own timeout gave up on is never read late.
 - **Events:** every write fires `disposition_changed` for the lead's org (debounced 60 s), once the lead has a disposition. Ventana had no disposition configs on 2026-10-20, so nothing is sent anywhere today.
