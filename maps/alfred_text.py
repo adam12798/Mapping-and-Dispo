@@ -16,7 +16,22 @@ the way a call does, and answers with what it set and what to ask next.
     }
     → 200 {"set": {...}, "summary": "...", "next_question": "..." | null,
            "appointment_move": {"date": "YYYY-MM-DD", "time": "HH:MM"} | null,
-           "still_empty": [...], "understood": true | false}
+           "still_empty": [...], "understood": true | false,
+           "pending": {"token": "...", "set": {...}, "expires_at": "..."} | null}
+
+A text whose answer contains an appointment move writes NOTHING (the owner's
+ruling (l), 2026-10-25): "set" is empty, and "pending" carries the whole
+exchange — what it would set, the transcript, the call note — in a signed
+token. The rep confirms the move to Wednesday, and Wednesday applies the
+exchange, exactly once, by sending the token back:
+
+    POST /api/v1/alfred/text/  {"rep_id" | "rep_phone", "lead_id", "confirm_move": "<token>"}
+    → 200 {"set": {...}, "summary": "...", "next_question": null, "appointment_move": {...},
+           "still_empty": [], "understood": true, "pending": null, "confirmed": true,
+           "already_applied": false}
+
+A token is good for 72 hours, for its own lead and rep; sent again, it applies
+nothing ("already_applied": true).
 
 Pass back each response's summary, next_question and still_empty as the
 next text's context. The lead must be the rep's (or have no rep), not
@@ -36,6 +51,7 @@ from datetime import date, datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.core import signing
 from django.db import transaction
 from django.db.models import Case, F, Q, TextField, Value, When
 from django.db.models.functions import Concat
@@ -58,6 +74,9 @@ MAX_TEXT = 1600              # a long SMS
 # also reaches the last two weeks (a late debrief, a follow-up that closed).
 DAYS_BACK, DAYS_AHEAD = 14, 3
 MODEL = 'gpt-4o-mini'
+# The ruling (l): an unconfirmed move's exchange waits in a signed token.
+PENDING_SALT = 'maps.alfred_text.pending_move'
+PENDING_MAX_AGE = 72 * 3600     # seconds
 TOOL_NAME = 'read_rep_text'
 
 # What Alfred still asks after the outcome, in the call's order. The deal
@@ -181,6 +200,13 @@ def _parse_body(request):
         raise _Refusal(400, 'rep_phone must be a phone number.')
     if rep_id is None and rep_phone is None:
         raise _Refusal(400, 'rep_id or rep_phone is required.')
+    confirm = data.get('confirm_move')
+    if confirm is not None:
+        # The rep confirmed a move to Wednesday: apply the exchange its token holds.
+        if not isinstance(confirm, str) or not confirm.strip() or len(confirm) > 8000:
+            raise _Refusal(400, 'confirm_move must be the pending token Alfred returned.')
+        return {'lead_id': lead_id, 'rep_id': _int(rep_id), 'rep_phone': rep_phone,
+                'text': None, 'context': None, 'confirm_move': confirm.strip()}
     text = data.get('text')
     if not isinstance(text, str) or not _short(text, MAX_TEXT + 1):
         raise _Refusal(400, "text (the rep's message) is required.")
@@ -202,7 +228,7 @@ def _parse_body(request):
         'empty_fields': None if empty is None else [f for f in QUESTION_ORDER if f in empty],
     }
     return {'lead_id': lead_id, 'rep_id': _int(rep_id), 'rep_phone': rep_phone,
-            'text': text, 'context': context}
+            'text': text, 'context': context, 'confirm_move': None}
 
 
 def _find_rep(rep_id, rep_phone):
@@ -353,7 +379,9 @@ def _complete(messages, tool):
     """One forced tool call; its arguments. Tests replace this function."""
     from openai import OpenAI
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=20, max_retries=1)
+    # No client retry (the owner's ruling (n)): the caller's own timeout and
+    # retry are the only ones, so a reply it gave up on is never read late.
+    client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=20, max_retries=0)
     resp = client.chat.completions.create(
         model=MODEL, messages=messages, tools=[tool],
         tool_choice={'type': 'function', 'function': {'name': TOOL_NAME}},
@@ -505,6 +533,92 @@ def _serialize(writes):
     return out
 
 
+def _deserialize(data):
+    """_serialize's inverse, for a pending exchange's writes: only the fields
+    a text can write, each of its own type; anything else refuses."""
+    allowed = {'disposition', 'sat', 'follow_up_date', 'follow_up_time', 'call_notes', *FIELD_LIMITS}
+    if not isinstance(data, dict) or not set(data) <= allowed:
+        raise ValueError('not a pending exchange')
+    out = dict(data)
+    if 'follow_up_date' in out:
+        out['follow_up_date'] = date.fromisoformat(out['follow_up_date'])
+    if 'follow_up_time' in out:
+        out['follow_up_time'] = datetime.strptime(out['follow_up_time'], '%H:%M').time()
+    if 'sat' in out and not isinstance(out['sat'], bool):
+        raise ValueError('sat is not a boolean')
+    return out
+
+
+def _write_exchange(lead, rep, writes, exchange, summary):
+    """The call's write — these fields, the exchange added to the transcript —
+    and the text's call log, in one transaction. False when the lead changed
+    hands meanwhile (nothing is written)."""
+    with transaction.atomic():
+        if writes:
+            # A text debrief comes in pieces, so each exchange is added to the
+            # transcript rather than replacing it — appended in the UPDATE
+            # itself, so two texts at once both keep theirs.
+            update = dict(writes)
+            update['call_transcript'] = Case(
+                When(call_transcript='', then=Value(exchange)),
+                default=Concat(F('call_transcript'), Value('\n\n' + exchange)),
+                output_field=TextField())
+            if not Lead.objects.filter(id=lead.id).filter(Q(rep=rep) | Q(rep__isnull=True)).update(**update):
+                return False
+        VoiceCallLog.objects.create(
+            rep=rep, caller_number=_phone_digits(rep.phone_number)[:20], channel='text',
+            transcript=f"Lead #{lead.id} ({lead.homeowner_name or 'no name'})\n{exchange}",
+            summary=summary,
+        )
+    return True
+
+
+def _after_write(lead, rep, writes):
+    logger.info(f'Alfred by text: lead {lead.id} set {sorted(writes)} for {rep.name}')
+    # Like each write a call makes, every write fires the org's disposition
+    # webhooks (debounced 60 s, so the receivers get the latest details too) —
+    # once the lead has a disposition to report.
+    fresh = Lead.objects.select_related('rep').filter(id=lead.id).first()
+    if fresh and fresh.disposition:
+        fire_webhooks('disposition_changed', fresh)
+
+
+def _confirm_move(token, rep, lead):
+    """The rep confirmed the move (ruling (l)): apply the exchange the token
+    holds, exactly once."""
+    try:
+        data = signing.loads(token, salt=PENDING_SALT, max_age=PENDING_MAX_AGE)
+    except signing.SignatureExpired:
+        return JsonResponse({'error': 'That move confirmation has expired; nothing was saved.'}, status=410)
+    except signing.BadSignature:
+        return JsonResponse({'error': 'confirm_move is not a token Alfred returned; nothing was saved.'}, status=400)
+    try:
+        if not isinstance(data, dict) or data.get('v') != 1:
+            raise ValueError('not a pending exchange')
+        writes = _deserialize(data.get('writes'))
+        exchange, summary, move = data['exchange'], data['summary'], data['move']
+    except (KeyError, TypeError, ValueError):
+        return JsonResponse({'error': 'confirm_move is not a token Alfred returned; nothing was saved.'}, status=400)
+    if data.get('lead') != lead.id or data.get('rep') != rep.id:
+        return JsonResponse({'error': 'That confirmation is for another lead or rep; nothing was saved.'}, status=409)
+    stamp = f'Lead #{lead.id} '
+    with transaction.atomic():
+        # One confirmation at a time per lead; the call log is the record that it was applied.
+        Lead.objects.select_for_update().filter(id=lead.id).first()
+        if VoiceCallLog.objects.filter(channel='text', transcript__startswith=stamp,
+                                       transcript__endswith=f'\n{exchange}').exists():
+            return JsonResponse({'set': {}, 'summary': summary, 'next_question': None, 'appointment_move': move,
+                                 'still_empty': [], 'understood': True, 'pending': None,
+                                 'confirmed': True, 'already_applied': True})
+        if not _write_exchange(lead, rep, writes, exchange, summary):
+            return JsonResponse({'error': 'That lead changed hands just now; nothing was saved.'}, status=409)
+    if writes:
+        _after_write(lead, rep, writes)
+    return JsonResponse({'set': _serialize(writes), 'summary': summary, 'next_question': None,
+                         'appointment_move': move, 'still_empty': [], 'understood': True, 'pending': None,
+                         'confirmed': True, 'already_applied': False})
+
+
 # ── The endpoint ──────────────────────────────────────────────────────────
 
 @api_key_required
@@ -531,6 +645,8 @@ def alfred_text(request):
         lead = _find_lead(body['lead_id'], rep, now)
     except _Refusal as refusal:
         return JsonResponse({'error': refusal.error}, status=refusal.status)
+    if body['confirm_move']:
+        return _confirm_move(body['confirm_move'], rep, lead)
     if not settings.OPENAI_API_KEY:
         return JsonResponse({'error': 'Alfred is not configured (no OpenAI key); nothing was saved.'}, status=503)
 
@@ -572,34 +688,28 @@ def alfred_text(request):
     stamp = now.astimezone(EASTERN)
     exchange = (f"[Text {stamp:%m/%d %I:%M %p}] {rep.name}: {text}\n"
                 f"Alfred: {next_question or '(nothing more to ask)'}")
-    updated = 0
-    with transaction.atomic():
-        if writes:
-            # The call's write: these fields, and the transcript of the
-            # debrief. A text debrief comes in pieces, so each exchange is
-            # added to the transcript rather than replacing it.
-            # Appended in the UPDATE itself, so two texts at once both keep theirs.
-            update = dict(writes)
-            update['call_transcript'] = Case(
-                When(call_transcript='', then=Value(exchange)),
-                default=Concat(F('call_transcript'), Value('\n\n' + exchange)),
-                output_field=TextField())
-            updated = Lead.objects.filter(id=lead.id).filter(Q(rep=rep) | Q(rep__isnull=True)).update(**update)
-            if not updated:
-                return JsonResponse({'error': 'That lead changed hands just now; nothing was saved.'}, status=409)
-        VoiceCallLog.objects.create(
-            rep=rep, caller_number=_phone_digits(rep.phone_number)[:20], channel='text',
-            transcript=f"Lead #{lead.id} ({lead.homeowner_name or 'no name'})\n{exchange}",
-            summary=summary,
-        )
-    if updated:
-        logger.info(f'Alfred by text: lead {lead.id} set {sorted(writes)} for {rep.name}')
-        # Like each write a call makes, every write fires the org's
-        # disposition webhooks (debounced 60 s, so the receivers get the
-        # latest details too) — once the lead has a disposition to report.
-        fresh = Lead.objects.select_related('rep').filter(id=lead.id).first()
-        if fresh and fresh.disposition:
-            fire_webhooks('disposition_changed', fresh)
+    if answer['understood'] and answer['move']:
+        # The ruling (l): nothing is written while the move is unconfirmed.
+        # The whole exchange waits in a signed token, applied on the rep's
+        # confirmation (confirm_move).
+        pending_set = _serialize(writes)
+        token = signing.dumps({'v': 1, 'lead': lead.id, 'rep': rep.id, 'writes': pending_set,
+                               'exchange': exchange, 'summary': summary, 'move': answer['move']},
+                              salt=PENDING_SALT, compress=True)
+        return JsonResponse({
+            'set': {},
+            'summary': summary,
+            'next_question': next_question,
+            'appointment_move': answer['move'],
+            'still_empty': still_empty,
+            'understood': True,
+            'pending': {'token': token, 'set': pending_set,
+                        'expires_at': (now + timedelta(seconds=PENDING_MAX_AGE)).isoformat()},
+        })
+    if not _write_exchange(lead, rep, writes, exchange, summary):
+        return JsonResponse({'error': 'That lead changed hands just now; nothing was saved.'}, status=409)
+    if writes:
+        _after_write(lead, rep, writes)
 
     return JsonResponse({
         'set': _serialize(writes),
@@ -608,4 +718,5 @@ def alfred_text(request):
         'appointment_move': answer['move'],
         'still_empty': still_empty,
         'understood': answer['understood'],
+        'pending': None,
     })
