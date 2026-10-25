@@ -103,8 +103,10 @@ class StrictResolutionTests(AlfredBase):
         third = Organization.objects.create(name='Third Org', slug='third-org')
         Rep.all_objects.create(name='Both T', phone_number=BOTH, home_address='5 E St', organization=third)
         self.assertEqual(resolve_caller(f'+1{BOTH}'), {'org_id': None, 'decline': 'both_orgs'})
+        calls_before = VoiceCallLog.all_objects.count()
         with self.assertLogs('maps.alfred_org', level='WARNING') as logs:
             body = self.answer(BOTH).content.decode()
+        self.assertEqual(VoiceCallLog.all_objects.count(), calls_before)  # a declined call writes nothing
         self.assertIn(f'<Say>{DECLINE_BOTH}</Say>', body)
         self.assertIn('<Hangup />', body)
         self.assertNotIn('<Connect>', body)
