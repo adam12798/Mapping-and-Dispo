@@ -352,6 +352,40 @@ async def get_drive_time(lat1, lng1, lat2, lng2):
     return None
 
 
+async def _session_org(caller_number, reminder_lead_id, org_id):
+    """maps/alfred_org.session_org, from the stream's event loop."""
+    import django
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
+    django.setup()
+    from asgiref.sync import sync_to_async
+    from maps.alfred_org import session_org
+    return await sync_to_async(session_org)(caller_number, reminder_lead_id, org_id)
+
+
+async def _strict_mode():
+    import django
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
+    django.setup()
+    from asgiref.sync import sync_to_async
+    from maps.alfred_org import strict_mode
+    return await sync_to_async(strict_mode)()
+
+
+def _log_decline(kind, number, result):
+    from maps.alfred_org import log_decline
+    log_decline(kind, number, result)
+
+
+def fixed_org_id(value):
+    """The organization a call was fixed to when it was answered (the
+    stream's orgId parameter, maps/alfred_org.py), or None: no organization
+    asked Alfred to decline, and the call is resolved as it always was."""
+    try:
+        return int(value) if value not in (None, '') else None
+    except (TypeError, ValueError):
+        return None
+
+
 def resolve_voice_org_id(rep=None, manager=None):
     """Explicit org for a voice call: the identified caller's org, else the
     default inbound org. Called before any scoped query runs."""
@@ -363,8 +397,10 @@ def resolve_voice_org_id(rep=None, manager=None):
     return Organization.default_inbound_id()
 
 
-async def get_rep_context(caller_number, reminder_lead_id=''):
-    """Look up caller as rep or manager and return appropriate context."""
+async def get_rep_context(caller_number, reminder_lead_id='', org_id=None):
+    """Look up caller as rep or manager and return appropriate context.
+    With org_id (fixed at answer time, maps/alfred_org.py) the caller is
+    looked up within that organization only and the call runs in it."""
     import django
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
     django.setup()
@@ -376,13 +412,19 @@ async def get_rep_context(caller_number, reminder_lead_id=''):
     from datetime import date, datetime, timedelta
 
     if not caller_number:
-        return {'rep': None, 'manager': None, 'prompt_context': ''}
+        return {'rep': None, 'manager': None, 'prompt_context': '', 'org_id': org_id}
 
     clean = clean_phone(caller_number)
 
     # Identify the caller by phone across all orgs (deliberate cross-org
-    # lookup — the phone number is the only identity available here).
-    reps = await sync_to_async(list)(Rep.all_objects.filter(is_active=True))
+    # lookup — the phone number is the only identity available here) — or,
+    # when the call was fixed to an organization at answer time, within it.
+    rep_qs = Rep.all_objects.filter(is_active=True)
+    manager_qs = Manager.all_objects.all()
+    if org_id is not None:
+        rep_qs = rep_qs.filter(organization_id=org_id)
+        manager_qs = manager_qs.filter(organization_id=org_id)
+    reps = await sync_to_async(list)(rep_qs)
     rep = None
     for r in reps:
         r_clean = clean_phone(r.phone_number)
@@ -390,7 +432,7 @@ async def get_rep_context(caller_number, reminder_lead_id=''):
             rep = r
             break
 
-    managers = await sync_to_async(list)(Manager.all_objects.all())
+    managers = await sync_to_async(list)(manager_qs)
     manager = None
     for m in managers:
         m_clean = clean_phone(m.phone_number)
@@ -399,7 +441,8 @@ async def get_rep_context(caller_number, reminder_lead_id=''):
             break
 
     # Everything below runs scoped to the caller's organization.
-    org_id = await sync_to_async(resolve_voice_org_id)(rep, manager)
+    if org_id is None:
+        org_id = await sync_to_async(resolve_voice_org_id)(rep, manager)
     set_current_org(org_id)
 
     now_eastern = datetime.now(ZoneInfo('America/New_York'))
@@ -441,11 +484,12 @@ async def get_rep_context(caller_number, reminder_lead_id=''):
             'rep': None,
             'manager': manager,
             'prompt_context': '\n'.join(lines),
+            'org_id': org_id,
         }
 
     # Not a rep and not a manager
     if not rep:
-        return {'rep': None, 'manager': None, 'prompt_context': ''}
+        return {'rep': None, 'manager': None, 'prompt_context': '', 'org_id': org_id}
 
     # Rep mode (existing logic)
     leads = await sync_to_async(list)(
@@ -536,10 +580,11 @@ async def get_rep_context(caller_number, reminder_lead_id=''):
         'manager': manager,
         'prompt_context': '\n'.join(lines),
         'reminder_lead_info': reminder_lead_info,
+        'org_id': org_id,
     }
 
 
-async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_parts=None):
+async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_parts=None, org_id=None):
     """Execute a function call from the AI and return the result."""
     import django
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
@@ -550,8 +595,11 @@ async def execute_tool(fn_name, fn_args, rep=None, manager=None, transcript_part
     from maps.tenancy import set_current_org
 
     # This coroutine runs in a different task than get_rep_context, so the
-    # org context is not inherited — re-resolve from the identified caller.
-    set_current_org(await sync_to_async(resolve_voice_org_id)(rep, manager))
+    # org context is not inherited — the call's fixed organization, else
+    # re-resolve from the identified caller.
+    if org_id is None:
+        org_id = await sync_to_async(resolve_voice_org_id)(rep, manager)
+    set_current_org(org_id)
 
     if fn_name == 'update_disposition':
         homeowner_name = fn_args.get('homeowner_name', '')
@@ -821,6 +869,9 @@ async def media_stream(ws: WebSocket):
     caller_number = ''
     call_sid = ''
     reminder_lead_id = ''
+    call_org_id = None  # fixed at answer time when an organization asks Alfred to decline (maps/alfred_org.py)
+    started = False     # the stream's start event arrived
+    refused = False     # the stream refused the call (maps/alfred_org.py session_org)
     transcript_parts = []
     openai_ws = None
     session_ready = asyncio.Event()
@@ -841,7 +892,7 @@ async def media_stream(ws: WebSocket):
 
         async def forward_twilio_to_openai():
             """Forward audio from Twilio to OpenAI."""
-            nonlocal stream_sid, caller_number, call_sid, reminder_lead_id, rep_context
+            nonlocal stream_sid, caller_number, call_sid, reminder_lead_id, rep_context, call_org_id, started, refused
             try:
                 while True:
                     data = await ws.receive_text()
@@ -853,10 +904,26 @@ async def media_stream(ws: WebSocket):
                         call_sid = custom.get('callSid', msg['start'].get('callSid', ''))
                         caller_number = custom.get('callerNumber', '')
                         reminder_lead_id = custom.get('reminderLeadId', '')
+                        call_org_id = fixed_org_id(custom.get('orgId', ''))
+                        started = True
                         logger.info(f'Stream started: sid={stream_sid}, call={call_sid}, caller={caller_number}, reminder={reminder_lead_id}')
 
+                        # While an organization asks Alfred to decline, the
+                        # stream checks the call's organization once more before
+                        # any lookup, and refuses it if it does not hold. The
+                        # call counts as refused until the check returns: if it
+                        # raises, nothing is written.
+                        refused = True
+                        session = await _session_org(caller_number, reminder_lead_id, call_org_id)
+                        if session['decline']:
+                            _log_decline('stream', caller_number, session)
+                            break
+                        refused = False
+                        call_org_id = session['org_id']
+
                         # Look up caller (rep or manager) and their appointments
-                        rep_context = await get_rep_context(caller_number, reminder_lead_id=reminder_lead_id)
+                        rep_context = await get_rep_context(caller_number, reminder_lead_id=reminder_lead_id,
+                                                            org_id=call_org_id)
                         logger.info(f'Caller context: rep={rep_context.get("rep")}, manager={rep_context.get("manager")}, reminder={reminder_lead_id}')
                         caller_identified.set()
 
@@ -1011,7 +1078,7 @@ async def media_stream(ws: WebSocket):
 
                         logger.info(f'Function call: {fn_name}({fn_args})')
 
-                        result = await execute_tool(fn_name, fn_args, rep=rep_context.get('rep'), manager=rep_context.get('manager'), transcript_parts=transcript_parts)
+                        result = await execute_tool(fn_name, fn_args, rep=rep_context.get('rep'), manager=rep_context.get('manager'), transcript_parts=transcript_parts, org_id=call_org_id)
 
                         # Send result back to OpenAI
                         await openai_ws.send(json.dumps({
@@ -1086,17 +1153,29 @@ async def media_stream(ws: WebSocket):
             await openai_ws.close()
         logger.info('Media stream connection closed')
 
-        # Post-call: always save call log
-        full_transcript = '\n'.join(transcript_parts)
-        logger.info(f'Call ended. Caller: {caller_number}, SID: {call_sid}, transcript parts: {len(transcript_parts)}')
-        logger.info(f'Transcript: {full_transcript[:300] if full_transcript else "(empty)"}')
+        # Post-call: always save call log — except, while an organization asks
+        # Alfred to decline, for a call the stream refused or that never
+        # started: it writes nothing in any organization's tables. (A failed
+        # check skips the save: nothing is written on a doubt.)
         try:
-            await save_call_and_extract(caller_number, call_sid, full_transcript, rep=rep_context.get('rep'))
+            skip = refused or (not started and await _strict_mode())
         except Exception as e:
-            logger.error(f'Failed to save call log: {e}')
+            logger.error(f'Could not check whether to save the call log: {e}')
+            skip = True
+        if skip:
+            logger.info('Call not saved: refused, never started, or unchecked')
+        else:
+            full_transcript = '\n'.join(transcript_parts)
+            logger.info(f'Call ended. Caller: {caller_number}, SID: {call_sid}, transcript parts: {len(transcript_parts)}')
+            logger.info(f'Transcript: {full_transcript[:300] if full_transcript else "(empty)"}')
+            try:
+                await save_call_and_extract(caller_number, call_sid, full_transcript, rep=rep_context.get('rep'),
+                                            org_id=call_org_id)
+            except Exception as e:
+                logger.error(f'Failed to save call log: {e}')
 
 
-async def save_call_and_extract(caller_number, call_sid, transcript, rep=None):
+async def save_call_and_extract(caller_number, call_sid, transcript, rep=None, org_id=None):
     """Save the call log and extract time off requests using GPT-4o-mini."""
     import django
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dispo.settings')
@@ -1127,10 +1206,14 @@ async def save_call_and_extract(caller_number, call_sid, transcript, rep=None):
         except Exception as e:
             logger.error(f'Summary generation failed: {e}')
 
-    # Match caller to a rep if not already matched (cross-org phone lookup)
+    # Match caller to a rep if not already matched (cross-org phone lookup —
+    # within the call's fixed organization when it has one)
     if not rep and caller_number:
         clean = clean_phone(caller_number)
-        reps = await sync_to_async(list)(Rep.all_objects.filter(is_active=True))
+        rep_qs = Rep.all_objects.filter(is_active=True)
+        if org_id is not None:
+            rep_qs = rep_qs.filter(organization_id=org_id)
+        reps = await sync_to_async(list)(rep_qs)
         for r in reps:
             r_clean = clean_phone(r.phone_number)
             if r_clean and r_clean == clean:
@@ -1138,8 +1221,11 @@ async def save_call_and_extract(caller_number, call_sid, transcript, rep=None):
                 break
 
     # Post-call work runs outside the tasks that identified the caller, so
-    # the org context is not inherited — re-resolve it before any writes.
-    set_current_org(await sync_to_async(resolve_voice_org_id)(rep))
+    # the org context is not inherited — the call's fixed organization, else
+    # re-resolve it before any writes.
+    if org_id is None:
+        org_id = await sync_to_async(resolve_voice_org_id)(rep)
+    set_current_org(org_id)
 
     # Save call log
     call_log = await sync_to_async(VoiceCallLog.objects.create)(

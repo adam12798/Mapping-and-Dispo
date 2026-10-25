@@ -16,6 +16,14 @@ class Organization(models.Model):
     # (unknown SMS sender, API tenant with no org). Exactly one org should
     # have this set.
     is_default_inbound = models.BooleanField(default=False)
+    # Alfred (the voice assistant) politely declines this organization's
+    # callers and makes no reminder calls for it. Off by default: nothing
+    # changes until it is turned on — `python manage.py alfred_declines
+    # <slug> on`, or the Django admin for a superuser who is also staff
+    # (is_staff: Django's admin requires it). While any active
+    # organization has it on, every call's organization is resolved strictly
+    # at answer time (maps/alfred_org.py).
+    alfred_declines = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
