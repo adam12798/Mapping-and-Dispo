@@ -1236,69 +1236,113 @@ class ComposeTests(AlfredTextBase):
 class WeekdayTests(AlfredTextBase):
     """The weekday guard (2026-10-26): on a Monday, after "I gotta follow up
     next week", "Wednesday noon" came back as that Monday. A date on none of
-    the weekdays the rep's text names (and no other date beside them) is held
+    the weekdays the rep's text names (and not given another way) is held
     with its time, and Alfred offers the date the text names."""
 
     MONDAY = dt.datetime(2026, 10, 26, 12, 30, tzinfo=EASTERN)
 
-    def follow_up(self, text, day, time='12:00', **extra):
+    def follow_up(self, text, day, time='12:00', context=None, **extra):
         self.model.fixed = {'understood': True, 'follow_up_date': day, **extra}
         if time:
             self.model.fixed['follow_up_time'] = time
-        return self.text(text).json()
+        return self.text(text, context=context).json()
 
-    def test_wednesday_noon_on_a_monday_is_held_with_its_time_and_offered(self):
+    def test_the_10_26_incident_two_texts_offers_next_weeks_wednesday(self):
         self.now.return_value = self.MONDAY
-        # As on 10-26: a follow-up already dated today, no time yet.
+        self.model.fixed = {'understood': True, 'disposition': 'follow_up', 'sat': True,
+                            'call_notes': 'Following up next week'}
+        first = self.text('I gotta follow up next week').json()
+        context = {'last_summary': first['summary'], 'last_question': first['next_question'],
+                   'empty_fields': first['still_empty']}
+        out = self.follow_up('Wednesday noon', '2026-10-26', context=context)
+        self.assertEqual(out['set'], {})
+        self.assertEqual(out['next_question'], 'Follow up Wednesday, November 4 at 12:00 PM?')
+        lead = self.fresh()
+        self.assertEqual((lead.follow_up_date, lead.follow_up_time), (None, None))
+        # A bare "yes" settles both.
+        out = self.follow_up('yes', '2026-11-04', '12:00')
+        self.assertEqual((out['set']['follow_up_date'], out['set']['follow_up_time']), ('2026-11-04', '12:00'))
+
+    def test_next_week_read_from_the_context_alone(self):
+        self.now.return_value = self.MONDAY
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='follow_up', sat=True)   # no call note
+        for context in ({'last_summary': 'Wants a call next week'},
+                        {'last_question': 'Next week works? What day and time?'}):
+            out = self.follow_up('Wednesday noon', '2026-10-26', context=context)
+            self.assertEqual(out['next_question'], 'Follow up Wednesday, November 4 at 12:00 PM?', context)
+        # The rep's own "this wednesday" overrides an earlier "next week".
+        out = self.follow_up('this wednesday at noon', '2026-10-26', context={'last_summary': 'Wants a call next week'})
+        self.assertEqual(out['next_question'], 'Follow up Wednesday, October 28 at 12:00 PM?')
+
+    def test_a_held_date_holds_its_time_too(self):
+        self.now.return_value = self.MONDAY
+        # As on 10-26: the lead's call note says next week; a follow-up already dated today, no time yet.
         Lead.all_objects.filter(pk=self.lead.pk).update(disposition='follow_up', sat=True,
                                                         call_notes='Following up next week',
                                                         follow_up_date=dt.date(2026, 10, 26))
         out = self.follow_up('Wednesday noon', '2026-10-26')
         self.assertEqual(out['set'], {})
-        self.assertEqual(out['next_question'], 'Follow up Wednesday the 28th at 12:00 PM?')
+        self.assertEqual(out['next_question'], 'Follow up Wednesday, November 4 at 12:00 PM?')   # from the call note
         lead = self.fresh()
         # Neither the date nor 12:00 (which would have landed on today) is written.
         self.assertEqual((lead.follow_up_date, lead.follow_up_time), (dt.date(2026, 10, 26), None))
-        self.assertIn('Alfred: Follow up Wednesday the 28th at 12:00 PM?', VoiceCallLog.all_objects.get().transcript)
-        # A bare "yes" settles both.
-        out = self.follow_up('yes', '2026-10-28', '12:00')
-        self.assertEqual((out['set']['follow_up_date'], out['set']['follow_up_time']), ('2026-10-28', '12:00'))
-        lead = self.fresh()
-        self.assertEqual((lead.follow_up_date, lead.follow_up_time), (dt.date(2026, 10, 28), dt.time(12, 0)))
+        self.assertIn('Alfred: Follow up Wednesday, November 4 at 12:00 PM?',
+                      VoiceCallLog.all_objects.get().transcript)
 
     def test_the_same_mistake_again_gets_the_same_offer_and_a_yes_settles_it(self):
         self.now.return_value = self.MONDAY
         Lead.all_objects.filter(pk=self.lead.pk).update(disposition='follow_up', sat=True)
         for text in ('Wednesday noon', 'this wednesday'):
             out = self.follow_up(text, '2026-10-26')       # the model makes the same mistake twice
-            self.assertEqual(out['next_question'], 'Follow up Wednesday the 28th at 12:00 PM?', text)
+            self.assertEqual(out['next_question'], 'Follow up Wednesday, October 28 at 12:00 PM?', text)
             self.assertNotIn('follow_up_date', out['set'])
             self.assertNotIn('follow_up_time', out['set'])
         out = self.follow_up('yes', '2026-10-28')
         self.assertEqual((out['set']['follow_up_date'], out['set']['follow_up_time']), ('2026-10-28', '12:00'))
 
+    def test_debrief_words_beside_the_weekday_dont_switch_the_guard_off(self):
+        self.now.return_value = self.MONDAY
+        for text in ('went well today, follow up Wednesday noon',
+                     'sat with them yesterday, follow up Wednesday at noon',
+                     '$189 a month, follow up wed at noon',
+                     'needs to talk to wife tonight, call her Wednesday at noon'):
+            out = self.follow_up(text, '2026-10-26')       # read as that Monday
+            self.assertNotIn('follow_up_date', out['set'], text)
+            self.assertEqual(out['next_question'], 'Follow up Wednesday, October 28 at 12:00 PM?', text)
+        self.assertIsNone(self.fresh().follow_up_date)
+
+    def test_todays_weekday_is_offered_while_its_time_is_ahead(self):
+        self.now.return_value = self.MONDAY           # 12:30 PM
+        for text, time, offer in (('Monday 5pm', '17:00', 'Follow up Monday, October 26 at 5:00 PM?'),
+                                  ('Monday 9am', '09:00', 'Follow up Monday, November 2 at 9:00 AM?'),
+                                  ('Monday', None, 'Follow up Monday, November 2?')):
+            out = self.follow_up(text, '2026-10-27', time)     # read as Tuesday
+            self.assertEqual(out['next_question'], offer, text)
+
     def test_next_week_and_a_weekday(self):
         self.now.return_value = self.MONDAY
         text = 'follow up next week, wednesday at noon, no credit run'
-        answer = {'disposition': 'follow_up', 'sat': True, 'call_notes': 'Following up next week'}
+        answer = {'disposition': 'follow_up', 'sat': True, 'call_notes': 'Needs to talk to wife'}
         out = self.follow_up(text, '2026-10-26', **answer)
         self.assertNotIn('follow_up_date', out['set'])
         self.assertNotIn('follow_up_time', out['set'])
-        self.assertEqual(out['next_question'], 'Follow up Wednesday the 4th at 12:00 PM?')    # next week's
+        self.assertEqual(out['next_question'], 'Follow up Wednesday, November 4 at 12:00 PM?')
         self.assertEqual(out['set']['disposition'], 'follow_up')         # the rest of the answer is written
         out = self.follow_up(text, '2026-11-02', **answer)               # next week, but a Monday
-        self.assertEqual(out['next_question'], 'Follow up Wednesday the 4th at 12:00 PM?')
+        self.assertEqual(out['next_question'], 'Follow up Wednesday, November 4 at 12:00 PM?')
         out = self.follow_up(text, '2026-11-04', **answer)
         self.assertEqual((out['set']['follow_up_date'], out['set']['follow_up_time']), ('2026-11-04', '12:00'))
         self.assertEqual(self.fresh().follow_up_date, dt.date(2026, 11, 4))
 
     def test_a_date_on_a_named_weekday_is_written(self):
-        # Tuesday 2026-10-20.
+        # Tuesday 2026-10-20. With several weekdays named, a date on any of them is written.
         for text, day in (('Wednesday noon', '2026-10-21'), ('call him wed at noon', '2026-10-28'),
                           ('wed 2pm', '2026-10-21'), ('weds 12', '2026-10-21'), ('thurs at 10', '2026-10-22'),
                           ('thu 10am', '2026-10-22'), ('Fri at 2', '2026-10-23'), ('mon morning, 9', '2026-10-26'),
                           ('tues 9am', '2026-10-27'), ('Saturday at 11', '2026-10-24'),
                           ('sunday after church, 1pm', '2026-10-25'), ('wednesday or thursday at 2', '2026-10-22'),
+                          ('wed or thurs at 2', '2026-10-21'), ('thurs or wed', '2026-10-21'),
+                          ('this wed, 2pm', '2026-10-21'),
                           ("Can't do Tuesday but Wednesday works, noon", '2026-10-21'),
                           ('swing by Wednesday at 2', '2026-10-21')):
             out = self.follow_up(text, day)
@@ -1306,16 +1350,19 @@ class WeekdayTests(AlfredTextBase):
             self.assertEqual(self.fresh().follow_up_date, dt.date.fromisoformat(day), text)
 
     def test_a_date_on_none_of_the_named_weekdays_is_held_and_offered(self):
-        # Tuesday 2026-10-20.
+        # Tuesday 2026-10-20, 9 PM.
         for text, day, time, offer in (
-                ('Wednesday noon', '2026-10-20', '12:00', 'Follow up Wednesday the 21st at 12:00 PM?'),
-                ('thurs at 10', '2026-10-23', '10:00', 'Follow up Thursday the 22nd at 10:00 AM?'),
-                ('fri at 2', '2026-10-22', '14:00', 'Follow up Friday the 23rd at 2:00 PM?'),
-                ('not monday, call tues at 2', '2026-10-26', '14:00', 'Follow up Tuesday the 27th at 2:00 PM?'),
-                ('wednesday or thursday at 2', '2026-10-23', '14:00', 'Follow up Wednesday the 21st at 2:00 PM?'),
-                ('swing by Wednesday at 2', '2026-10-22', '14:00', 'Follow up Wednesday the 21st at 2:00 PM?'),
-                ('wed at 2', '2026-10-22', '14:00', 'Follow up Wednesday the 21st at 2:00 PM?'),
-                ('Wednesday', '2026-10-22', None, 'Follow up Wednesday the 21st?')):     # no time, none offered
+                ('Wednesday noon', '2026-10-20', '12:00', 'Follow up Wednesday, October 21 at 12:00 PM?'),
+                ('thurs at 10', '2026-10-23', '10:00', 'Follow up Thursday, October 22 at 10:00 AM?'),
+                ('fri at 2', '2026-10-22', '14:00', 'Follow up Friday, October 23 at 2:00 PM?'),
+                ('not monday, call tues at 2', '2026-10-26', '14:00', 'Follow up Tuesday, October 27 at 2:00 PM?'),
+                ('wednesday or thursday at 2', '2026-10-23', '14:00', 'Follow up Wednesday, October 21 at 2:00 PM?'),
+                ('swing by Wednesday at 2', '2026-10-22', '14:00', 'Follow up Wednesday, October 21 at 2:00 PM?'),
+                ('wed at 2', '2026-10-22', '14:00', 'Follow up Wednesday, October 21 at 2:00 PM?'),
+                ('tuesday at 11pm', '2026-10-21', '23:00', 'Follow up Tuesday, October 20 at 11:00 PM?'),
+                ('call her the 4th or friday at 2', '2026-11-05', '14:00', 'Follow up Friday, October 23 at 2:00 PM?'),
+                ('in 3 days, wednesday at 2', '2026-10-22', '14:00', 'Follow up Wednesday, October 21 at 2:00 PM?'),
+                ('Wednesday', '2026-10-22', None, 'Follow up Wednesday, October 21?')):     # no time, none offered
             out = self.follow_up(text, day, time)
             self.assertNotIn('follow_up_date', out['set'], text)
             self.assertNotIn('follow_up_time', out['set'], text)              # held with the date
@@ -1330,13 +1377,13 @@ class WeekdayTests(AlfredTextBase):
         out = self.text('Homeowner asked to move it to Thursday at 6').json()
         self.assertIsNone(out['appointment_move'])
         self.assertIsNone(out['pending'])
-        self.assertEqual(out['next_question'], 'Move it to Thursday the 22nd at 6:00 PM?')
+        self.assertEqual(out['next_question'], 'Move it to Thursday, October 22 at 6:00 PM?')
         self.assertNothingWritten(before)
         # The answer "the 22nd": the offer carried the time, so the move is whole — pending as before.
         self.model.fixed = {'understood': True, 'appointment_moved_to_date': '2026-10-22',
                             'appointment_moved_to_time': '18:00'}
         out = self.text('the 22nd', context={'last_question': out['next_question']}).json()
-        self.assertIn("Alfred's last question: Move it to Thursday the 22nd at 6:00 PM?",
+        self.assertIn("Alfred's last question: Move it to Thursday, October 22 at 6:00 PM?",
                       self.model.calls[-1]['messages'][0]['content'])
         self.assertEqual(out['appointment_move'], {'date': '2026-10-22', 'time': '18:00'})
         self.assertTrue(out['pending']['token'])
@@ -1346,12 +1393,13 @@ class WeekdayTests(AlfredTextBase):
         for text, day in (
                 ('sat with them, call back in 3 days at 2', '2026-10-23'),            # "sat": they sat it
                 ('great sun on that roof, call in a week at 2', '2026-10-27'),         # "sun": solar
-                ('the appointment tuesday went well, call her back 11/4 at 2', '2026-11-04'),   # a calendar date
+                ('the appointment tuesday went well, call her back 11/4 at 2', '2026-11-04'),   # that very date
                 ("Tuesday's appt went well, call her the 4th at 2", '2026-11-04'),
                 ('monday was rough, call her back nov 4 at 2', '2026-11-04'),
-                ('Monday appt went well, follow up in 2 weeks at 2', '2026-11-03'),    # a relative date
+                ('Monday appt went well, follow up in 2 weeks at 2', '2026-11-03'),
                 ("follow up tomorrow at 2, he's off on friday", '2026-10-21'),
                 ('follow up in a couple of weeks, she is away until friday', '2026-11-03'),
+                ('wednesday is out, try again in a few days at 2', '2026-10-24'),
                 ('call after wednesday, around 2', '2026-10-22'),                      # a limit, not the day
                 ('went well, wed like to come back tomorrow at 2', '2026-10-21'),       # "wed" is "we'd"
                 ('went well wed like to swing back around 2', '2026-10-22'),

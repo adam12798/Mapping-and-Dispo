@@ -654,73 +654,118 @@ def _time(value):
         return None
 
 
-# The weekday guard (2026-10-26: on a Monday, "Wednesday noon" came back as
-# that Monday). A date the model made is held only when the rep's text names
-# weekdays, the date is on none of them, and the text gives no other date the
-# weekday could merely sit beside — a calendar date ("11/4", "the 4th") or a
-# relative one ("tomorrow", "in 2 weeks"). Then the date and its time are
-# not written, and Alfred offers the date the text names instead:
-# "Follow up Wednesday the 28th at 12:00 PM?", so a bare "yes" settles both.
+# The weekday guard (2026-10-26: on a Monday, after "I gotta follow up next
+# week", "Wednesday noon" came back as that Monday). A date the model made is
+# held when the rep's text names weekdays and the date is on none of them —
+# unless the text also gives that very date another way: a calendar date
+# ("11/4", "the 4th", "Nov 4") or a relative one ("tomorrow", "in 3 days",
+# "in 2 weeks") that means exactly it. "today", "tonight" and "yesterday"
+# never excuse it: a debrief says them about the appointment. A held date is
+# not written, nor is its time; Alfred offers the date the text names, with
+# that time — "Follow up Wednesday, November 4 at 12:00 PM?" — so a bare
+# "yes" settles both. The offer is the next such weekday (today's, if the
+# time is still ahead), or that weekday next week when "next week" is in the
+# text, or in the summary, last question or call note before it.
 # Weekdays are full names, and only abbreviations nobody writes for anything
 # else: never "sat" (they sat the appointment) or "sun" (solar), and "wed"
-# only before a time ("wed at 2"), since it is also "we'd". A weekday after
-# "after", "until", "not"… is a limit, not the day, so it isn't counted.
+# only where "we'd" can't be. A weekday after "after", "until", "not"… is a
+# limit, not the day, so it isn't counted.
 WEEKDAY_WORDS = {'monday': 0, 'mon': 0, 'tuesday': 1, 'tue': 1, 'tues': 1, 'wednesday': 2, 'wed': 2, 'weds': 2,
                  'thursday': 3, 'thu': 3, 'thur': 3, 'thurs': 3, 'friday': 4, 'fri': 4, 'saturday': 5, 'sunday': 6}
 WEEKDAY_NAMES = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
-BEFORE_A_TIME = {'at', '@', 'noon', 'morning', 'afternoon', 'evening', 'night', 'am', 'pm'}
+# "wed" is Wednesday before a time, "or"/"and", another weekday or the end ("wed at 2", "wed or thurs"),
+# or after "this"/"next"/"on"; anywhere else ("wed like to come back") it is "we'd".
+WED_BEFORE = {'at', '@', 'noon', 'morning', 'afternoon', 'evening', 'night', 'am', 'pm', 'or', 'and', ''}
+WED_AFTER = {'this', 'next', 'on'}
 NOT_THE_DAY = {'after', 'before', 'until', 'till', 'til', 'not', 'except', 'past'}
+MONTHS = ('jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec')
 CALENDAR_DATE = re.compile(
-    r'\d{1,2}/\d{1,2}|\b\d{1,2}(st|nd|rd|th)\b|\d{4}-\d{2}-\d{2}|\b(jan|january|feb|february|mar|march|apr|april|'
-    r'may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\.?\s+\d{1,2}\b',
-    re.I)
-OTHER_DATE = re.compile(
-    r'\b(today|tonight|tmrw?|tomm?orr?ow|yesterday|weekend|months?|'
-    r'(in|a|an|one|two|three|four|five|six|couple|couple of|few|\d+)\s+(days?|weeks?|months?))\b', re.I)
+    r'(?P<m>\d{1,2})/(?P<d>\d{1,2})|\b(?P<nth>\d{1,2})(?:st|nd|rd|th)\b|(?P<iso>\d{4}-\d{2}-\d{2})|'
+    r'\b(?P<month>jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|'
+    r'oct|october|nov|november|dec|december)\.?\s+(?P<md>\d{1,2})\b', re.I)
+RELATIVE_DATE = re.compile(
+    r'\b(?:(?P<tomorrow>tmrw?|tomm?orr?ow)|(?P<weekend>weekend)|'
+    r'(?P<n>\d+|a|an|one|two|three|four|five|six|couple\s+of|couple|few)\s+(?P<unit>days?|weeks?|months?))\b', re.I)
+COUNTS = {'a': (1,), 'an': (1,), 'one': (1,), 'two': (2,), 'three': (3,), 'four': (4,), 'five': (5,), 'six': (6,),
+          'couple': (2, 3), 'couple of': (2, 3), 'few': (3, 4)}
 NEXT_WEEK = re.compile(r'\bnext week\b', re.I)
+THIS_WEEK = re.compile(r'\bthis (?:week|' + '|'.join(WEEKDAY_WORDS) + r')\b', re.I)
 ASK_FOLLOW_UP_ON = 'Follow up {when}?'
 ASK_MOVE_TO = 'Move it to {when}?'
 
 
-def _ordinal(n):
-    return f"{n}{'th' if 11 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+def _said_as_date(day, text, today):
+    """True when a calendar or relative date in the (lowercased) text is `day` itself."""
+    for m in CALENDAR_DATE.finditer(text):
+        if m['iso']:
+            said = m['iso'] == day.isoformat()
+        elif m['nth']:
+            said = int(m['nth']) == day.day
+        else:
+            month = int(m['m']) if m['m'] else MONTHS.index(m['month'][:3]) + 1
+            said = (month, int(m['d'] or m['md'])) == (day.month, day.day)
+        if said:
+            return True
+    ahead = (day - today).days
+    for m in RELATIVE_DATE.finditer(text):
+        if m['tomorrow']:
+            said = ahead == 1
+        elif m['weekend']:
+            said = day.weekday() >= 5 and 0 <= ahead <= 8
+        else:
+            counts = COUNTS.get(' '.join(m['n'].split())) or (int(m['n']),)
+            unit = m['unit'][0]
+            said = any(ahead == n if unit == 'd' else ahead == 7 * n if unit == 'w' else 28 * n <= ahead <= 31 * n
+                       for n in counts)
+        if said:
+            return True
+    return False
 
 
-def _weekday_question(day, text, today, at, template):
+def _weekday_question(day, text, today, at, template, earlier=()):
     """None when `day` may stand: the rep's text names no weekday, `day` is on
-    one it names, or the text gives another date. Else the question offering
-    the date the text names — the next such weekday after today, or that
-    weekday next week when the text says "next week" — at `at`, if given."""
-    text = (text or '').lower().replace('’', "'")
-    if CALENDAR_DATE.search(text) or OTHER_DATE.search(text):
-        return None
-    words = re.findall(r"[a-z]+(?:'[a-z]+)?|\d+|@", text)
+    one it names, or the text gives `day` itself another way. Else the
+    question offering the date the text names, at `at` when given. `earlier`:
+    the summary, last question and call note, read for "next week"."""
+    said = (text or '').lower().replace('\u2019', "'")
+    words = re.findall(r"[a-z]+(?:'[a-z]+)?|\d+|@", said)
     named = set()
     for i, word in enumerate(words):
-        if word not in WEEKDAY_WORDS or (i and words[i - 1] in NOT_THE_DAY):
+        before = words[i - 1] if i else ''
+        after = words[i + 1] if i + 1 < len(words) else ''
+        if word not in WEEKDAY_WORDS or before in NOT_THE_DAY:
             continue
-        following = words[i + 1] if i + 1 < len(words) else ''
-        if word == 'wed' and not (following.isdigit() or following in BEFORE_A_TIME):
+        if word == 'wed' and not (after.isdigit() or after in WED_BEFORE or after in WEEKDAY_WORDS
+                                  or before in WED_AFTER):
             continue                # "wed like to come back" is "we'd"
         named.add(WEEKDAY_WORDS[word])
-    if not named or day.weekday() in named:
+    if not named or day.weekday() in named or _said_as_date(day, said, today):
         return None
-    if NEXT_WEEK.search(text):
-        monday = today + timedelta(days=7 - today.weekday())
-        offer = min(monday + timedelta(days=w) for w in named)
-    else:
-        offer = min(today + timedelta(days=(w - today.weekday()) % 7 or 7) for w in named)
-    when = f'{WEEKDAY_NAMES[offer.weekday()]} the {_ordinal(offer.day)}'
+    before_now = ' '.join(t for t in earlier if t)
+    next_week = NEXT_WEEK.search(said) or (NEXT_WEEK.search(before_now) and not THIS_WEEK.search(said))
+    now = timezone.now().astimezone(EASTERN)
+
+    def offer_on(weekday):
+        if next_week:
+            return today + timedelta(days=7 - today.weekday() + weekday)
+        ahead = (weekday - today.weekday()) % 7
+        if ahead == 0 and not (at and now.date() == today and at > now.time()):
+            ahead = 7               # today's weekday: today only while the time is still ahead
+        return today + timedelta(days=ahead)
+
+    offer = min(offer_on(w) for w in named)
+    when = f'{WEEKDAY_NAMES[offer.weekday()]}, {offer:%B} {offer.day}'
     if at:
         when += ' at ' + at.strftime('%I:%M %p').lstrip('0')
     return template.format(when=when)
 
 
-def read_answer(args, lead, today, text=''):
+def read_answer(args, lead, today, text='', context=None):
     """What to write, what to return, and what didn't read. Never a guess:
     a field the model got wrong is dropped and becomes the question."""
     writes, problems = {}, []
     held = None                 # the weekday guard's question, when it holds the follow-up
+    earlier = ((context or {}).get('last_summary'), (context or {}).get('last_question'), lead.call_notes)
     understood = args.get('understood') is not False
     question = _short(args.get('clarifying_question'), 300)
     declined = [f for f in QUESTION_ORDER if f in (args.get('declined_fields') or [])] \
@@ -747,7 +792,7 @@ def read_answer(args, lead, today, text=''):
         if follow_up_date is None or follow_up_date < today:
             problems.append(('follow_up_date', QUESTIONS['follow_up_date']))
         elif held := _weekday_question(follow_up_date, text, today, _time(args.get('follow_up_time')),
-                                       ASK_FOLLOW_UP_ON):
+                                       ASK_FOLLOW_UP_ON, earlier):
             # Held with its time: the question offers both, so a bare "yes" settles them.
             problems.append(('follow_up_date', held))
         else:
@@ -776,7 +821,7 @@ def read_answer(args, lead, today, text=''):
         moved_time = _time(args.get('appointment_moved_to_time'))
         if moved_date is None or moved_time is None or moved_date < today:
             problems.append(('appointment_move', ASK_MOVE))
-        elif ask := _weekday_question(moved_date, text, today, moved_time, ASK_MOVE_TO):
+        elif ask := _weekday_question(moved_date, text, today, moved_time, ASK_MOVE_TO, earlier):
             problems.append(('appointment_move', ask))
         else:
             move = {'date': moved_date.isoformat(), 'time': moved_time.strftime('%H:%M')}
@@ -1053,7 +1098,7 @@ def alfred_text(request):
                             status=502)
 
     today = now.astimezone(EASTERN).date()
-    answer = read_answer(args, lead, today, text)
+    answer = read_answer(args, lead, today, text, context)
     writes = answer['writes']
     if answer['understood'] and not writes and not answer['move'] and not answer['question'] \
             and not answer['problems'] and not answer['declined']:
