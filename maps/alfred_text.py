@@ -652,43 +652,72 @@ def _time(value):
 
 
 # The weekday guard (2026-10-26: on a Monday, "Wednesday noon" came back as
-# that Monday). When the rep's text names a weekday and gives no calendar
-# date, a date the model made that falls on none of the named weekdays is
-# not written; Alfred asks for the date instead. Full names, and only the
-# abbreviations nobody writes for anything else: never "sat" (they sat the
-# appointment) or "sun" (solar). A weekday after "after", "until", "not"…
-# is a limit, not the day, so it isn't counted.
+# that Monday). A date the model made is held only when the rep's text names
+# weekdays, the date is on none of them, and the text gives no other date the
+# weekday could merely sit beside — a calendar date ("11/4", "the 4th") or a
+# relative one ("tomorrow", "in 2 weeks"). Then the date and its time are
+# not written, and Alfred offers the date the text names instead:
+# "Follow up Wednesday the 28th at 12:00 PM?", so a bare "yes" settles both.
+# Weekdays are full names, and only abbreviations nobody writes for anything
+# else: never "sat" (they sat the appointment) or "sun" (solar), and "wed"
+# only before a time ("wed at 2"), since it is also "we'd". A weekday after
+# "after", "until", "not"… is a limit, not the day, so it isn't counted.
 WEEKDAY_WORDS = {'monday': 0, 'mon': 0, 'tuesday': 1, 'tue': 1, 'tues': 1, 'wednesday': 2, 'wed': 2, 'weds': 2,
                  'thursday': 3, 'thu': 3, 'thur': 3, 'thurs': 3, 'friday': 4, 'fri': 4, 'saturday': 5, 'sunday': 6}
 WEEKDAY_NAMES = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
-NOT_THE_DAY = {'after', 'before', 'until', 'till', 'til', 'not', 'except', 'but', 'past', 'by'}
-# "11/4", "the 4th", "Nov 4", "2026-11-04": the model had the date itself, and a weekday beside it may be
-# about something else ("Tuesday's appointment went well, call her the 4th").
+BEFORE_A_TIME = {'at', '@', 'noon', 'morning', 'afternoon', 'evening', 'night', 'am', 'pm'}
+NOT_THE_DAY = {'after', 'before', 'until', 'till', 'til', 'not', 'except', 'past'}
 CALENDAR_DATE = re.compile(
     r'\d{1,2}/\d{1,2}|\b\d{1,2}(st|nd|rd|th)\b|\d{4}-\d{2}-\d{2}|\b(jan|january|feb|february|mar|march|apr|april|'
     r'may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\.?\s+\d{1,2}\b',
     re.I)
-ASK_WHICH_DAY = 'What date is that {day}?'
+OTHER_DATE = re.compile(
+    r'\b(today|tonight|tmrw?|tomm?orr?ow|yesterday|weekend|months?|'
+    r'(in|a|an|one|two|three|four|five|six|couple|couple of|few|\d+)\s+(days?|weeks?|months?))\b', re.I)
+NEXT_WEEK = re.compile(r'\bnext week\b', re.I)
+ASK_FOLLOW_UP_ON = 'Follow up {when}?'
+ASK_MOVE_TO = 'Move it to {when}?'
 
 
-def _weekday_question(day, text, question):
-    """None when `day` fits the weekdays the rep's text names (or it names
-    none, or gives a calendar date); else what to ask instead."""
+def _ordinal(n):
+    return f"{n}{'th' if 11 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _weekday_question(day, text, today, at, template):
+    """None when `day` may stand: the rep's text names no weekday, `day` is on
+    one it names, or the text gives another date. Else the question offering
+    the date the text names — the next such weekday after today, or that
+    weekday next week when the text says "next week" — at `at`, if given."""
     text = (text or '').lower().replace('’', "'")
-    if CALENDAR_DATE.search(text):
+    if CALENDAR_DATE.search(text) or OTHER_DATE.search(text):
         return None
-    words = re.findall(r"[a-z]+(?:'[a-z]+)?", text)
-    named = {WEEKDAY_WORDS[w] for i, w in enumerate(words)
-             if w in WEEKDAY_WORDS and (i == 0 or words[i - 1] not in NOT_THE_DAY)}
+    words = re.findall(r"[a-z]+(?:'[a-z]+)?|\d+|@", text)
+    named = set()
+    for i, word in enumerate(words):
+        if word not in WEEKDAY_WORDS or (i and words[i - 1] in NOT_THE_DAY):
+            continue
+        following = words[i + 1] if i + 1 < len(words) else ''
+        if word == 'wed' and not (following.isdigit() or following in BEFORE_A_TIME):
+            continue                # "wed like to come back" is "we'd"
+        named.add(WEEKDAY_WORDS[word])
     if not named or day.weekday() in named:
         return None
-    return ASK_WHICH_DAY.format(day=WEEKDAY_NAMES[min(named)]) if len(named) == 1 else question
+    if NEXT_WEEK.search(text):
+        monday = today + timedelta(days=7 - today.weekday())
+        offer = min(monday + timedelta(days=w) for w in named)
+    else:
+        offer = min(today + timedelta(days=(w - today.weekday()) % 7 or 7) for w in named)
+    when = f'{WEEKDAY_NAMES[offer.weekday()]} the {_ordinal(offer.day)}'
+    if at:
+        when += ' at ' + at.strftime('%I:%M %p').lstrip('0')
+    return template.format(when=when)
 
 
 def read_answer(args, lead, today, text=''):
     """What to write, what to return, and what didn't read. Never a guess:
     a field the model got wrong is dropped and becomes the question."""
     writes, problems = {}, []
+    held = None                 # the weekday guard's question, when it holds the follow-up
     understood = args.get('understood') is not False
     question = _short(args.get('clarifying_question'), 300)
     declined = [f for f in QUESTION_ORDER if f in (args.get('declined_fields') or [])] \
@@ -714,11 +743,13 @@ def read_answer(args, lead, today, text=''):
         follow_up_date = _date(args['follow_up_date'])
         if follow_up_date is None or follow_up_date < today:
             problems.append(('follow_up_date', QUESTIONS['follow_up_date']))
-        elif ask := _weekday_question(follow_up_date, text, QUESTIONS['follow_up_date']):
-            problems.append(('follow_up_date', ask))
+        elif held := _weekday_question(follow_up_date, text, today, _time(args.get('follow_up_time')),
+                                       ASK_FOLLOW_UP_ON):
+            # Held with its time: the question offers both, so a bare "yes" settles them.
+            problems.append(('follow_up_date', held))
         else:
             writes['follow_up_date'] = follow_up_date
-    if args.get('follow_up_time'):
+    if args.get('follow_up_time') and not held:
         follow_up_time = _time(args['follow_up_time'])
         if follow_up_time is None:
             problems.append(('follow_up_time', 'What time should we follow up?'))
@@ -742,7 +773,7 @@ def read_answer(args, lead, today, text=''):
         moved_time = _time(args.get('appointment_moved_to_time'))
         if moved_date is None or moved_time is None or moved_date < today:
             problems.append(('appointment_move', ASK_MOVE))
-        elif ask := _weekday_question(moved_date, text, ASK_MOVE):
+        elif ask := _weekday_question(moved_date, text, today, moved_time, ASK_MOVE_TO):
             problems.append(('appointment_move', ask))
         else:
             move = {'date': moved_date.isoformat(), 'time': moved_time.strftime('%H:%M')}
