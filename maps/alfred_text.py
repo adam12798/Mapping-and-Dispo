@@ -184,18 +184,27 @@ This text: {goal}
 Now: {now}"""
 COMPOSE_GOALS = {
     'first_nudge': 'the first check-in on this appointment. Find out how it went: sold, dead, or a day and time to '
-                   'follow up.',
-    're_ask': "no answer yet. Ask again, in other words, how it went: sold, dead, or a day and time to follow up.",
-    'reminder': "the follow-up with this customer is due now. Mention the customer's phone and product, and the quote "
-                'when given, and ask how it goes: sold, dead, or a day and time to follow up.',
-    'deal_details': 'a detail of the deal. Put the "Get across" line in your own words, as one question.',
-    'clarify': 'clearing something up. Put the "Get across" line in your own words, as one question.',
+                   'follow up. At most 2 sentences.',
+    're_ask': 'no answer yet. Ask again, in other words, how it went: sold, dead, or a day and time to follow up. '
+              'At most 2 sentences.',
+    'reminder': "the follow-up with this customer is due now. Include the customer's phone and product exactly as "
+                'given (and the quote when given), and ask how it goes: sold, dead, or a day and time to follow up. '
+                'At most 2 sentences.',
+    # The ask is Sutton's next question: asked as is, never traded for another (dry run 10-27: "Any adders
+    # on this one?" came out as a question about talking to the wife).
+    'deal_details': 'a detail of the deal. Ask exactly what the "Get across" line asks — the same detail, nothing '
+                    "else; don't add or swap in another question. One question, at most 2 sentences.",
+    'clarify': 'clearing something up. Ask exactly what the "Get across" line asks — the same detail, nothing else; '
+               "don't add or swap in another question. One question, at most 2 sentences.",
     'which_customer': "ONE short sentence asking which customer they meant. A numbered list of them is added after "
                       "it, so don't name or list them.",
-    'move_confirmation': 'the appointment may be moving to the time on the "Get across" line. Ask whether to move it '
-                         'there or just remind them then; use both words "move" and "remind".',
-    'dead_reason': 'ask why it was dead, offering exactly: price, competitor, no decision, wrong fit, or other.',
-    'wrap_up': 'no question. A short thanks that confirms what was recorded.',
+    # Wednesday appends the exact move-or-remind question after this lead-in.
+    'move_confirmation': 'ONE short lead-in sentence about the appointment possibly moving — no question, no date or '
+                         'time (the exact question is added after it). Don\'t repeat the "Get across" line.',
+    'dead_reason': 'ask why it was dead, offering exactly: price, competitor, no decision, wrong fit, or other. '
+                   'At most 2 sentences.',
+    'wrap_up': 'no question and no invitation to reply (never "let me know", "anything else", "any questions"). '
+               'A short thanks that confirms what was recorded, at most 2 sentences.',
 }
 
 

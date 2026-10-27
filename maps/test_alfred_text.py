@@ -1122,13 +1122,25 @@ class ComposeTests(AlfredTextBase):
                 self.assertNotIn(goals[other], system)
         for objective in ('first_nudge', 're_ask', 'reminder'):
             self.assertIn('sold, dead, or a day and time to follow up', goals[objective])
-        self.assertIn("phone and product, and the quote when given", goals['reminder'])
+        self.assertIn("Include the customer's phone and product exactly as given (and the quote when given)",
+                      goals['reminder'])
         for objective in ('deal_details', 'clarify'):
-            self.assertIn('"Get across" line in your own words, as one question', goals[objective])
+            self.assertIn('Ask exactly what the "Get across" line asks — the same detail, nothing else; '
+                          "don't add or swap in another question. One question", goals[objective])
         self.assertIn('ONE short sentence asking which customer', goals['which_customer'])
-        self.assertIn('both words "move" and "remind"', goals['move_confirmation'])
+        self.assertIn('ONE short lead-in sentence about the appointment possibly moving — no question, no date or '
+                      'time (the exact question is added after it)', goals['move_confirmation'])
+        self.assertIn('Don\'t repeat the "Get across" line', goals['move_confirmation'])
         self.assertIn('price, competitor, no decision, wrong fit, or other', goals['dead_reason'])
-        self.assertIn('no question. A short thanks that confirms what was recorded', goals['wrap_up'])
+        self.assertIn('no question and no invitation to reply (never "let me know", "anything else", '
+                      '"any questions")', goals['wrap_up'])
+        self.assertIn('A short thanks that confirms what was recorded', goals['wrap_up'])
+        # Never 3 sentences: one where Wednesday appends to it, at most 2 everywhere else.
+        for objective, goal in goals.items():
+            if objective in ('which_customer', 'move_confirmation'):
+                self.assertTrue(goal.startswith('ONE short'), objective)
+            else:
+                self.assertIn('at most 2 sentences', goal.lower(), objective)
 
     def test_the_prompt_is_not_the_calls(self):
         from voice_ws import SYSTEM_PROMPT
