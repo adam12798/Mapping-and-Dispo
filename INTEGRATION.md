@@ -368,10 +368,10 @@ Related: the public SMS consent page (`sms_consent.html`, part of the 978's A2P 
 
 ### 6.6 Alfred by text (`maps/alfred_text.py`, migration `0043`)
 
-`POST /api/v1/alfred/text/` reads a rep's text about one appointment with the call-in Alfred's own instructions and fields (`SYSTEM_PROMPT` and `DISPOSITION_TOOL`, imported from `voice_ws.py`, plus a text-mode note), through `gpt-4o-mini`.
+`POST /api/v1/alfred/text/` reads a rep's text about one appointment with the call-in Alfred's own instructions and fields (`SYSTEM_PROMPT` and `DISPOSITION_TOOL`, imported from `voice_ws.py`, plus a text-mode note), through `gpt-4o-mini`. In **compose mode** (below) it instead writes the next text Wednesday's rep loop sends a rep.
 
 - **Ventana's keys only.** A key of any other org, or a key with no org, gets **403** `{"error": "Alfred by text is only for Ventana; this key is not a Ventana key."}` before any rep, lead or log is touched, the rate counter moves or the model is called. (`api_key_required` alone would run a no-org key as Team Sunshine; it still stamps the key's own `last_used_at`, as it does for every key.)
-- **Rate limit per key:** 60 requests an hour, lowered (never raised) by the key's own `rate_limit`. Every request counts, bad ones too. Over it: **429** with `Retry-After`. Counted in `APIRateWindow`.
+- **Rate limit per key:** 60 requests an hour, lowered (never raised) by the key's own `rate_limit`. Every request counts, bad ones too, and texts, move confirmations and compose requests share the same 60. Over it: **429** with `Retry-After`. Counted in `APIRateWindow`.
 - **Body:** `rep_id` or `rep_phone` (an active Ventana rep; both must agree), `lead_id`, `text` (≤ 1600 characters), and optional `context`: `last_summary`, `last_question`, `empty_fields` — pass back the previous response's `summary`, `next_question` and `still_empty`. A detail missing from `empty_fields` is one the rep already answered or said there's nothing for, so it isn't asked again; questions a new or changed outcome brings in are asked anyway. Send `still_empty` exactly as given (for a follow-up it includes the follow-up date and time), or no `empty_fields` at all.
 - **Which lead:** a Ventana lead that is the rep's or has no rep, not cancelled, with its appointment — or its follow-up date — between 14 days ago and 3 days ahead (the call reaches today to 3 days ahead). Otherwise 403/404/409, before the model is called.
 - **Response:** `set` (the fields written), `summary` (the one-line call note, under 20 words; cut at 19), `next_question` (the first still-empty detail in the call's order — follow-up date, follow-up time, adders, monthly, total, notes — or a clarifying question, or `null`), `appointment_move` (`{date, time}` or `null`), `still_empty`, `understood`.
@@ -399,3 +399,26 @@ Related: the public SMS consent page (`sms_consent.html`, part of the 978's A2P 
 - **No client retry** (ruling (n)): the OpenAI client runs `max_retries=0`, so a reply the caller's own timeout gave up on is never read late.
 - **Events:** every write fires `disposition_changed` for the lead's org (debounced 60 s), once the lead has a disposition. Ventana had no disposition configs on 2026-10-20, so nothing is sent anywhere today.
 - **Logged** as a `VoiceCallLog` with `channel='text'`; `/voice/logs/` shows the channel.
+- **Compose mode** (the rep loop's texts, 2026-10-27): Alfred writes the next text Wednesday sends a rep, in place of a fixed template. Wednesday checks every composed text before sending it, and sends its template when compose fails or the text fails a check.
+  - **Request:** `{rep_id | rep_phone, compose: {...}}`, with `compose` holding:
+    - `objective`: one of `first_nudge`, `re_ask`, `reminder`, `deal_details`, `which_customer`, `move_confirmation`, `dead_reason`, `clarify`, `wrap_up`;
+    - `rep_first_name`: required, ≤ 40 characters;
+    - `customers`: 1 to 8 of `{name, product, phone, quote, summary, appointment, follow_up}`. Only `which_customer` may have several; every other objective has exactly 1. `name` is required (≤ 80); the rest may be null or left out (each ≤ 200);
+    - `ask`: optional, ≤ 300. The thing to get across: Sutton's next question for `deal_details` / `clarify`, or the move's label for `move_confirmation`;
+    - `history`: optional, ≤ 12 messages, oldest first, each `{from: "alfred" | "rep", text (≤ 600), at (optional ISO time)}`.
+  - **Compose comes alone.** With `text`, `context` or `confirm_move` it gets **400**. `lead_id` is not needed and is ignored: compose reads no lead.
+  - **The same refusals, in the same order:**
+    - 405 for anything but POST;
+    - 403 for a key that is not Ventana's;
+    - then the same slot in the key's hour as a text: one compose is one count of the 60, and over it is 429;
+    - 400 for a bad body (each limit above, inclusive);
+    - then the rep, exactly as for a text (404 unknown or inactive, 400 when `rep_id` and `rep_phone` disagree, 409 for a phone shared by two reps).
+  - **Nothing is written** but the rate window: no lead, no call log, no webhook.
+  - **Errors:** **503** `Alfred is not configured (no OpenAI key); nothing was sent.` without an OpenAI key; **502** when the model fails or returns nothing usable.
+  - **Response:** **200** `{"message": "<the text>", "objective": "<objective>"}`.
+  - **Light cleanup only:** the text is put on one line with single spaces, one wrapping pair of quotes is dropped, and it is cut at 600 characters. Wednesday does the real checks (length, forbidden words, other reps' customers, the objective's cues).
+  - **The model:** `gpt-4o-mini`, one plain chat completion (no tools), temperature 0.4, 160 tokens at most, `timeout=20`, `max_retries=0`.
+  - **The prompt:** its own, `COMPOSE_MODE`, never the call's `SYSTEM_PROMPT` or the text mode's note (both unchanged). It holds:
+    - the owner's instructions, verbatim: *"You're texting a coworker. 1–2 sentences, casual, first names, one question at a time, ask only for what's missing, at most 3 questions per update then wrap up. Never use the words stop, cancel, end, quit, unsubscribe. Never mention another rep's customer."*;
+    - write only the text (no signature, which Wednesday appends; no emoji; plain characters), and make up no detail;
+    - the objective's goal (`COMPOSE_GOALS`), the current time, the customers, the `ask` and the history as a short transcript.

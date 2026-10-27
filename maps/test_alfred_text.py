@@ -854,3 +854,326 @@ class PendingMoveTests(AlfredTextBase):
             self.assertEqual(self.confirm(forged).status_code, 400)
         self.assertEqual(self.fresh().disposition, '')
 
+
+class StandInComposer:
+    """Stands in for gpt-4o-mini in compose mode. Records every call."""
+
+    def __init__(self):
+        self.calls, self.reply, self.raises = [], 'Hey Val, how did it go with Sam?', None
+
+    def __call__(self, messages):
+        self.calls.append(messages)
+        if self.raises:
+            raise self.raises
+        return self.reply
+
+
+CUSTOMER = {'name': 'Sam Example', 'product': 'HVAC', 'phone': '617-555-0101', 'quote': '$189/mo, $9,800 total',
+            'summary': 'Needs to talk to wife', 'appointment': 'Tue Oct 20 6:00 PM', 'follow_up': 'Thu Oct 22 2:00 PM'}
+OWNERS_INSTRUCTIONS = ("You're texting a coworker. 1–2 sentences, casual, first names, one question at a time, ask "
+                       "only for what's missing, at most 3 questions per update then wrap up. Never use the words "
+                       "stop, cancel, end, quit, unsubscribe. Never mention another rep's customer.")
+REAL_COMPOSE = alfred_text._complete_compose      # before any test replaces it
+
+
+class ComposeTests(AlfredTextBase):
+    """Compose mode (2026-10-27): Alfred writes the rep loop's next text. Same
+    endpoint, lock, key and hourly count; no lead, no write."""
+
+    def setUp(self):
+        super().setUp()
+        self.composer = StandInComposer()
+        self.start(mock.patch('maps.alfred_text._complete_compose', self.composer))
+
+    def post(self, payload, tenant=None):
+        data = payload if isinstance(payload, str) else json.dumps(payload)
+        return Client().post(URL, data=data, content_type='application/json',
+                             HTTP_AUTHORIZATION=f'Bearer {(tenant or self.v_tenant).api_key}')
+
+    def compose(self, tenant=None, body=None, **fields):
+        compose = {'objective': 'first_nudge', 'rep_first_name': 'Val', 'customers': [dict(CUSTOMER)], **fields}
+        return self.post({'rep_id': self.v_rep.id, 'compose': compose, **(body or {})}, tenant)
+
+    def system(self, call=-1):
+        return self.composer.calls[call][0]['content']
+
+    def test_a_composed_text(self):
+        r = self.compose()
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json(), {'message': 'Hey Val, how did it go with Sam?', 'objective': 'first_nudge'})
+        self.assertEqual(len(self.composer.calls), 1)
+        self.assertEqual(self.model.calls, [])          # never the text reader
+
+    # ── the lock, the hour, the rep ──
+
+    def test_only_ventana_keys(self):
+        for tenant, body in ((self.s_tenant, None), (self.s_tenant, {'rep_id': self.s_rep.id}),
+                             (self.legacy_tenant, {'rep_id': self.s_rep.id})):
+            r = self.compose(tenant=tenant, body=body)
+            self.assertEqual(r.status_code, 403, r.content)
+            self.assertEqual(r.json(), {'error': 'Alfred by text is only for Ventana; this key is not a Ventana key.'})
+        self.assertFalse(APIRateWindow.objects.exists())      # refused before the hour is counted
+        no_key = Client().post(URL, data=json.dumps({'rep_id': self.v_rep.id, 'compose': {}}),
+                               content_type='application/json')
+        self.assertEqual(no_key.status_code, 401)
+        self.assertEqual(Client().get(URL, HTTP_AUTHORIZATION=f'Bearer {self.v_tenant.api_key}').status_code, 405)
+        self.assertEqual(self.composer.calls, [])
+
+    def test_a_compose_is_one_count_in_the_texts_hour(self):
+        APITenant.objects.filter(pk=self.v_tenant.pk).update(rate_limit=1)
+        self.assertEqual(self.compose().status_code, 200)
+        r = self.text('Sold it!')
+        self.assertEqual(r.status_code, 429)
+        self.assertEqual(r['Retry-After'], '3601')
+        self.assertEqual(self.model.calls, [])
+        # …and the other way round, in the next hour.
+        self.now.return_value = NOW + dt.timedelta(hours=1)
+        self.assertEqual(self.text('Sold it!').status_code, 200)
+        r = self.compose()
+        self.assertEqual(r.status_code, 429)
+        self.assertEqual(r.json()['error'], 'Too many texts on this key this hour.')
+        self.assertEqual(len(self.composer.calls), 1)
+        self.assertEqual(list(APIRateWindow.objects.filter(tenant=self.v_tenant).values_list('scope', 'count')),
+                         [('alfred_text', 1), ('alfred_text', 1)])
+
+    @mock.patch('maps.alfred_text.TEXTS_PER_HOUR', 3)
+    def test_compose_and_texts_share_the_hours_limit(self):
+        self.assertEqual(self.compose().status_code, 200)
+        self.assertEqual(self.text('Sold it!').status_code, 200)
+        self.assertEqual(self.compose(objective='bogus').status_code, 400)     # a bad compose counts too
+        self.assertEqual(self.compose().status_code, 429)
+        self.assertEqual(self.text('Sold it!').status_code, 429)
+        self.assertEqual(APIRateWindow.objects.get(tenant=self.v_tenant).count, 3)
+        self.assertEqual(self.compose(tenant=self.v_tenant2).status_code, 200)  # another key, its own count
+
+    def test_the_rep_as_today(self):
+        self.assertEqual(self.compose(body={'rep_id': None, 'rep_phone': '+1 617-555-0001'}).status_code, 200)
+        self.assertEqual(self.compose(body={'rep_phone': '617-555-0001'}).status_code, 200)    # both, agreeing
+        r = self.compose(body={'rep_phone': '6175550003'})
+        self.assertEqual((r.status_code, r.json()['error']), (400, "rep_id and rep_phone don't name the same rep."))
+        for body in ({'rep_id': 999999}, {'rep_id': self.s_rep.id}, {'rep_id': None, 'rep_phone': '6175550002'},
+                     {'rep_id': None, 'rep_phone': '6175559999'}):
+            self.assertEqual(self.compose(body=body).status_code, 404, body)            # Team Sunshine's are invisible
+        Rep.all_objects.filter(pk=self.v_rep2.pk).update(is_active=False)
+        self.assertEqual(self.compose(body={'rep_id': self.v_rep2.id}).status_code, 404)
+        Rep.all_objects.create(name='Twin Rep', phone_number='617-555-0001', home_address='4 D St',
+                               organization=self.ventana)
+        r = self.compose(body={'rep_id': None, 'rep_phone': '6175550001'})
+        self.assertEqual((r.status_code, r.json()['error']),
+                         (409, 'More than one active Ventana rep has that phone number; send rep_id.'))
+        self.assertEqual(self.compose().status_code, 200)        # by rep_id it is still one rep
+        self.assertEqual(len(self.composer.calls), 3)
+
+    # ── the body ──
+
+    @mock.patch('maps.alfred_text.TEXTS_PER_HOUR', 500)
+    def test_every_bad_body_is_a_400(self):
+        good = {'objective': 'first_nudge', 'rep_first_name': 'Val', 'customers': [dict(CUSTOMER)]}
+        rep = {'rep_id': self.v_rep.id}
+
+        def body(**over):
+            return {**rep, 'compose': {**good, **over}}
+
+        def customer(**over):
+            return body(customers=[{**CUSTOMER, **over}])
+
+        def said(**over):
+            return body(history=[{'from': 'rep', 'text': 'went well', 'at': '2026-10-20T21:00:00Z', **over}])
+
+        bad = [
+            'not json', '[]', {**rep, 'compose': 'first_nudge'}, {**rep, 'compose': []}, {**rep, 'compose': {}},
+            {**rep, 'compose': None},                                       # no compose: a text, without its lead_id
+            {**body(), 'text': 'went well'}, {**body(), 'context': {}}, {**body(), 'confirm_move': 'token'},
+            {'compose': good}, {'rep_id': 'abc', 'compose': good}, {'rep_phone': 'no digits', 'compose': good},
+            body(objective=None), body(objective='nudge'), body(objective=['first_nudge']),
+            body(rep_first_name=None), body(rep_first_name='  '), body(rep_first_name='x' * 41), body(rep_first_name=7),
+            body(customers=None), body(customers=[]), body(customers=dict(CUSTOMER)), body(customers=['Sam Example']),
+            body(customers=[CUSTOMER, CUSTOMER]),                           # two, but not which_customer
+            body(objective='which_customer', customers=[CUSTOMER] * 9),
+            customer(name=None), customer(name=' '), customer(name='x' * 81), customer(product='x' * 201),
+            customer(phone=6175550101), customer(quote=['$189/mo']), customer(follow_up='x' * 201),
+            body(ask=7), body(ask='x' * 301),
+            body(history={}), body(history=['went well']), body(history=[{'from': 'rep', 'text': 'x'}] * 13),
+            said(**{'from': 'customer'}), said(**{'from': None}), said(text=None), said(text='x' * 601), said(at=1),
+        ]
+        for payload in bad:
+            r = self.post(payload)
+            self.assertEqual(r.status_code, 400, str(payload)[:120])
+        self.assertEqual(self.composer.calls, [])
+        # Each limit is inclusive; every customer field but name may be null or left out.
+        fine = [
+            body(rep_first_name='x' * 40), customer(name='x' * 80, summary='x' * 200, product=None, phone=None),
+            body(customers=[{'name': 'Sam Example'}]), body(ask='x' * 300), body(ask=None), body(history=None),
+            body(history=[{'from': 'alfred', 'text': 'x' * 600}] * 12), said(at=None), said(at='not a time'),
+            said(at='0001-01-01T00:00:00+23:59'), said(text=''),
+            body(objective='which_customer', customers=[CUSTOMER] * 8),
+            {**body(), 'text': None, 'context': None, 'confirm_move': None},
+        ]
+        for payload in fine:
+            r = self.post(payload)
+            self.assertEqual(r.status_code, 200, str(payload)[:120])
+
+    def test_which_customer_takes_several_and_the_others_exactly_one(self):
+        two = [dict(CUSTOMER), {**CUSTOMER, 'name': 'Dana Sample', 'phone': '617-555-0102'}]
+        for objective in alfred_text.OBJECTIVES:
+            r = self.compose(objective=objective, customers=two)
+            if objective == 'which_customer':
+                self.assertEqual(r.status_code, 200, r.content)
+                self.assertIn('Customers:\n- Sam Example (product HVAC; phone 617-555-0101;', self.system())
+                self.assertIn('\n- Dana Sample (product HVAC; phone 617-555-0102;', self.system())
+            else:
+                self.assertEqual(r.json(), {'error': 'compose.customers must hold exactly one customer, '
+                                                     'except for which_customer.'}, objective)
+            self.assertEqual(self.compose(objective=objective).status_code, 200, objective)
+        self.assertEqual(len(self.composer.calls), len(alfred_text.OBJECTIVES) + 1)
+
+    # ── no lead, no write ──
+
+    def test_compose_never_needs_or_reads_a_lead(self):
+        with mock.patch('maps.alfred_text._find_lead', side_effect=AssertionError('compose read a lead')):
+            for body in ({}, {'lead_id': self.lead.id}, {'lead_id': self.s_lead.id}, {'lead_id': self.others_lead.id},
+                         {'lead_id': 999999}, {'lead_id': 'not an id'}):
+                self.assertEqual(self.compose(body=body).status_code, 200, body)
+        Lead.all_objects.filter(pk=self.lead.pk).update(cancelled=True, appointment_datetime=None)
+        self.assertEqual(self.compose(body={'lead_id': self.lead.id}).status_code, 200)
+        for call in self.composer.calls:
+            self.assertNotIn('Vera', call[0]['content'])        # nothing of any lead reaches the model
+
+    def test_nothing_is_written(self):
+        leads = list(Lead.all_objects.order_by('pk').values())
+        for objective in alfred_text.OBJECTIVES:
+            customers = [dict(CUSTOMER)] * (2 if objective == 'which_customer' else 1)
+            r = self.compose(objective=objective, customers=customers, ask='Thu Oct 22 2:00 PM',
+                             body={'lead_id': self.lead.id})
+            self.assertEqual((r.status_code, r.json()['objective']), (200, objective))
+        self.assertEqual(list(Lead.all_objects.order_by('pk').values()), leads)
+        self.assertFalse(VoiceCallLog.all_objects.exists())
+        self.assertFalse(GHLWebhookLog.objects.exists())
+        self.fired.assert_not_called()
+        self.assertEqual(APIRateWindow.objects.get(tenant=self.v_tenant).count, len(alfred_text.OBJECTIVES))
+
+    # ── what the model is sent ──
+
+    def test_what_the_model_is_sent(self):
+        history = [{'from': 'alfred', 'text': 'Hey Val, how did it go with Sam?', 'at': '2026-10-20T22:30:00Z'},
+                   {'from': 'rep', 'text': 'went well,\n needs to talk to wife, try Thursday 2',
+                    'at': '2026-10-20T23:00:00+00:00'},
+                   {'from': 'alfred', 'text': 'Got it. Any adders on this one?'}]
+        self.compose(objective='deal_details', ask="What's the monthly looking like?", history=history)
+        messages = self.composer.calls[0]
+        self.assertEqual([m['role'] for m in messages], ['system', 'user'])
+        system = messages[0]['content']
+        self.assertIn(OWNERS_INSTRUCTIONS, system)                  # verbatim
+        self.assertEqual(alfred_text.COMPOSE_RULES, OWNERS_INSTRUCTIONS)
+        self.assertIn('Write the next text message to Val, a sales rep.', system)
+        self.assertIn('no signature, no emoji, plain characters', system)
+        self.assertIn('This text: ' + alfred_text.COMPOSE_GOALS['deal_details'], system)
+        self.assertIn('Now: Tuesday, October 20, 9:00 PM Eastern', system)
+        self.assertIn('Customer: Sam Example (product HVAC; phone 617-555-0101; quote $189/mo, $9,800 total; '
+                      'appointment Tue Oct 20 6:00 PM; follow-up Thu Oct 22 2:00 PM; '
+                      'last update: Needs to talk to wife)', system)
+        self.assertIn("Get across: What's the monthly looking like?", system)
+        self.assertIn('Recent texts with Val, oldest first:\n'
+                      '[Tue Oct 20 6:30 PM] Alfred: Hey Val, how did it go with Sam?\n'
+                      '[Tue Oct 20 7:00 PM] Val: went well, needs to talk to wife, try Thursday 2\n'
+                      'Alfred: Got it. Any adders on this one?', system)
+        # With no ask, no history and a bare customer: none of it is made up.
+        self.compose(customers=[{'name': 'Sam Example', 'product': None}])
+        system = self.system()
+        self.assertIn('Customer: Sam Example\n', system)
+        self.assertNotIn('Get across', system)
+        self.assertTrue(system.endswith('Recent texts with Val: none'), system[-200:])
+
+    def test_each_objective_gets_its_own_guidance(self):
+        goals = alfred_text.COMPOSE_GOALS
+        self.assertEqual(alfred_text.OBJECTIVES, ('first_nudge', 're_ask', 'reminder', 'deal_details', 'which_customer',
+                                                  'move_confirmation', 'dead_reason', 'clarify', 'wrap_up'))
+        self.assertEqual(set(goals), set(alfred_text.OBJECTIVES))
+        for objective in alfred_text.OBJECTIVES:
+            customers = [dict(CUSTOMER)] * (2 if objective == 'which_customer' else 1)
+            self.assertEqual(self.compose(objective=objective, customers=customers).status_code, 200)
+            system = self.system()
+            self.assertIn(f'This text: {goals[objective]}', system)
+            for other in set(alfred_text.OBJECTIVES) - {objective}:
+                self.assertNotIn(goals[other], system)
+        for objective in ('first_nudge', 're_ask', 'reminder'):
+            self.assertIn('sold, dead, or a day and time to follow up', goals[objective])
+        self.assertIn("phone and product, and the quote when given", goals['reminder'])
+        for objective in ('deal_details', 'clarify'):
+            self.assertIn('"Get across" line in your own words, as one question', goals[objective])
+        self.assertIn('ONE short sentence asking which customer', goals['which_customer'])
+        self.assertIn('both words "move" and "remind"', goals['move_confirmation'])
+        self.assertIn('price, competitor, no decision, wrong fit, or other', goals['dead_reason'])
+        self.assertIn('no question. A short thanks that confirms what was recorded', goals['wrap_up'])
+
+    def test_the_prompt_is_not_the_calls(self):
+        from voice_ws import SYSTEM_PROMPT
+        self.compose()
+        system = self.system()
+        self.assertNotIn(SYSTEM_PROMPT, system)
+        self.assertNotIn(alfred_text.TEXT_MODE.splitlines()[0], system)
+        sentences = [s.strip() for s in re.split(r'[.!?\n]', SYSTEM_PROMPT) if len(s.strip()) >= 20]
+        self.assertGreater(len(sentences), 50)
+        for sentence in sentences:
+            self.assertNotIn(sentence, system)
+        for word in ('British', '60-year-old', 'read_rep_text', 'update_disposition', 'clarifying_question'):
+            self.assertNotIn(word, system)
+
+    # ── the answer ──
+
+    def test_the_text_is_tidied(self):
+        for reply, message in (
+                ('  "Hey Val,\n\n  how did it go   with Sam?"  ', 'Hey Val, how did it go with Sam?'),
+                ('“Hey Val, how’d it go with Sam?”', 'Hey Val, how’d it go with Sam?'),
+                ("'Hey Val, how'd it go?'", "Hey Val, how'd it go?"),
+                ('‘Hey Val’', 'Hey Val'),
+                ('""Hey Val""', '"Hey Val"'),                       # one pair only
+                ('"Hey Val, how did it go?', '"Hey Val, how did it go?'),      # not a pair
+                ('"Hey Val\'', '"Hey Val\''),
+                ('Did Sam say "yes"', 'Did Sam say "yes"'),
+                ('Hey\x00 Val', 'Hey Val'),
+                ('x' * 700, 'x' * 600)):
+            self.composer.reply = reply
+            r = self.compose()
+            self.assertEqual((r.status_code, r.json()), (200, {'message': message, 'objective': 'first_nudge'}), reply)
+        self.composer.reply = 'word ' * 200
+        message = self.compose().json()['message']
+        self.assertLessEqual(len(message), 600)
+        self.assertEqual(message, message.strip())
+
+    def test_a_failed_or_empty_model_answer_is_a_502(self):
+        self.composer.raises = RuntimeError('timeout')
+        r = self.compose()
+        self.assertEqual((r.status_code, r.json()),
+                         (502, {'error': "Alfred couldn't write that text just now; nothing was sent. Try again."}))
+        self.composer.raises = None
+        for reply in ('', '  \n ', '""', '“ ”', None, 42):
+            self.composer.reply = reply
+            self.assertEqual(self.compose().status_code, 502, repr(reply))
+        self.assertFalse(VoiceCallLog.all_objects.exists())
+        self.assertEqual(APIRateWindow.objects.get(tenant=self.v_tenant).count, 7)    # each one counted
+
+    @override_settings(OPENAI_API_KEY='')
+    def test_no_openai_key_is_a_503(self):
+        r = self.compose()
+        self.assertEqual((r.status_code, r.json()),
+                         (503, {'error': 'Alfred is not configured (no OpenAI key); nothing was sent.'}))
+        self.assertEqual(self.composer.calls, [])
+        self.assertEqual(self.compose(body={'rep_id': 999999}).status_code, 404)      # the rep is checked first
+        self.assertEqual(self.compose(objective='bogus').status_code, 400)
+
+    def test_the_real_call_is_one_plain_completion(self):
+        fake = mock.MagicMock()
+        create = fake.return_value.chat.completions.create
+        create.return_value.choices = [mock.Mock(message=mock.Mock(content=' "Hey Val, how did it go with Sam?" '))]
+        with mock.patch('maps.alfred_text._complete_compose', REAL_COMPOSE), mock.patch('openai.OpenAI', fake):
+            r = self.compose()
+        self.assertEqual(r.json(), {'message': 'Hey Val, how did it go with Sam?', 'objective': 'first_nudge'})
+        fake.assert_called_once_with(api_key='sk-test', timeout=20, max_retries=0)    # no client retry
+        kwargs = create.call_args.kwargs
+        self.assertEqual(set(kwargs), {'model', 'messages', 'temperature', 'max_tokens'})     # no tools
+        self.assertEqual((kwargs['model'], kwargs['temperature'], kwargs['max_tokens']), ('gpt-4o-mini', 0.4, 160))
+        self.assertIn(OWNERS_INSTRUCTIONS, kwargs['messages'][0]['content'])
+        create.return_value.choices = [mock.Mock(message=mock.Mock(content=None))]
+        with mock.patch('openai.OpenAI', fake):
+            self.assertEqual(REAL_COMPOSE([]), '')

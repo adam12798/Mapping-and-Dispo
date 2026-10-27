@@ -46,6 +46,26 @@ with a text-mode note on top. Nothing is guessed: what the model leaves out or
 gets wrong is not written, and Alfred asks about it instead. A follow-up time
 and the appointment itself being moved come back as different fields; a move
 is returned, never written — reps can't reschedule (the call says so too).
+
+Compose mode (the rep loop's texts, 2026-10-27): Wednesday asks Alfred to
+write the next text it sends a rep, instead of a fixed template.
+
+    POST /api/v1/alfred/text/  {"rep_id" | "rep_phone", "compose": {
+        "objective": "first_nudge",      // one of OBJECTIVES
+        "rep_first_name": "Pat",         // ≤ 40
+        "customers": [{"name": "…", "product", "phone", "quote", "summary",
+                       "appointment", "follow_up"}],   // 1..8: several only for
+                                         //   which_customer; name ≤ 80, the rest null or ≤ 200
+        "ask": "…",                      // optional, ≤ 300: what to get across
+        "history": [{"from": "alfred" | "rep", "text": "…", "at": "…"}]}}  // optional, ≤ 12, oldest first
+    → 200 {"message": "<the text>", "objective": "first_nudge"}
+
+compose comes alone (no text, context or confirm_move); lead_id is ignored.
+It reads and writes no lead, call log or webhook, and it takes the same slot
+in the key's hour as a text (one compose = one count of the 60). The model
+gets COMPOSE_MODE — not the call's instructions — with no tools; the message
+is only tidied here (whitespace, one wrapping pair of quotes, 600 at most).
+Wednesday checks it before sending, and sends its template when this fails.
 """
 import copy
 import hashlib
@@ -141,6 +161,42 @@ Appointment: {appointment}
 Disposition on the lead now: {disposition}
 On the lead now: {details}"""
 
+# ── Compose mode: the rep loop's texts, written by Alfred ─────────────────
+OBJECTIVES = ('first_nudge', 're_ask', 'reminder', 'deal_details', 'which_customer', 'move_confirmation',
+              'dead_reason', 'clarify', 'wrap_up')
+CUSTOMER_FIELDS = ('product', 'phone', 'quote', 'summary', 'appointment', 'follow_up')
+MAX_CUSTOMERS, MAX_HISTORY = 8, 12
+COMPOSE_LIMITS = {'rep_first_name': 40, 'name': 80, 'customer_field': 200, 'ask': 300, 'history_text': 600,
+                  'message': 600}
+# The owner's model instructions, verbatim (2026-10-27).
+COMPOSE_RULES = ("You're texting a coworker. 1–2 sentences, casual, first names, one question at a time, ask only "
+                 "for what's missing, at most 3 questions per update then wrap up. Never use the words stop, cancel, "
+                 "end, quit, unsubscribe. Never mention another rep's customer.")
+COMPOSE_MODE = """You are Alfred, the office assistant who keeps the sales reps' appointment records up to date. Write the next text message to {rep}, a sales rep.
+
+""" + COMPOSE_RULES + """
+
+Write only the text message itself: no signature, no emoji, plain characters. Use only the details below; never make one up.
+
+This text: {goal}
+
+Now: {now}"""
+COMPOSE_GOALS = {
+    'first_nudge': 'the first check-in on this appointment. Find out how it went: sold, dead, or a day and time to '
+                   'follow up.',
+    're_ask': "no answer yet. Ask again, in other words, how it went: sold, dead, or a day and time to follow up.",
+    'reminder': "the follow-up with this customer is due now. Mention the customer's phone and product, and the quote "
+                'when given, and ask how it goes: sold, dead, or a day and time to follow up.',
+    'deal_details': 'a detail of the deal. Put the "Get across" line in your own words, as one question.',
+    'clarify': 'clearing something up. Put the "Get across" line in your own words, as one question.',
+    'which_customer': "ONE short sentence asking which customer they meant. A numbered list of them is added after "
+                      "it, so don't name or list them.",
+    'move_confirmation': 'the appointment may be moving to the time on the "Get across" line. Ask whether to move it '
+                         'there or just remind them then; use both words "move" and "remind".',
+    'dead_reason': 'ask why it was dead, offering exactly: price, competitor, no decision, wrong fit, or other.',
+    'wrap_up': 'no question. A short thanks that confirms what was recorded.',
+}
+
 
 # ── The request ───────────────────────────────────────────────────────────
 
@@ -208,17 +264,17 @@ def _parse_body(request):
     if not isinstance(data, dict):
         raise _Refusal(400, 'The body must be a JSON object.')
 
+    if data.get('compose') is not None:
+        # Compose reads and writes no lead: lead_id is not needed, and ignored.
+        rep_id, rep_phone = _rep_fields(data)
+        if any(data.get(other) is not None for other in ('text', 'context', 'confirm_move')):
+            raise _Refusal(400, 'Send compose alone, with no text, context or confirm_move.')
+        return {'rep_id': rep_id, 'rep_phone': rep_phone, 'compose': _parse_compose(data['compose'])}
+
     lead_id = _int(data.get('lead_id'))
     if lead_id is None:
         raise _Refusal(400, 'lead_id (the Sutton lead id) is required.')
-    rep_id = data.get('rep_id')
-    if rep_id is not None and _int(rep_id) is None:
-        raise _Refusal(400, 'rep_id must be a Sutton rep id.')
-    rep_phone = data.get('rep_phone')
-    if rep_phone is not None and not _phone_digits(rep_phone):
-        raise _Refusal(400, 'rep_phone must be a phone number.')
-    if rep_id is None and rep_phone is None:
-        raise _Refusal(400, 'rep_id or rep_phone is required.')
+    rep_id, rep_phone = _rep_fields(data)
     confirm = data.get('confirm_move')
     if confirm is not None:
         # The rep confirmed a move to Wednesday: apply the exchange its token holds.
@@ -226,7 +282,7 @@ def _parse_body(request):
             raise _Refusal(400, 'confirm_move must be the pending token Alfred returned.')
         if data.get('text') is not None or data.get('context') is not None:
             raise _Refusal(400, 'Send confirm_move alone, with no text or context.')
-        return {'lead_id': lead_id, 'rep_id': _int(rep_id), 'rep_phone': rep_phone,
+        return {'lead_id': lead_id, 'rep_id': rep_id, 'rep_phone': rep_phone,
                 'text': None, 'context': None, 'confirm_move': confirm.strip()}
     text = data.get('text')
     if not isinstance(text, str) or not _short(text, MAX_TEXT + 1):
@@ -248,8 +304,85 @@ def _parse_body(request):
         'last_question': _short(raw.get('last_question'), 300),
         'empty_fields': None if empty is None else [f for f in QUESTION_ORDER if f in empty],
     }
-    return {'lead_id': lead_id, 'rep_id': _int(rep_id), 'rep_phone': rep_phone,
+    return {'lead_id': lead_id, 'rep_id': rep_id, 'rep_phone': rep_phone,
             'text': text, 'context': context, 'confirm_move': None}
+
+
+def _rep_fields(data):
+    """(rep_id, rep_phone) as given; at least one, each well-formed."""
+    rep_id = data.get('rep_id')
+    if rep_id is not None and _int(rep_id) is None:
+        raise _Refusal(400, 'rep_id must be a Sutton rep id.')
+    rep_phone = data.get('rep_phone')
+    if rep_phone is not None and not _phone_digits(rep_phone):
+        raise _Refusal(400, 'rep_phone must be a phone number.')
+    if rep_id is None and rep_phone is None:
+        raise _Refusal(400, 'rep_id or rep_phone is required.')
+    return _int(rep_id), rep_phone
+
+
+def _one_line(value):
+    # _short's cleaning (no NUL, no lone surrogate), on one line with single spaces.
+    return ' '.join(value.encode('utf-8', 'replace').decode('utf-8').replace('\x00', '').split())
+
+
+def _compose_str(value, what, limit, required=False):
+    """One string of a compose request, on one line; None when null or empty."""
+    if value is None:
+        value = ''
+    if not isinstance(value, str):
+        raise _Refusal(400, f'{what} must be a string.')
+    value = _one_line(value)
+    if len(value) > limit:
+        raise _Refusal(400, f'{what} is longer than {limit} characters.')
+    if required and not value:
+        raise _Refusal(400, f'{what} is required.')
+    return value or None
+
+
+def _parse_compose(raw):
+    if not isinstance(raw, dict):
+        raise _Refusal(400, 'compose must be an object.')
+    objective = raw.get('objective')
+    if not isinstance(objective, str) or objective not in OBJECTIVES:
+        raise _Refusal(400, f"compose.objective must be one of: {', '.join(OBJECTIVES)}.")
+    first_name = _compose_str(raw.get('rep_first_name'), 'compose.rep_first_name',
+                              COMPOSE_LIMITS['rep_first_name'], required=True)
+
+    customers = raw.get('customers')
+    if not isinstance(customers, list) or not 1 <= len(customers) <= MAX_CUSTOMERS:
+        raise _Refusal(400, f'compose.customers must be a list of 1 to {MAX_CUSTOMERS} customers.')
+    if objective != 'which_customer' and len(customers) != 1:
+        raise _Refusal(400, 'compose.customers must hold exactly one customer, except for which_customer.')
+    parsed = []
+    for i, customer in enumerate(customers):
+        what = f'compose.customers[{i}]'
+        if not isinstance(customer, dict):
+            raise _Refusal(400, f'{what} must be an object.')
+        one = {'name': _compose_str(customer.get('name'), f'{what}.name', COMPOSE_LIMITS['name'], required=True)}
+        for field in CUSTOMER_FIELDS:
+            one[field] = _compose_str(customer.get(field), f'{what}.{field}', COMPOSE_LIMITS['customer_field'])
+        parsed.append(one)
+
+    ask = _compose_str(raw.get('ask'), 'compose.ask', COMPOSE_LIMITS['ask'])
+
+    history = raw.get('history')
+    if history is None:
+        history = []
+    if not isinstance(history, list) or len(history) > MAX_HISTORY:
+        raise _Refusal(400, f'compose.history must be a list of at most {MAX_HISTORY} messages.')
+    said = []
+    for i, item in enumerate(history):
+        what = f'compose.history[{i}]'
+        if not isinstance(item, dict) or item.get('from') not in ('alfred', 'rep'):
+            raise _Refusal(400, f'{what} must be an object whose "from" is "alfred" or "rep".')
+        if not isinstance(item.get('text'), str):
+            raise _Refusal(400, f'{what}.text must be a string.')
+        said.append({'from': item['from'],
+                     'text': _compose_str(item['text'], f'{what}.text', COMPOSE_LIMITS['history_text']),
+                     'at': _compose_str(item.get('at'), f'{what}.at', 40)})
+    return {'objective': objective, 'rep_first_name': first_name, 'customers': parsed, 'ask': ask,
+            'history': said}
 
 
 def _find_rep(rep_id, rep_phone):
@@ -413,6 +546,77 @@ def _complete(messages, tool):
         return {}
     args = json.loads(calls[0].function.arguments or '{}')
     return args if isinstance(args, dict) else {}
+
+
+def _clock(local):
+    return local.strftime('%I:%M %p').lstrip('0')
+
+
+def _at(value):
+    """A history message's time, as "Tue Oct 27 12:45 PM" Eastern; '' when absent or unreadable."""
+    if not value:
+        return ''
+    try:
+        when = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        local = (when if when.tzinfo else when.replace(tzinfo=ZoneInfo('UTC'))).astimezone(EASTERN)
+    except (ValueError, OverflowError):
+        return ''
+    return f'{local:%a %b} {local.day} {_clock(local)}'
+
+
+def build_compose_messages(compose, now):
+    """COMPOSE_MODE (never the call's instructions), the customers, the ask and
+    the recent texts, as a short transcript."""
+    rep = compose['rep_first_name']
+    local = now.astimezone(EASTERN)
+    lines = [COMPOSE_MODE.format(rep=rep, goal=COMPOSE_GOALS[compose['objective']],
+                                 now=f'{local:%A, %B} {local.day}, {_clock(local)} Eastern')]
+    customers = []
+    for c in compose['customers']:
+        details = [f'{label} {c[field]}' for field, label in (
+            ('product', 'product'), ('phone', 'phone'), ('quote', 'quote'), ('appointment', 'appointment'),
+            ('follow_up', 'follow-up'), ('summary', 'last update:')) if c[field]]
+        customers.append(c['name'] + (f" ({'; '.join(details)})" if details else ''))
+    if len(customers) == 1:
+        lines.append(f'Customer: {customers[0]}')
+    else:
+        lines.append('Customers:\n' + '\n'.join(f'- {c}' for c in customers))
+    if compose['ask']:
+        lines.append(f"Get across: {compose['ask']}")
+    said = [(m, _at(m['at'])) for m in compose['history'] if m['text']]
+    if said:
+        lines.append(f'Recent texts with {rep}, oldest first:\n' + '\n'.join(
+            (f'[{at}] ' if at else '') + f"{'Alfred' if m['from'] == 'alfred' else rep}: {m['text']}"
+            for m, at in said))
+    else:
+        lines.append(f'Recent texts with {rep}: none')
+    return [
+        {'role': 'system', 'content': '\n'.join(lines)},
+        {'role': 'user', 'content': 'Write the text.'},
+    ]
+
+
+def _complete_compose(messages):
+    """One plain completion (no tools); its text. Tests replace this function."""
+    from openai import OpenAI
+
+    # No client retry, as for a text: Wednesday's own timeout is the only one.
+    client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=20, max_retries=0)
+    resp = client.chat.completions.create(model=MODEL, messages=messages, temperature=0.4, max_tokens=160)
+    return resp.choices[0].message.content or ''
+
+
+QUOTE_PAIRS = {'"': '"', '“': '”', "'": "'", '‘': '’'}
+
+
+def _tidy(message):
+    """Sutton's light cleanup of a composed text: one line, single spaces, one
+    wrapping pair of quotes dropped, 600 characters at most. Wednesday does
+    the real checks."""
+    message = _one_line(message) if isinstance(message, str) else ''
+    if len(message) >= 2 and QUOTE_PAIRS.get(message[0]) == message[-1]:
+        message = message[1:-1].strip()
+    return message[:COMPOSE_LIMITS['message']].rstrip()
 
 
 # ── Reading the answer ────────────────────────────────────────────────────
@@ -703,6 +907,24 @@ def _confirm_move(token, rep, lead):
     return JsonResponse({'set': _serialize(p['writes']), **done, 'already_applied': False})
 
 
+def _compose(compose, rep, now):
+    """Compose mode: the next text to send the rep. No lead, no call log, no
+    webhook — the rate window (already counted) is the only write."""
+    if not settings.OPENAI_API_KEY:
+        return JsonResponse({'error': 'Alfred is not configured (no OpenAI key); nothing was sent.'}, status=503)
+    failed = JsonResponse({'error': "Alfred couldn't write that text just now; nothing was sent. Try again."},
+                          status=502)
+    try:
+        message = _tidy(_complete_compose(build_compose_messages(compose, now)))
+    except Exception as e:
+        logger.error(f"Alfred compose: model call failed ({compose['objective']}, rep {rep.id}): {e}")
+        return failed
+    if not message:
+        logger.error(f"Alfred compose: the model wrote nothing ({compose['objective']}, rep {rep.id})")
+        return failed
+    return JsonResponse({'message': message, 'objective': compose['objective']})
+
+
 # ── The endpoint ──────────────────────────────────────────────────────────
 
 @api_key_required
@@ -726,6 +948,8 @@ def alfred_text(request):
     try:
         body = _parse_body(request)
         rep = _find_rep(body['rep_id'], body['rep_phone'])
+        if body.get('compose'):
+            return _compose(body['compose'], rep, now)
         lead = _find_lead(body['lead_id'], rep, now)
     except _Refusal as refusal:
         return JsonResponse({'error': refusal.error}, status=refusal.status)
