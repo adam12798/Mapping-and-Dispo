@@ -618,6 +618,7 @@ def _complete_compose(messages):
 
 
 QUOTE_PAIRS = {'"': '"', '“': '”', "'": "'", '‘': '’'}
+CONTRACTION = re.compile(r"(?<=[^\W\d_])['’](?=[^\W\d_])")
 
 
 def _tidy(message):
@@ -627,8 +628,10 @@ def _tidy(message):
     message = _one_line(message) if isinstance(message, str) else ''
     opening, closing, inner = message[:1], message[-1:], message[1:-1]
     # Only a true wrapping pair: when the quote comes again inside ("Sold",
-    # "dead", or a day for "Sam"), the outer two are not a pair.
-    if len(message) >= 2 and QUOTE_PAIRS.get(opening) == closing and opening not in inner and closing not in inner:
+    # "dead", or a day for "Sam"), the outer two are not a pair. Inside single
+    # quotes, an apostrophe between two letters (how'd, it’s) is not a quote.
+    seen = CONTRACTION.sub('', inner) if opening in "'‘" else inner
+    if len(message) >= 2 and QUOTE_PAIRS.get(opening) == closing and opening not in seen and closing not in seen:
         message = inner.strip()
     return message[:COMPOSE_LIMITS['message']].rstrip()
 

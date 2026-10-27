@@ -1154,8 +1154,12 @@ class ComposeTests(AlfredTextBase):
                 # The quote comes again inside: the outer two are not a wrapping pair.
                 ('"Sold", "dead", or a day for "Sam"', '"Sold", "dead", or a day for "Sam"'),
                 ('""Hey Val""', '""Hey Val""'),
-                ("'Hey Val, how'd it go?'", "'Hey Val, how'd it go?'"),
                 ('“Was it “sold”?”', '“Was it “sold”?”'),
+                ("'Sold' or 'dead'", "'Sold' or 'dead'"),
+                # …but inside single quotes, an apostrophe between two letters is a contraction.
+                ("'Hey Val, how'd it go?'", "Hey Val, how'd it go?"),
+                ('‘Hey Val, it’s Alfred’', 'Hey Val, it’s Alfred'),
+                ("'Sam's wife said 'later''", "'Sam's wife said 'later''"),
                 ('"Hey Val, how did it go?', '"Hey Val, how did it go?'),      # not a pair
                 ('"Hey Val\'', '"Hey Val\''),
                 ('Did Sam say "yes"', 'Did Sam say "yes"'),
