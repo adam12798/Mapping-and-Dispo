@@ -637,7 +637,41 @@ def _time(value):
         return None
 
 
-def read_answer(args, lead, today):
+# The weekday guard (2026-10-26: on a Monday, "Wednesday noon" came back as
+# that Monday). When the rep's text names a weekday and gives no calendar
+# date, a date the model made that falls on none of the named weekdays is
+# not written; Alfred asks for the date instead. Full names, and only the
+# abbreviations nobody writes for anything else: never "sat" (they sat the
+# appointment) or "sun" (solar). A weekday after "after", "until", "not"…
+# is a limit, not the day, so it isn't counted.
+WEEKDAY_WORDS = {'monday': 0, 'mon': 0, 'tuesday': 1, 'tue': 1, 'tues': 1, 'wednesday': 2, 'wed': 2, 'weds': 2,
+                 'thursday': 3, 'thu': 3, 'thur': 3, 'thurs': 3, 'friday': 4, 'fri': 4, 'saturday': 5, 'sunday': 6}
+WEEKDAY_NAMES = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
+NOT_THE_DAY = {'after', 'before', 'until', 'till', 'til', 'not', 'except', 'but', 'past', 'by'}
+# "11/4", "the 4th", "Nov 4", "2026-11-04": the model had the date itself, and a weekday beside it may be
+# about something else ("Tuesday's appointment went well, call her the 4th").
+CALENDAR_DATE = re.compile(
+    r'\d{1,2}/\d{1,2}|\b\d{1,2}(st|nd|rd|th)\b|\d{4}-\d{2}-\d{2}|\b(jan|january|feb|february|mar|march|apr|april|'
+    r'may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\.?\s+\d{1,2}\b',
+    re.I)
+ASK_WHICH_DAY = 'What date is that {day}?'
+
+
+def _weekday_question(day, text, question):
+    """None when `day` fits the weekdays the rep's text names (or it names
+    none, or gives a calendar date); else what to ask instead."""
+    text = (text or '').lower().replace('’', "'")
+    if CALENDAR_DATE.search(text):
+        return None
+    words = re.findall(r"[a-z]+(?:'[a-z]+)?", text)
+    named = {WEEKDAY_WORDS[w] for i, w in enumerate(words)
+             if w in WEEKDAY_WORDS and (i == 0 or words[i - 1] not in NOT_THE_DAY)}
+    if not named or day.weekday() in named:
+        return None
+    return ASK_WHICH_DAY.format(day=WEEKDAY_NAMES[min(named)]) if len(named) == 1 else question
+
+
+def read_answer(args, lead, today, text=''):
     """What to write, what to return, and what didn't read. Never a guess:
     a field the model got wrong is dropped and becomes the question."""
     writes, problems = {}, []
@@ -666,6 +700,8 @@ def read_answer(args, lead, today):
         follow_up_date = _date(args['follow_up_date'])
         if follow_up_date is None or follow_up_date < today:
             problems.append(('follow_up_date', QUESTIONS['follow_up_date']))
+        elif ask := _weekday_question(follow_up_date, text, QUESTIONS['follow_up_date']):
+            problems.append(('follow_up_date', ask))
         else:
             writes['follow_up_date'] = follow_up_date
     if args.get('follow_up_time'):
@@ -692,6 +728,8 @@ def read_answer(args, lead, today):
         moved_time = _time(args.get('appointment_moved_to_time'))
         if moved_date is None or moved_time is None or moved_date < today:
             problems.append(('appointment_move', ASK_MOVE))
+        elif ask := _weekday_question(moved_date, text, ASK_MOVE):
+            problems.append(('appointment_move', ask))
         else:
             move = {'date': moved_date.isoformat(), 'time': moved_time.strftime('%H:%M')}
 
@@ -967,7 +1005,7 @@ def alfred_text(request):
                             status=502)
 
     today = now.astimezone(EASTERN).date()
-    answer = read_answer(args, lead, today)
+    answer = read_answer(args, lead, today, text)
     writes = answer['writes']
     if answer['understood'] and not writes and not answer['move'] and not answer['question'] \
             and not answer['problems'] and not answer['declined']:
