@@ -1370,6 +1370,18 @@ class WeekdayTests(AlfredTextBase):
         lead = self.fresh()
         self.assertEqual((lead.follow_up_date, lead.follow_up_time), (None, None))
 
+    def test_next_month_excuses_a_date_in_the_next_calendar_month(self):
+        self.now.return_value = dt.datetime(2026, 10, 21, 12, 0, tzinfo=EASTERN)     # a Wednesday
+        text = 'Monday appt went well, follow up next month at 2'
+        for day in ('2026-11-20', '2026-11-02', '2026-11-30'):              # as on origin/main: written
+            out = self.follow_up(text, day, time='14:00')
+            self.assertEqual(out['set'].get('follow_up_date'), day, day)
+        for day, offer in (('2026-10-28', 'Follow up Monday, October 26 at 2:00 PM?'),      # this month
+                           ('2026-12-03', 'Follow up Monday, October 26 at 2:00 PM?')):     # the month after
+            out = self.follow_up(text, day, time='14:00')
+            self.assertNotIn('follow_up_date', out['set'], day)
+            self.assertEqual(out['next_question'], offer, day)
+
     def test_a_move_to_another_weekday_is_offered_with_its_time(self):
         before = self.fresh()
         self.model.fixed = {'understood': True, 'appointment_moved_to_date': '2026-10-23',

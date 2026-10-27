@@ -659,7 +659,7 @@ def _time(value):
 # held when the rep's text names weekdays and the date is on none of them —
 # unless the text also gives that very date another way: a calendar date
 # ("11/4", "the 4th", "Nov 4") or a relative one ("tomorrow", "in 3 days",
-# "in 2 weeks") that means exactly it. "today", "tonight" and "yesterday"
+# "in 2 weeks", "next month" = any day of it) that means exactly it. "today", "tonight" and "yesterday"
 # never excuse it: a debrief says them about the appointment. A held date is
 # not written, nor is its time; Alfred offers the date the text names, with
 # that time — "Follow up Wednesday, November 4 at 12:00 PM?" — so a bare
@@ -684,7 +684,7 @@ CALENDAR_DATE = re.compile(
     r'\b(?P<month>jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|'
     r'oct|october|nov|november|dec|december)\.?\s+(?P<md>\d{1,2})\b', re.I)
 RELATIVE_DATE = re.compile(
-    r'\b(?:(?P<tomorrow>tmrw?|tomm?orr?ow)|(?P<weekend>weekend)|'
+    r'\b(?:(?P<tomorrow>tmrw?|tomm?orr?ow)|(?P<weekend>weekend)|(?P<next_month>next month)|'
     r'(?P<n>\d+|a|an|one|two|three|four|five|six|couple\s+of|couple|few)\s+(?P<unit>days?|weeks?|months?))\b', re.I)
 COUNTS = {'a': (1,), 'an': (1,), 'one': (1,), 'two': (2,), 'three': (3,), 'four': (4,), 'five': (5,), 'six': (6,),
           'couple': (2, 3), 'couple of': (2, 3), 'few': (3, 4)}
@@ -712,6 +712,8 @@ def _said_as_date(day, text, today):
             said = ahead == 1
         elif m['weekend']:
             said = day.weekday() >= 5 and 0 <= ahead <= 8
+        elif m['next_month']:       # any day of the next calendar month
+            said = (day.year * 12 + day.month) - (today.year * 12 + today.month) == 1
         else:
             counts = COUNTS.get(' '.join(m['n'].split())) or (int(m['n']),)
             unit = m['unit'][0]
