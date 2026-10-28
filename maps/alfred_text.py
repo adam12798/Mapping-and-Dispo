@@ -223,7 +223,7 @@ Rules:
 This text: {goal}
 
 Now: {now}"""
-GREET = 'Open with "Hey {rep}," and go straight on.'
+GREET = 'Open with "Hey {rep}," and go straight on. The intro was already sent: don\'t repeat it or say who you are.'
 NO_GREETING = "Don't open with a greeting (no \"Hey\", \"Hi\" or \"Hello\") and don't start with the rep's name."
 COMPOSE_GOALS = {
     'first_nudge': 'the first check-in on this appointment. Ask how it went with the customer, then "Sold, dead, or '
@@ -247,8 +247,9 @@ COMPOSE_GOALS = {
     'dead_reason': 'ask why it was dead, offering exactly: price, competitor, no decision, wrong fit, or other. '
                    'At most 2 sentences.',
     'wrap_up': 'ONE sentence stating what was just recorded (the "Recorded just now" line, else the latest texts), '
-               'like "Got it — I\'ll hit you up Thursday at 2." No question and no invitation to reply (never "let '
-               'me know", "anything else", "any questions").',
+               'shaped like the example "Got it — I\'ll hit you up Thursday at 2." (its day and time are only an '
+               'example). No question and no invitation to reply (never "let me know", "anything else", "any '
+               'questions").',
 }
 # Every rep reply is acknowledged: when an outcome or a follow-up was just
 # recorded, a question opens with one short acknowledgment.
@@ -259,6 +260,18 @@ NO_ACK = 'No acknowledgment first: just the question.'
 CLOSER = 'After that sentence you may add a two-word closer like "Nice work." (a sale was just recorded).'
 RECORDED_FIELDS = (('total', 'total'), ('monthly', 'monthly'), ('zones', 'zones'), ('adders', 'adders'),
                    ('system', 'system'))
+# What only the reference conversation says: a text with one of these that the data doesn't give borrowed it
+# from the example, and is refused (a 502; Wednesday sends its template).
+# (name, in the text, given by the data: every one of these found in it)
+FROM_THE_EXAMPLE = (
+    ('Sam', r'\bSam\b', (r'\bSam\b',)),
+    ('Alex', r'\bAlex\b', (r'\bAlex\b',)),
+    ('0177', r'0177', (r'0177',)),
+    ('9,800', r'(?<![\d,])9,?800(?!\d)', (r'(?<![\d,])9,?800(?!\d)',)),
+    ('$180', r'(?<![\d,.])180(?![\d,])', (r'(?<![\d,.])180(?![\d,])',)),
+    ('Thursday at 2', r'(?i)\bthursday at 2\b', (r'(?i)\bthu(?:r|rs|rsday)?\b', r'\b2(?::00)?(?!\d|:[1-5])')),
+    ('2 zones', r'(?i)\b2 zones\b', (r'(?i)\b2\s*zones?\b|\bzones?:?\s*2\b',)),
+)
 
 
 # ── The request ───────────────────────────────────────────────────────────
@@ -721,6 +734,14 @@ def build_compose_messages(compose, now):
     ]
 
 
+def _borrowed(message, data):
+    """What the text took from the reference conversation that the data doesn't give; None when nothing."""
+    for name, said, given in FROM_THE_EXAMPLE:
+        if re.search(said, message) and not all(re.search(g, data) for g in given):
+            return name
+    return None
+
+
 def _complete_compose(messages):
     """One plain completion (no tools); its text. Tests replace this function."""
     from openai import OpenAI
@@ -736,6 +757,7 @@ def _complete_compose(messages):
 
 
 QUOTE_PAIRS = {'"': '"', '“': '”', "'": "'", '‘': '’'}
+SPEAKER = re.compile(r'^alfred\s*(?:\([^)]*\))?\s*:\s*', re.I)     # "Alfred:", "Alfred (Thu 2:00):"
 CONTRACTION = re.compile(r"(?<=[^\W\d_])['’](?=[^\W\d_])")
 
 
@@ -743,14 +765,14 @@ def _tidy(message):
     """Sutton's light cleanup of a composed text: one line, single spaces, one
     wrapping pair of quotes dropped, 600 characters at most. Wednesday does
     the real checks."""
-    message = _one_line(message) if isinstance(message, str) else ''
+    message = SPEAKER.sub('', _one_line(message) if isinstance(message, str) else '', count=1)
     opening, closing, inner = message[:1], message[-1:], message[1:-1]
     # Only a true wrapping pair: when the quote comes again inside ("Sold",
     # "dead", or a day for "Sam"), the outer two are not a pair. Inside single
     # quotes, an apostrophe between two letters (how'd, it’s) is not a quote.
     seen = CONTRACTION.sub('', inner) if opening in "'‘" else inner
     if len(message) >= 2 and QUOTE_PAIRS.get(opening) == closing and opening not in seen and closing not in seen:
-        message = inner.strip()
+        message = SPEAKER.sub('', inner.strip(), count=1)
     return message[:COMPOSE_LIMITS['message']].rstrip()
 
 
@@ -1271,13 +1293,20 @@ def _compose(compose, rep, now):
         return JsonResponse({'error': 'Alfred is not configured (no OpenAI key); nothing was sent.'}, status=503)
     failed = JsonResponse({'error': "Alfred couldn't write that text just now; nothing was sent. Try again."},
                           status=502)
+    messages = build_compose_messages(compose, now)
     try:
-        message = _tidy(_complete_compose(build_compose_messages(compose, now)))
+        message = _tidy(_complete_compose(messages))
     except Exception as e:
         logger.error(f"Alfred compose: model call failed ({compose['objective']}, rep {rep.id}): {e}")
         return failed
     if not message:
         logger.error(f"Alfred compose: the model wrote nothing ({compose['objective']}, rep {rep.id})")
+        return failed
+    # The data, and the rep's own first name (given in the system message), are what the text may draw on.
+    borrowed = _borrowed(message, messages[1]['content'] + '\n' + compose['rep_first_name'])
+    if borrowed:
+        logger.error(f"Alfred compose: the text took {borrowed!r} from the example ({compose['objective']}, "
+                     f"rep {rep.id})")
         return failed
     return JsonResponse({'message': message, 'objective': compose['objective']})
 

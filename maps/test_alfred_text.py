@@ -1285,6 +1285,7 @@ class ComposeTests(AlfredTextBase):
             self.assertEqual(r.status_code, 400, str(payload)[:120])
         self.assertEqual(self.composer.calls, [])
         # Each limit is inclusive; every customer field but name may be null or left out.
+        self.composer.reply = 'Hey Val, how did it go?'      # names no customer (some of these rename it)
         fine = [
             body(rep_first_name='x' * 40), customer(name='x' * 80, summary='x' * 200, product=None, phone=None),
             body(customers=[{'name': 'Sam Example'}]), body(ask='x' * 300), body(ask=None), body(history=None),
@@ -1426,6 +1427,82 @@ class ComposeTests(AlfredTextBase):
                 self.assertIn('at most 2 sentences', goal.lower(), objective)
 
     # ── Revision 2 (owner, 2026-10-28): the target voice ──
+
+    # ── the review of Revision 2 (2026-10-28) ──
+
+    def test_a_text_that_borrows_from_the_example_is_a_502(self):
+        dana = {'name': 'Dana Sample', 'product': 'Solar', 'phone': '617-555-0102'}
+        failed = (502, {'error': "Alfred couldn't write that text just now; nothing was sent. Try again."})
+        for reply in ("How'd it go with Sam today? Sold, dead, or when are you following up?",
+                      'Hey Alex, how did it go with Dana?',
+                      'Follow-up with Dana is now — 617-555-0177, Solar.',
+                      'Got it — Dana sold, $9,800.', 'Got it — Dana sold, 9800.', 'Got it — Dana sold, $180/mo.',
+                      "Got it — I'll hit you up Thursday at 2.", 'Got it — Dana sold, 2 zones.'):
+            self.composer.reply = reply
+            r = self.compose(customers=[dict(dana)])
+            self.assertEqual((r.status_code, r.json()), failed, reply)
+        # The same words, when the data (or the rep's own name) gives them, are fine.
+        for reply, compose in (
+                ("How'd it go with Sam today?", {}),                                     # Sam Example is the customer
+                ('Hey Alex, how did it go with Sam?', {'rep_first_name': 'Alex', 'greet': True}),
+                ('Follow-up with Dana is now — 617-555-0177, Solar.',
+                 {'customers': [{**dana, 'phone': '617-555-0177'}]}),
+                ('Got it — Dana sold, $9,800, $180/mo, 2 zones.',
+                 {'customers': [dict(dana)], 'objective': 'wrap_up',
+                  'recorded': {'outcome': 'sale', 'fields': {'total': '$9,800', 'monthly': '$180/mo', 'zones': '2'}}}),
+                ("Got it — I'll hit you up Thursday at 2.",
+                 {'customers': [dict(dana)], 'objective': 'wrap_up', 'recorded': {'follow_up': 'Thursday at 2'}}),
+                ("Got it — I'll hit you up Thursday at 2.",
+                 {'customers': [{**dana, 'follow_up': 'Thu Oct 22 2:00 PM'}], 'objective': 'wrap_up'}),
+                ('Got it — 2 zones.', {'customers': [dict(dana)],
+                                       'history': [{'from': 'rep', 'text': 'sold, 2 zones'}]})):
+            self.composer.reply = reply
+            r = self.compose(**compose)
+            self.assertEqual((r.status_code, r.json().get('message')), (200, reply), reply)
+        self.assertIn('shaped like the example "Got it — I\'ll hit you up Thursday at 2." (its day and time are only '
+                      'an example)', alfred_text.COMPOSE_GOALS['wrap_up'])
+
+    def test_the_targets_last_turn_wraps_up_the_whole_update(self):
+        # For the wrap-up, recorded is everything this update recorded (Wednesday sends that).
+        sam = {'name': 'Sam Example', 'product': 'HVAC', 'phone': '617-555-0101',
+               'summary': 'Needs to talk to his wife'}
+        history = [{'from': 'alfred', 'text': 'Nice. What was the total?'},
+                   {'from': 'rep', 'text': 'about 9800 total'},
+                   {'from': 'alfred', 'text': 'Any adders?'},
+                   {'from': 'rep', 'text': 'no adders'}]
+        recorded = {'outcome': 'sale', 'fields': {'monthly': '$180/mo', 'zones': '2', 'total': '$9,800',
+                                                  'adders': 'none'}}
+        self.composer.reply = 'Got it — Sam sold, $180/mo, 2 zones, $9,800, no adders. Nice work.'
+        r = self.compose(objective='wrap_up', customers=[sam], recorded=recorded, history=history)
+        self.assertEqual((r.status_code, r.json()['message']),
+                         (200, 'Got it — Sam sold, $180/mo, 2 zones, $9,800, no adders. Nice work.'))
+        self.assertIn('Recorded just now: outcome sale; total $9,800; monthly $180/mo; zones 2; adders none\n',
+                      self.data())
+        self.assertIn('Val: no adders', self.data())
+        self.assertIn(alfred_text.COMPOSE_GOALS['wrap_up'] + ' After that sentence you may add a two-word closer',
+                      self.system())
+
+    def test_sold_counts_as_a_sale(self):
+        for outcome in ('sold', 'Sold', 'SALE'):
+            self.compose(objective='deal_details', ask='What was the total?', recorded={'outcome': outcome})
+            self.assertIn('Start with the acknowledgment "Nice."', self.system(), outcome)
+            self.compose(objective='wrap_up', recorded={'outcome': outcome})
+            self.assertIn('two-word closer', self.system(), outcome)
+        self.compose(objective='deal_details', ask='What was the total?', recorded={'outcome': 'no_sale'})
+        self.assertIn('Start with the acknowledgment "Got it."', self.system())
+
+    def test_a_speaker_label_is_stripped(self):
+        for reply in ('Alfred: Any adders?', 'Alfred (Thu 2:00): Any adders?', 'alfred : Any adders?',
+                      '"Alfred: Any adders?"', 'Alfred: "Any adders?"'):
+            self.composer.reply = reply
+            self.assertEqual(self.compose().json()['message'], 'Any adders?', reply)
+        self.composer.reply = 'Alfred says hi'          # not a label
+        self.assertEqual(self.compose().json()['message'], 'Alfred says hi')
+
+    def test_a_greeting_comes_after_the_intro_never_instead_of_it(self):
+        self.compose(greet=True)
+        self.assertIn('- Open with "Hey Val," and go straight on. The intro was already sent: don\'t repeat it or say '
+                      'who you are.', self.system())
 
     def test_the_owners_reference_conversation_verbatim(self):
         self.compose()
