@@ -138,6 +138,9 @@ QUESTION_ORDER = FOLLOW_UP_FIELDS + SALE_FIELDS
 # this) may carry; accepted, never asked.
 LEGACY_FIELDS = ['monthly_cost', 'post_appt_notes']
 DECLINABLE = QUESTION_ORDER + LEGACY_FIELDS
+# The deal questions before Revision 2: a context whose last question is one of these is from the old flow.
+LEGACY_QUESTIONS = {'any adders on this one?', "what's the monthly looking like?", 'and the total?',
+                    'anything else worth noting?'}
 QUESTIONS = {
     'follow_up_date': 'When would be a good time to follow up with the homeowner?',   # the call's own words
     'total_cost': 'What was the total?',
@@ -269,8 +272,9 @@ FROM_THE_EXAMPLE = (
     ('0177', r'0177', (r'0177',)),
     ('9,800', r'(?<![\d,])9,?800(?!\d)', (r'(?<![\d,])9,?800(?!\d)',)),
     ('$180', r'(?<![\d,.])180(?![\d,])', (r'(?<![\d,.])180(?![\d,])',)),
-    ('Thursday at 2', r'(?i)\bthursday at 2\b', (r'(?i)\bthu(?:r|rs|rsday)?\b', r'\b2(?::00)?(?!\d|:[1-5])')),
+    ('Thursday at 2', r'(?i)\bthursday at 2(?::00)?\b(?!:\d)', (r'(?i)\bthu(?:r|rs|rsday)?\b', r'\b2(?::00)?(?!\d|:[1-5])')),
     ('2 zones', r'(?i)\b2 zones\b', (r'(?i)\b2\s*zones?\b|\bzones?:?\s*2\b',)),
+    ('wife', r'(?i)\bwife\b', (r'(?i)\bwife\b',)),
 )
 
 
@@ -375,13 +379,17 @@ def _parse_body(request):
     empty = raw.get('empty_fields')
     if empty is not None and not (isinstance(empty, list) and all(isinstance(f, str) for f in empty)):
         raise _Refusal(400, 'context.empty_fields must be a list of field names.')
+    last_question = _short(raw.get('last_question'), 300)
+    # A context from the flow before Revision 2 (a conversation under way at deploy): its still_empty has
+    # the old names, or its last question was an old deal question. That flow asked deal questions for
+    # follow-ups too, so its total is never a "pricing came up" total; and it never knew zones or system.
+    legacy = any(old in (empty or []) for old in LEGACY_FIELDS) or last_question.lower() in LEGACY_QUESTIONS
     context = {
         'last_summary': _short(raw.get('last_summary'), 300),
-        'last_question': _short(raw.get('last_question'), 300),
-        # An older still_empty (monthly_cost, post_appt_notes…) never knew zones or system: still to ask.
+        'last_question': last_question,
         'empty_fields': None if empty is None else [
-            f for f in QUESTION_ORDER
-            if f in empty or (f in NOTE_LABELS and any(old in empty for old in LEGACY_FIELDS))],
+            f for f in QUESTION_ORDER if f in empty or (legacy and f in NOTE_LABELS)],
+        'legacy': legacy,
     }
     return {'lead_id': lead_id, 'rep_id': rep_id, 'rep_phone': rep_phone,
             'text': text, 'context': context, 'confirm_move': None}
@@ -1003,7 +1011,8 @@ def _labels(args, lead, outcome):
         value = re.sub(rf'^(?:{label}\s*:\s*)+', '', value, flags=re.I).strip()[:NOTE_LIMITS[field]].strip()
         if not value or (field == 'zones' and product not in ZONED_PRODUCTS):
             continue
-        if field == 'system' and product and value.lower() in (product, dict(Lead.APPOINTMENT_TYPE_CHOICES)[product].lower()):
+        if field == 'system' and product and value.lower() in (
+                product, dict(Lead.APPOINTMENT_TYPE_CHOICES).get(product, product).lower()):
             continue
         labels[label] = value
     return labels
@@ -1020,17 +1029,13 @@ def _to_ask(disposition, lead, pricing=False):
     return []
 
 
-def _labelled(notes, label):
-    return re.compile(rf'^\s*{label}\s*:', re.I | re.M).search(notes or '') is not None
-
-
 def _with_label(notes, label, value):
     """The notes with a "Label: value" line: an earlier line with that label
     is replaced where it stands (and any repeat of it dropped); the rest of
     the notes is left as it was."""
     line, placed, out = f'{label}: {value}', False, []
     for old in (notes or '').split('\n') if notes else []:
-        if re.match(rf'\s*{label}\s*:', old, re.I):
+        if re.match(rf'[ \t]*{label}[ \t]*:', old, re.I):
             if not placed:
                 out.append(line)
                 placed = True
@@ -1044,7 +1049,9 @@ def _with_label(notes, label, value):
 
 
 def _label_value(notes, label):
-    m = re.compile(rf'^\s*{label}\s*:\s*(.*?)\s*$', re.I | re.M).search(notes or '')
+    """The value on the notes' "Label:" line; None when there's none or it's empty. Only spaces and tabs
+    around the colon, so an empty label line never reaches into the next one."""
+    m = re.compile(rf'^[ \t]*{label}[ \t]*:[ \t]*(.*?)[ \t]*$', re.I | re.M).search(notes or '')
     return m.group(1) if m and m.group(1) else None
 
 
@@ -1057,7 +1064,7 @@ def _notes_with(notes, model_notes, labels):
         kept = model_notes
         for label in NOTE_LABELS.values():
             value = _label_value(notes, label)
-            if value and not _labelled(kept, label):
+            if value and _label_value(kept, label) is None:
                 kept = _with_label(kept, label, value)
         notes = kept
     for label, value in labels.items():
@@ -1077,7 +1084,7 @@ def _known(field, lead, writes):
     """Whether a question's answer is on the lead or in this text's writes."""
     if field in NOTE_LABELS:
         notes = writes.get('post_appt_notes', lead.post_appt_notes)
-        return _labelled(notes, NOTE_LABELS[field]) or (field == 'system' and bool(lead.appointment_type))
+        return _label_value(notes, NOTE_LABELS[field]) is not None or (field == 'system' and bool(lead.appointment_type))
     return field in writes or bool(getattr(lead, field))
 
 
@@ -1091,8 +1098,9 @@ def _still_empty(lead, writes, declined, context, pricing=False):
     asked_before = _to_ask(lead.disposition, lead)
     carried = context['empty_fields']
     # A total the last text asked because pricing came up (the lead was already a follow-up) is still
-    # asked, though this text doesn't flag it. One carried over from a sale's questions is not.
-    pricing = pricing or (lead.disposition in FOLLOW_UP_DISPOSITIONS
+    # asked, though this text doesn't flag it. One carried over from a sale's questions, or from the old
+    # flow (which asked every follow-up for its total), is not.
+    pricing = pricing or (lead.disposition in FOLLOW_UP_DISPOSITIONS and not context.get('legacy')
                           and any(f in (carried or []) for f in PRICE_FIELDS))
     return [f for f in _to_ask(writes.get('disposition') or lead.disposition, lead, pricing)
             if not _known(f, lead, writes) and f not in declined

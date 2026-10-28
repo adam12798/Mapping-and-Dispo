@@ -923,6 +923,61 @@ class TextQuestionReviewTests(AlfredTextBase):
         self.assertEqual(self.notes(), 'Dog in the yard\nZones: 2')
 
 
+class TextQuestionReReviewTests(AlfredTextBase):
+    """The re-review of Revision 2 (2026-10-28)."""
+
+    say = TextQuestionTests.say
+    OLD_CONTEXT = {'last_summary': 'Wants to think it over', 'last_question': 'Any adders on this one?',
+                   'empty_fields': ['adders', 'monthly_cost', 'total_cost', 'post_appt_notes']}
+
+    def test_a_follow_up_with_an_old_context_is_never_asked_the_total(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='follow_up', sat=True)
+        answer = {'follow_up_date': '2026-10-23', 'follow_up_time': '14:00'}
+        for context in (self.OLD_CONTEXT,
+                        {**self.OLD_CONTEXT, 'empty_fields': ['adders', 'total_cost']},       # old question only
+                        {**self.OLD_CONTEXT, 'last_question': 'When would be a good time to follow up with the '
+                                                              'homeowner?'}):                   # old names only
+            self.model.fixed = {'understood': True, **answer}
+            out = self.text('still thinking, try friday at 2', context=context).json()
+            self.assertEqual((out['next_question'], out['still_empty']), (None, []), context)
+        # A context from today's flow still carries a pricing total.
+        self.model.fixed = {'understood': True, **answer}
+        out = self.text('friday at 2', context={'last_summary': 'x', 'last_question': 'What was the total?',
+                                                'empty_fields': ['follow_up_date', 'follow_up_time',
+                                                                 'total_cost']}).json()
+        self.assertEqual(out['next_question'], 'What was the total?')
+
+    def test_an_old_context_on_a_sale_still_asks_zones(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True, total_cost='$9,800')
+        self.model.fixed = {'understood': True, 'adders': 'Battery'}
+        out = self.text('battery', context={**self.OLD_CONTEXT, 'empty_fields': ['adders']}).json()
+        self.assertEqual((out['next_question'], out['still_empty']), ('How many zones?', ['zones']))
+
+    def test_a_product_outside_the_choices(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True, appointment_type='geothermal')
+        out = self.say('geothermal', {'system': 'Geothermal'})
+        self.assertEqual(self.fresh().post_appt_notes, '')                   # only the lead's own product
+        out = self.say('heat pump, 2 zones', {'system': 'heat pump', 'zones': '2'})
+        self.assertEqual(self.fresh().post_appt_notes, 'System: heat pump')   # no zones outside HVAC/Both
+        self.assertIsInstance(out['still_empty'], list)
+
+    def test_an_empty_label_line_never_takes_the_next_one(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True,
+                                                        post_appt_notes='Zones:\nSystem: heat pump')
+        self.assertIsNone(alfred_text._label_value('Zones:\nSystem: heat pump', 'Zones'))
+        self.assertIsNone(alfred_text._label_value('Zones: \t\nSystem: heat pump', 'Zones'))
+        self.assertEqual(alfred_text._label_value('Dog\n  zones :  3 \nGate', 'Zones'), '3')
+        out = self.say('quiet unit', {'post_appt_notes': 'Wants a quiet unit'})
+        self.assertEqual(self.fresh().post_appt_notes, 'Wants a quiet unit\nSystem: heat pump')
+        # An empty "Zones:" line isn't an answer: still asked.
+        Lead.all_objects.filter(pk=self.lead.pk).update(post_appt_notes='Zones:\nSystem: heat pump',
+                                                        total_cost='$9,800', adders='Battery')
+        out = self.say('ok', {'declined_fields': ['post_appt_notes']})
+        self.assertEqual(out['next_question'], 'How many zones?')
+        out = self.say('2', {'zones': '2'}, out)
+        self.assertEqual(self.fresh().post_appt_notes, 'Zones: 2\nSystem: heat pump')
+
+
 class WebhookTests(AlfredTextBase):
     """The org's disposition webhooks fire, through the real fire_webhooks."""
     stub_webhooks = False
@@ -1461,6 +1516,19 @@ class ComposeTests(AlfredTextBase):
             self.assertEqual((r.status_code, r.json().get('message')), (200, reply), reply)
         self.assertIn('shaped like the example "Got it — I\'ll hit you up Thursday at 2." (its day and time are only '
                       'an example)', alfred_text.COMPOSE_GOALS['wrap_up'])
+
+    def test_the_example_s_time_and_wife(self):
+        dana = {'name': 'Dana Sample', 'product': 'Solar', 'phone': '617-555-0102'}
+        for reply, status in (("Got it — I'll hit you up Thursday at 2:30.", 200),     # not the example's time
+                              ("Got it — I'll hit you up Thursday at 2:15 PM.", 200),
+                              ("Got it — I'll hit you up Thursday at 2:00.", 502),
+                              ("Got it — I'll hit you up Thursday at 2 PM.", 502),
+                              ('Follow-up with Dana is now. Last time she needed to talk to her wife.', 502)):
+            self.composer.reply = reply
+            self.assertEqual(self.compose(customers=[dict(dana)]).status_code, status, reply)
+        self.composer.reply = 'Follow-up with Dana is now. Last time she needed to talk to her wife.'
+        r = self.compose(customers=[{**dana, 'summary': 'Needs to talk to wife'}])
+        self.assertEqual(r.status_code, 200)
 
     def test_the_targets_last_turn_wraps_up_the_whole_update(self):
         # For the wrap-up, recorded is everything this update recorded (Wednesday sends that).
