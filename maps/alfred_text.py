@@ -150,7 +150,10 @@ ZONED_PRODUCTS = {'hvac', 'both'}
 # Sutton has no zones or system field: they are labelled lines in post_appt_notes.
 NOTE_LABELS = {'zones': 'Zones', 'system': 'System'}
 NOTE_LIMITS = {'zones': 40, 'system': 200}
-NOTES_MAX = 20000            # post_appt_notes, labelled lines included (a pending token's check)
+# Once the outcome is settled, the deal questions are Sutton's own (still_empty, in the owner's order): a
+# clarifying question from the model about the monthly, the notes or a deal detail is not asked.
+DEAL_QUESTION = re.compile(r'\b(monthly|a month|per month|/mo|notes?|noting|anything else|adders?|total|zones?|'
+                           r'system|price|pricing|cost)\b', re.I)
 
 ASK_OUTCOME = 'Did you sit the appointment?'
 ASK_CREDIT = 'Did you run credit?'
@@ -362,7 +365,10 @@ def _parse_body(request):
     context = {
         'last_summary': _short(raw.get('last_summary'), 300),
         'last_question': _short(raw.get('last_question'), 300),
-        'empty_fields': None if empty is None else [f for f in QUESTION_ORDER if f in empty],
+        # An older still_empty (monthly_cost, post_appt_notes…) never knew zones or system: still to ask.
+        'empty_fields': None if empty is None else [
+            f for f in QUESTION_ORDER
+            if f in empty or (f in NOTE_LABELS and any(old in empty for old in LEGACY_FIELDS))],
     }
     return {'lead_id': lead_id, 'rep_id': rep_id, 'rep_phone': rep_phone,
             'text': text, 'context': context, 'confirm_move': None}
@@ -539,7 +545,9 @@ def text_tool():
         'clarifying_question': {
             'type': 'string',
             'description': ("One short question, in Alfred's voice, when something is unclear: the decision tree's "
-                            'next question, or asking the rep to say it again. Leave out when nothing is unclear.'),
+                            'next question, or asking the rep to say it again. Leave out when nothing is unclear. '
+                            'Never about the monthly, the notes or deal details (adders, total, zones, system): '
+                            'Alfred asks those itself.'),
         },
         'appointment_moved_to_date': {
             'type': 'string',
@@ -886,7 +894,7 @@ def read_answer(args, lead, today, text='', context=None):
     move = None
     if not understood:
         return {'writes': {}, 'problems': [], 'understood': False, 'question': question,
-                'declined': [], 'move': None, 'pricing': False}
+                'declined': [], 'move': None, 'pricing': False, 'labels': {}}
 
     disposition = args.get('disposition')
     if disposition is not None:
@@ -928,14 +936,6 @@ def read_answer(args, lead, today, text='', context=None):
     if notes:
         # Lead.call_notes is 200 characters; the call asks for under 20 words.
         writes['call_notes'] = ' '.join(notes.split()[:CALL_NOTE_WORDS])[:200]
-    for field, label in NOTE_LABELS.items():
-        value = args.get(field)
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            value = str(value)
-        value = ' '.join(_short(value, NOTE_LIMITS[field]).split())
-        if value:
-            writes['post_appt_notes'] = _with_label(writes.get('post_appt_notes', lead.post_appt_notes),
-                                                    label, value)
 
     if args.get('appointment_moved_to_date') or args.get('appointment_moved_to_time'):
         moved_date = _date(args.get('appointment_moved_to_date'))
@@ -962,7 +962,29 @@ def read_answer(args, lead, today, text='', context=None):
         problems.append(('disposition', ASK_CREDIT))
 
     return {'writes': writes, 'problems': problems, 'understood': True, 'question': question,
-            'declined': declined, 'move': move, 'pricing': pricing}
+            'declined': declined, 'move': move, 'pricing': pricing,
+            'labels': _labels(args, lead, writes.get('disposition') or lead.disposition)}
+
+
+def _labels(args, lead, outcome):
+    """This text's zones and system, as {label: value} for labelled lines in
+    the notes — only for a sale; zones only for HVAC or Both; never a system
+    that only repeats the lead's own product."""
+    labels, product = {}, (lead.appointment_type or '').lower()
+    if outcome != 'sale':
+        return labels
+    for field, label in NOTE_LABELS.items():
+        value = args.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            value = str(value)
+        value = ' '.join(_short(value, 1000).split())
+        value = re.sub(rf'^(?:{label}\s*:\s*)+', '', value, flags=re.I).strip()[:NOTE_LIMITS[field]].strip()
+        if not value or (field == 'zones' and product not in ZONED_PRODUCTS):
+            continue
+        if field == 'system' and product and value.lower() in (product, dict(Lead.APPOINTMENT_TYPE_CHOICES)[product].lower()):
+            continue
+        labels[label] = value
+    return labels
 
 
 def _to_ask(disposition, lead, pricing=False):
@@ -992,7 +1014,41 @@ def _with_label(notes, label, value):
                 placed = True
         else:
             out.append(old)
-    return '\n'.join(out if placed else out + [line])
+    if not placed:
+        while out and not out[-1].strip():      # no blank line before the label
+            out.pop()
+        out.append(line)
+    return '\n'.join(out)
+
+
+def _label_value(notes, label):
+    m = re.compile(rf'^\s*{label}\s*:\s*(.*?)\s*$', re.I | re.M).search(notes or '')
+    return m.group(1) if m and m.group(1) else None
+
+
+def _notes_with(notes, model_notes, labels):
+    """The notes to write, from the notes as they are (`notes`): the model's
+    own new notes when it gave them — keeping every labelled line of `notes`
+    they lack, since the model sees only the start of the notes — then this
+    text's labels."""
+    if model_notes is not None:
+        kept = model_notes
+        for label in NOTE_LABELS.values():
+            value = _label_value(notes, label)
+            if value and not _labelled(kept, label):
+                kept = _with_label(kept, label, value)
+        notes = kept
+    for label, value in labels.items():
+        notes = _with_label(notes, label, value)
+    return notes
+
+
+def _with_notes(notes, writes, labels):
+    """writes, with post_appt_notes worked out from `notes` when this text
+    touches them."""
+    if not labels and 'post_appt_notes' not in writes:
+        return dict(writes)
+    return {**writes, 'post_appt_notes': _notes_with(notes or '', writes.get('post_appt_notes'), labels)}
 
 
 def _known(field, lead, writes):
@@ -1012,6 +1068,10 @@ def _still_empty(lead, writes, declined, context, pricing=False):
     brings in (a first outcome, sale → cpfu) are asked."""
     asked_before = _to_ask(lead.disposition, lead)
     carried = context['empty_fields']
+    # A total the last text asked because pricing came up (the lead was already a follow-up) is still
+    # asked, though this text doesn't flag it. One carried over from a sale's questions is not.
+    pricing = pricing or (lead.disposition in FOLLOW_UP_DISPOSITIONS
+                          and any(f in (carried or []) for f in PRICE_FIELDS))
     return [f for f in _to_ask(writes.get('disposition') or lead.disposition, lead, pricing)
             if not _known(f, lead, writes) and f not in declined
             and (carried is None or f in carried or f not in asked_before)]
@@ -1070,8 +1130,7 @@ def _deserialize(data):
                 raise ValueError('call_notes')
             out[field] = value
         else:
-            limit = NOTES_MAX if field == 'post_appt_notes' else FIELD_LIMITS[field]   # labelled lines added
-            if not isinstance(value, str) or not value or len(value) > limit:
+            if not isinstance(value, str) or not value or len(value) > FIELD_LIMITS[field]:
                 raise ValueError(field)
             out[field] = value
     return out
@@ -1108,33 +1167,46 @@ def _pending_from(data, lead, rep):
         raise ValueError('next_question')
     if not (isinstance(still, list) and all(isinstance(f, str) and f in DECLINABLE for f in still)):
         raise ValueError('still_empty')
-    return {'pid': pid, 'writes': _deserialize(data.get('writes')), 'exchange': exchange, 'summary': summary,
+    # Zones and system wait as label/value pairs, put on the notes as they are at the confirmation. (A token
+    # from before carries none.)
+    labels, fields = data.get('labels', {}), {label: field for field, label in NOTE_LABELS.items()}
+    if not (isinstance(labels, dict) and set(labels) <= set(fields) and all(
+            isinstance(v, str) and v.strip() and len(v) <= NOTE_LIMITS[fields[k]] for k, v in labels.items())):
+        raise ValueError('labels')
+    return {'pid': pid, 'writes': _deserialize(data.get('writes')), 'labels': dict(labels),
+            'exchange': exchange, 'summary': summary,
             'issued': issued, 'move': {'date': move['date'], 'time': move['time']},
             'next_question': nq, 'still_empty': [f for f in still if f in QUESTION_ORDER]}
 
 
-def _write_exchange(lead, rep, writes, exchange, summary, log_suffix=''):
+def _write_exchange(lead, rep, writes, exchange, summary, log_suffix='', labels=None):
     """The call's write — these fields, the exchange added to the transcript —
-    and the text's call log, in one transaction. False when the lead changed
-    hands meanwhile (nothing is written)."""
+    and the text's call log, in one transaction. What was written (the notes
+    as finally written), or None when the lead changed hands meanwhile
+    (nothing is written)."""
     with transaction.atomic():
-        if writes:
+        written = dict(writes)
+        if labels or 'post_appt_notes' in writes:
+            # The notes as they are now, under a lock: labels go onto them, never onto a stale copy.
+            notes = Lead.objects.select_for_update().filter(id=lead.id).values_list('post_appt_notes', flat=True).first()
+            written = _with_notes(notes or '', writes, labels or {})
+        if written:
             # A text debrief comes in pieces, so each exchange is added to the
             # transcript rather than replacing it — appended in the UPDATE
             # itself, so two texts at once both keep theirs.
-            update = dict(writes)
+            update = dict(written)
             update['call_transcript'] = Case(
                 When(call_transcript='', then=Value(exchange)),
                 default=Concat(F('call_transcript'), Value('\n\n' + exchange)),
                 output_field=TextField())
             if not Lead.objects.filter(id=lead.id).filter(Q(rep=rep) | Q(rep__isnull=True)).update(**update):
-                return False
+                return None
         VoiceCallLog.objects.create(
             rep=rep, caller_number=_phone_digits(rep.phone_number)[:20], channel='text',
             transcript=f"Lead #{lead.id} ({lead.homeowner_name or 'no name'})\n{exchange}{log_suffix}",
             summary=summary,
         )
-    return True
+    return written
 
 
 def _after_write(lead, rep, writes):
@@ -1183,11 +1255,13 @@ def _confirm_move(token, rep, lead):
         if logs.exists():
             return JsonResponse({'error': 'The lead has a newer text since this move was asked; nothing was saved.'},
                                 status=409)
-        if not _write_exchange(lead, rep, p['writes'], p['exchange'], p['summary'], log_suffix=marker):
+        written = _write_exchange(lead, rep, p['writes'], p['exchange'], p['summary'], log_suffix=marker,
+                                  labels=p['labels'])
+        if written is None:
             return JsonResponse({'error': 'That lead changed hands just now; nothing was saved.'}, status=409)
-    if p['writes']:
-        _after_write(lead, rep, p['writes'])
-    return JsonResponse({'set': _serialize(p['writes']), **done, 'already_applied': False})
+    if written:
+        _after_write(lead, rep, written)
+    return JsonResponse({'set': _serialize(written), **done, 'already_applied': False})
 
 
 def _compose(compose, rep, now):
@@ -1251,27 +1325,31 @@ def alfred_text(request):
 
     today = now.astimezone(EASTERN).date()
     answer = read_answer(args, lead, today, text, context)
-    writes = answer['writes']
-    if answer['understood'] and not writes and not answer['move'] and not answer['question'] \
-            and not answer['problems'] and not answer['declined']:
+    writes, labels = answer['writes'], answer['labels']
+    heard = any(args.get(f) for f in NOTE_LABELS)      # zones or system read, though not for this lead
+    if answer['understood'] and not writes and not labels and not heard and not answer['move'] \
+            and not answer['question'] and not answer['problems'] and not answer['declined']:
         answer['understood'] = False     # nothing in it: ask, don't guess
 
     if not answer['understood']:
-        writes = {}
+        writes, labels, preview = {}, {}, {}
         still_empty = []
         next_question = answer['question'] or ASK_UNREADABLE.format(name=_first_name(lead))
     else:
-        still_empty = _still_empty(lead, writes, answer['declined'], context, answer['pricing'])
+        # What the lead would hold (the notes with this text's labels), for what's still to ask and the reply.
+        preview = _with_notes(lead.post_appt_notes, writes, labels)
+        still_empty = _still_empty(lead, preview, answer['declined'], context, answer['pricing'])
+        settled = bool(writes.get('disposition') or lead.disposition)
         if answer['problems']:
             next_question = answer['problems'][0][1]
-        elif answer['question']:
+        elif answer['question'] and not (settled and DEAL_QUESTION.search(answer['question'])):
             next_question = answer['question']
-        elif not (writes.get('disposition') or lead.disposition) and not answer['move']:
+        elif not settled and not answer['move']:
             # Details but no outcome yet: the decision tree's next question.
             sat = writes['sat'] if 'sat' in writes else lead.sat
             next_question = {True: ASK_CREDIT, False: ASK_NOT_SAT}.get(sat, ASK_OUTCOME)
         elif still_empty:
-            next_question = _ask(still_empty[0], lead, writes)
+            next_question = _ask(still_empty[0], lead, preview)
         else:
             next_question = None
     summary = writes.get('call_notes') or context['last_summary'] or lead.call_notes or ''
@@ -1282,15 +1360,15 @@ def alfred_text(request):
     if answer['understood'] and answer['move']:
         # The ruling (l): nothing is written while the move is unconfirmed.
         # The whole exchange waits in a signed token, applied on the rep's
-        # confirmation (confirm_move).
-        pending_set = _serialize(writes)
+        # confirmation (confirm_move). The token holds the model's own notes
+        # (if any) and this text's labels — never the lead's whole notes.
         if _pending_key() is None:      # never signed with SECRET_KEY (its production fallback is public)
             return JsonResponse({'error': 'Alfred is not configured (no key to hold a move); nothing was saved.'},
                                 status=503)
         token = signing.dumps({'v': 2, 'pid': secrets.token_hex(8), 'lead': lead.id, 'rep': rep.id,
-                               'issued': now.isoformat(), 'writes': pending_set, 'exchange': exchange,
-                               'summary': summary, 'move': answer['move'], 'next_question': next_question,
-                               'still_empty': still_empty},
+                               'issued': now.isoformat(), 'writes': _serialize(writes), 'labels': labels,
+                               'exchange': exchange, 'summary': summary, 'move': answer['move'],
+                               'next_question': next_question, 'still_empty': still_empty},
                               key=_pending_key(), salt=PENDING_SALT, compress=True)
         return JsonResponse({
             'set': {},
@@ -1299,16 +1377,17 @@ def alfred_text(request):
             'appointment_move': answer['move'],
             'still_empty': still_empty,
             'understood': True,
-            'pending': {'token': token, 'set': pending_set,
+            'pending': {'token': token, 'set': _serialize(preview),
                         'expires_at': (now + timedelta(seconds=PENDING_MAX_AGE)).isoformat()},
         })
-    if not _write_exchange(lead, rep, writes, exchange, summary):
+    written = _write_exchange(lead, rep, writes, exchange, summary, labels=labels)
+    if written is None:
         return JsonResponse({'error': 'That lead changed hands just now; nothing was saved.'}, status=409)
-    if writes:
-        _after_write(lead, rep, writes)
+    if written:
+        _after_write(lead, rep, written)
 
     return JsonResponse({
-        'set': _serialize(writes),
+        'set': _serialize(written),
         'summary': summary,
         'next_question': next_question,
         'appointment_move': answer['move'],

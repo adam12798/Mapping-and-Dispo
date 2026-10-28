@@ -810,7 +810,117 @@ class TextQuestionTests(AlfredTextBase):
         out = self.text('battery', context={'last_summary': 'Sold', 'last_question': 'Any adders on this one?',
                                             'empty_fields': ['adders', 'monthly_cost', 'total_cost',
                                                              'post_appt_notes']}).json()
+        # The old flow never asked zones or system: they are still to ask (an HVAC lead: zones).
+        self.assertEqual((out['next_question'], out['still_empty']), ('What was the total?', ['total_cost', 'zones']))
+
+
+class TextQuestionReviewTests(AlfredTextBase):
+    """The review of Revision 2's text mode (2026-10-28)."""
+
+    say = TextQuestionTests.say
+
+    def setUp(self):
+        super().setUp()
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True)
+
+    def notes(self):
+        return self.fresh().post_appt_notes
+
+    def payload(self, token):
+        return signing.loads(token, key=alfred_text._pending_key(), salt=alfred_text.PENDING_SALT)
+
+    def confirm(self, token):
+        return Client().post(URL, data=json.dumps({'rep_id': self.v_rep.id, 'lead_id': self.lead.id,
+                                                   'confirm_move': token}),
+                             content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {self.v_tenant.api_key}')
+
+    MOVE = {'appointment_moved_to_date': '2026-10-22', 'appointment_moved_to_time': '18:00'}
+
+    def test_the_models_own_notes_keep_the_labelled_lines(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(post_appt_notes='Dog in the yard\nZones: 3\nSystem: heat pump')
+        out = self.say('wants a quiet unit', {'post_appt_notes': 'Wants a quiet unit'})
+        self.assertEqual(out['set']['post_appt_notes'], 'Wants a quiet unit\nZones: 3\nSystem: heat pump')
+        self.assertEqual(self.notes(), 'Wants a quiet unit\nZones: 3\nSystem: heat pump')
+        # With this text's own label too, and a line the model already kept is not doubled.
+        out = self.say('quiet unit, 4 zones', {'post_appt_notes': 'Wants a quiet unit\nZones: 3', 'zones': '4'})
+        self.assertEqual(self.notes(), 'Wants a quiet unit\nZones: 4\nSystem: heat pump')
+
+    def test_a_total_asked_for_pricing_stays_asked_next_text(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='', sat=None)
+        out = self.say('cpfu, quoted $9,800', {'disposition': 'cpfu', 'sat': True, 'call_notes': 'Credit passed',
+                                               'pricing_mentioned': True})
+        self.assertEqual(out['still_empty'], ['follow_up_date', 'follow_up_time', 'total_cost'])
+        out = self.say('friday at 2', {'follow_up_date': '2026-10-23', 'follow_up_time': '14:00'}, out)
         self.assertEqual((out['next_question'], out['still_empty']), ('What was the total?', ['total_cost']))
+        out = self.say('9800', {'total_cost': '$9,800'}, out)
+        self.assertEqual((out['next_question'], out['still_empty']), (None, []))
+
+    def test_once_the_outcome_is_settled_alfred_asks_the_deal_questions_itself(self):
+        out = self.say('battery', {'adders': 'Battery', 'clarifying_question': "What's the monthly looking like?"})
+        self.assertEqual(out['next_question'], 'What was the total?')          # the computed question instead
+        Lead.all_objects.filter(pk=self.lead.pk).update(total_cost='$9,800', post_appt_notes='Zones: 2')
+        out = self.say('ok', {'clarifying_question': 'Anything else worth noting?'})
+        self.assertTrue(out['understood'])
+        self.assertIsNone(out['next_question'])
+        # Questions about the outcome itself are still the model's to ask.
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='follow_up')
+        out = self.say('maybe', {'clarifying_question': 'Did you run credit?'})
+        self.assertEqual(out['next_question'], 'Did you run credit?')
+        description = alfred_text.text_tool()['function']['parameters']['properties']['clarifying_question']['description']
+        self.assertIn('Never about the monthly, the notes or deal details (adders, total, zones, system)', description)
+
+    def test_a_pending_move_holds_only_its_labels_and_puts_them_on_the_notes_as_they_are_then(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(post_appt_notes='Dog in the yard')
+        out = self.say('sold, 2 zones, wants it moved to thursday at 6', {**self.MOVE, 'zones': '2'})
+        self.assertEqual(out['set'], {})
+        self.assertEqual(out['pending']['set'], {'post_appt_notes': 'Dog in the yard\nZones: 2'})
+        payload = self.payload(out['pending']['token'])
+        self.assertEqual((payload['writes'], payload['labels']), ({}, {'Zones': '2'}))   # never the whole notes
+        self.assertEqual(self.notes(), 'Dog in the yard')
+        # The office edits the notes before the rep confirms: the edit stays.
+        Lead.all_objects.filter(pk=self.lead.pk).update(post_appt_notes='Dog in the yard\nGate code changed')
+        r = self.confirm(out['pending']['token'])
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['set'], {'post_appt_notes': 'Dog in the yard\nGate code changed\nZones: 2'})
+        self.assertEqual(self.notes(), 'Dog in the yard\nGate code changed\nZones: 2')
+
+    def test_long_notes_never_make_a_move_unconfirmable(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(post_appt_notes='x' * 25000)
+        out = self.say('2 zones, move it to thursday at 6', {**self.MOVE, 'zones': '2'})
+        token = out['pending']['token']
+        self.assertLess(len(token), 1000)
+        self.assertEqual(self.confirm(token).status_code, 200)
+        self.assertEqual(self.notes(), 'x' * 25000 + '\nZones: 2')
+        self.assertFalse(hasattr(alfred_text, 'NOTES_MAX'))      # the token holds no notes to cap
+
+    def test_the_direct_write_puts_labels_on_the_notes_as_they_are_at_the_write(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(post_appt_notes='Old notes')
+        # The office edits the notes while the model reads the text.
+        self.model.side_effect = lambda: Lead.all_objects.filter(pk=self.lead.pk).update(post_appt_notes='Office edit')
+        out = self.say('2 zones', {'zones': '2'})
+        self.assertEqual(self.notes(), 'Office edit\nZones: 2')
+        self.assertEqual(out['set'], {'post_appt_notes': 'Office edit\nZones: 2'})     # what was written
+
+    def test_zones_and_system_only_for_a_sale_zones_only_hvac_or_both(self):
+        for disposition, product, answer, written in (
+                ('follow_up', 'hvac', {'zones': '2'}, None),                  # before a sale: not written
+                ('sale', 'solar', {'zones': '2'}, None),                      # solar has no zones
+                ('sale', 'hvac', {'system': 'HVAC'}, None),                   # only the lead's own product
+                ('sale', 'both', {'system': 'Both'}, None),
+                ('sale', 'hvac', {'system': 'heat pump'}, 'System: heat pump'),
+                ('sale', 'solar', {'system': 'HVAC'}, 'System: HVAC'),         # not an echo
+                ('sale', 'both', {'zones': 'Zones: Zones: 2'}, 'Zones: 2'),    # its own label stripped
+                ('sale', '', {'system': 'System: solar'}, 'System: solar')):
+            Lead.all_objects.filter(pk=self.lead.pk).update(disposition=disposition, appointment_type=product,
+                                                            post_appt_notes='')
+            out = self.say('details', answer)
+            self.assertTrue(out['understood'], (disposition, product, answer))   # read, even when not written
+            self.assertEqual(self.notes(), written or '', (disposition, product, answer))
+        # No blank line before a label.
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', appointment_type='hvac',
+                                                        post_appt_notes='Dog in the yard\n\n')
+        self.say('2 zones', {'zones': '2'})
+        self.assertEqual(self.notes(), 'Dog in the yard\nZones: 2')
 
 
 class WebhookTests(AlfredTextBase):
