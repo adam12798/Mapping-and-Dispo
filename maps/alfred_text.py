@@ -123,21 +123,34 @@ def _pending_key():
     return None
 TOOL_NAME = 'read_rep_text'
 
-# What Alfred still asks after the outcome, in the call's order. The deal
-# questions are the call's own words (a test pins them to voice_ws.py).
-QUESTION_ORDER = ['follow_up_date', 'follow_up_time', 'adders', 'monthly_cost', 'total_cost', 'post_appt_notes']
-DEAL_FIELDS = ['adders', 'monthly_cost', 'total_cost', 'post_appt_notes']
+# What Alfred still asks by text (the owner's Revision 2, 2026-10-28; the
+# call is unchanged). A follow-up asks its day and time. Before a sale there
+# are no deal questions unless the rep brought up pricing — then only the
+# total. After a sale, only the missing required fields, in this order, each
+# once: zones for HVAC (or both), the system only when the lead has no
+# product. The monthly is written when given but never asked; the notes are
+# never asked about by text.
+FOLLOW_UP_FIELDS = ['follow_up_date', 'follow_up_time']
+SALE_FIELDS = ['total_cost', 'zones', 'adders', 'system']
+PRICE_FIELDS = ['total_cost']
+QUESTION_ORDER = FOLLOW_UP_FIELDS + SALE_FIELDS
+# Names an older still_empty (a context, or a pending token issued before
+# this) may carry; accepted, never asked.
+LEGACY_FIELDS = ['monthly_cost', 'post_appt_notes']
+DECLINABLE = QUESTION_ORDER + LEGACY_FIELDS
 QUESTIONS = {
-    'follow_up_date': 'When would be a good time to follow up with the homeowner?',
-    'adders': 'Any adders on this one?',
-    'monthly_cost': "What's the monthly looking like?",
-    'total_cost': 'And the total?',
-    'post_appt_notes': 'Anything else worth noting?',
+    'follow_up_date': 'When would be a good time to follow up with the homeowner?',   # the call's own words
+    'total_cost': 'What was the total?',
+    'zones': 'How many zones?',
+    'adders': 'Any adders?',
+    'system': 'What system did they go with?',
 }
-# Which outcomes get a follow-up date and the deal questions (the call asks
-# them for sale, follow_up and cpfu; future_contact is a far-out follow_up).
 FOLLOW_UP_DISPOSITIONS = {'follow_up', 'cpfu', 'future_contact'}
-DEAL_DISPOSITIONS = {'sale'} | FOLLOW_UP_DISPOSITIONS
+ZONED_PRODUCTS = {'hvac', 'both'}
+# Sutton has no zones or system field: they are labelled lines in post_appt_notes.
+NOTE_LABELS = {'zones': 'Zones', 'system': 'System'}
+NOTE_LIMITS = {'zones': 40, 'system': 200}
+NOTES_MAX = 20000            # post_appt_notes, labelled lines included (a pending token's check)
 
 ASK_OUTCOME = 'Did you sit the appointment?'
 ASK_CREDIT = 'Did you run credit?'
@@ -539,8 +552,21 @@ def text_tool():
         },
         'declined_fields': {
             'type': 'array',
-            'items': {'type': 'string', 'enum': QUESTION_ORDER},
+            'items': {'type': 'string', 'enum': DECLINABLE},
             'description': 'Details the rep said there is nothing for, or does not know (e.g. "no adders").',
+        },
+        'zones': {
+            'type': 'string',
+            'description': 'How many zones the system has (HVAC), as the rep said it, e.g. "2". Only when the rep said it.',
+        },
+        'system': {
+            'type': 'string',
+            'description': ('The system the homeowner went with, as the rep said it (e.g. "heat pump", "solar", '
+                            '"HVAC and solar"). Only when the rep said it.'),
+        },
+        'pricing_mentioned': {
+            'type': 'boolean',
+            'description': 'True when this text brings up pricing: a monthly, a total, a quote or a price.',
         },
     })
     return {
@@ -854,12 +880,13 @@ def read_answer(args, lead, today, text='', context=None):
     earlier = ((context or {}).get('last_summary'), (context or {}).get('last_question'), lead.call_notes)
     understood = args.get('understood') is not False
     question = _short(args.get('clarifying_question'), 300)
-    declined = [f for f in QUESTION_ORDER if f in (args.get('declined_fields') or [])] \
+    declined = [f for f in DECLINABLE if f in (args.get('declined_fields') or [])] \
         if isinstance(args.get('declined_fields'), list) else []
+    pricing = args.get('pricing_mentioned') is True
     move = None
     if not understood:
         return {'writes': {}, 'problems': [], 'understood': False, 'question': question,
-                'declined': [], 'move': None}
+                'declined': [], 'move': None, 'pricing': False}
 
     disposition = args.get('disposition')
     if disposition is not None:
@@ -901,6 +928,14 @@ def read_answer(args, lead, today, text='', context=None):
     if notes:
         # Lead.call_notes is 200 characters; the call asks for under 20 words.
         writes['call_notes'] = ' '.join(notes.split()[:CALL_NOTE_WORDS])[:200]
+    for field, label in NOTE_LABELS.items():
+        value = args.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            value = str(value)
+        value = ' '.join(_short(value, NOTE_LIMITS[field]).split())
+        if value:
+            writes['post_appt_notes'] = _with_label(writes.get('post_appt_notes', lead.post_appt_notes),
+                                                    label, value)
 
     if args.get('appointment_moved_to_date') or args.get('appointment_moved_to_time'):
         moved_date = _date(args.get('appointment_moved_to_date'))
@@ -927,28 +962,58 @@ def read_answer(args, lead, today, text='', context=None):
         problems.append(('disposition', ASK_CREDIT))
 
     return {'writes': writes, 'problems': problems, 'understood': True, 'question': question,
-            'declined': declined, 'move': move}
+            'declined': declined, 'move': move, 'pricing': pricing}
 
 
-def _to_ask(disposition):
+def _to_ask(disposition, lead, pricing=False):
+    """What this outcome asks by text, in order (see QUESTION_ORDER)."""
+    if disposition == 'sale':
+        product = (lead.appointment_type or '').lower()
+        return [f for f in SALE_FIELDS
+                if (f != 'zones' or product in ZONED_PRODUCTS) and (f != 'system' or not product)]
     if disposition in FOLLOW_UP_DISPOSITIONS:
-        return QUESTION_ORDER
-    if disposition in DEAL_DISPOSITIONS:
-        return DEAL_FIELDS
+        return FOLLOW_UP_FIELDS + (PRICE_FIELDS if pricing else [])
     return []
 
 
-def _still_empty(lead, writes, declined, context):
-    """The details Alfred still asks about, in the call's order: the ones this
-    outcome asks for that are empty on the lead and that the rep hasn't said
-    there's nothing for. The caller's empty_fields (the last response's
-    still_empty) carries those earlier "nothing"s — but only for questions the
-    lead's outcome already asked; ones this text's outcome newly brings in
-    (a first outcome, sale → cpfu) are asked."""
-    asked_before = _to_ask(lead.disposition)
+def _labelled(notes, label):
+    return re.compile(rf'^\s*{label}\s*:', re.I | re.M).search(notes or '') is not None
+
+
+def _with_label(notes, label, value):
+    """The notes with a "Label: value" line: an earlier line with that label
+    is replaced where it stands (and any repeat of it dropped); the rest of
+    the notes is left as it was."""
+    line, placed, out = f'{label}: {value}', False, []
+    for old in (notes or '').split('\n') if notes else []:
+        if re.match(rf'\s*{label}\s*:', old, re.I):
+            if not placed:
+                out.append(line)
+                placed = True
+        else:
+            out.append(old)
+    return '\n'.join(out if placed else out + [line])
+
+
+def _known(field, lead, writes):
+    """Whether a question's answer is on the lead or in this text's writes."""
+    if field in NOTE_LABELS:
+        notes = writes.get('post_appt_notes', lead.post_appt_notes)
+        return _labelled(notes, NOTE_LABELS[field]) or (field == 'system' and bool(lead.appointment_type))
+    return field in writes or bool(getattr(lead, field))
+
+
+def _still_empty(lead, writes, declined, context, pricing=False):
+    """The details Alfred still asks about, in order: the ones this outcome
+    asks for that aren't known (on the lead or in this text) and that the rep
+    hasn't said there's nothing for. The caller's empty_fields (the last
+    response's still_empty) carries those earlier "nothing"s — but only for
+    questions the lead's outcome already asked; ones this text's outcome newly
+    brings in (a first outcome, sale → cpfu) are asked."""
+    asked_before = _to_ask(lead.disposition, lead)
     carried = context['empty_fields']
-    return [f for f in _to_ask(writes.get('disposition') or lead.disposition)
-            if f not in writes and not getattr(lead, f) and f not in declined
+    return [f for f in _to_ask(writes.get('disposition') or lead.disposition, lead, pricing)
+            if not _known(f, lead, writes) and f not in declined
             and (carried is None or f in carried or f not in asked_before)]
 
 
@@ -1005,7 +1070,8 @@ def _deserialize(data):
                 raise ValueError('call_notes')
             out[field] = value
         else:
-            if not isinstance(value, str) or not value or len(value) > FIELD_LIMITS[field]:
+            limit = NOTES_MAX if field == 'post_appt_notes' else FIELD_LIMITS[field]   # labelled lines added
+            if not isinstance(value, str) or not value or len(value) > limit:
                 raise ValueError(field)
             out[field] = value
     return out
@@ -1040,11 +1106,11 @@ def _pending_from(data, lead, rep):
     nq, still = data.get('next_question'), data.get('still_empty')
     if not (nq is None or (isinstance(nq, str) and len(nq) <= 300)):
         raise ValueError('next_question')
-    if not (isinstance(still, list) and all(isinstance(f, str) and f in QUESTION_ORDER for f in still)):
+    if not (isinstance(still, list) and all(isinstance(f, str) and f in DECLINABLE for f in still)):
         raise ValueError('still_empty')
     return {'pid': pid, 'writes': _deserialize(data.get('writes')), 'exchange': exchange, 'summary': summary,
             'issued': issued, 'move': {'date': move['date'], 'time': move['time']},
-            'next_question': nq, 'still_empty': list(still)}
+            'next_question': nq, 'still_empty': [f for f in still if f in QUESTION_ORDER]}
 
 
 def _write_exchange(lead, rep, writes, exchange, summary, log_suffix=''):
@@ -1195,7 +1261,7 @@ def alfred_text(request):
         still_empty = []
         next_question = answer['question'] or ASK_UNREADABLE.format(name=_first_name(lead))
     else:
-        still_empty = _still_empty(lead, writes, answer['declined'], context)
+        still_empty = _still_empty(lead, writes, answer['declined'], context, answer['pricing'])
         if answer['problems']:
             next_question = answer['problems'][0][1]
         elif answer['question']:

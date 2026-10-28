@@ -156,8 +156,8 @@ class OutcomeTests(AlfredTextBase):
         self.assertEqual(out['set'], {'disposition': 'sale', 'sat': True,
                                       'call_notes': 'Sold, credit passed and all contracts signed'})
         self.assertEqual(out['summary'], 'Sold, credit passed and all contracts signed')
-        self.assertEqual(out['next_question'], 'Any adders on this one?')
-        self.assertEqual(out['still_empty'], ['adders', 'monthly_cost', 'total_cost', 'post_appt_notes'])
+        self.assertEqual(out['next_question'], 'What was the total?')
+        self.assertEqual(out['still_empty'], ['total_cost', 'zones', 'adders'])    # an HVAC lead: zones, no system
         self.assertIsNone(out['appointment_move'])
         self.assertTrue(out['understood'])
 
@@ -165,7 +165,7 @@ class OutcomeTests(AlfredTextBase):
         self.assertEqual((lead.disposition, lead.sat, lead.call_notes),
                          ('sale', True, 'Sold, credit passed and all contracts signed'))
         self.assertIn('Val Rep: Sold it! Credit passed, everything signed', lead.call_transcript)
-        self.assertIn('Alfred: Any adders on this one?', lead.call_transcript)
+        self.assertIn('Alfred: What was the total?', lead.call_transcript)
         self.assertIsNone(lead.rep)     # the call never assigns a rep; neither does a text
 
         self.fired.assert_called_once()
@@ -178,38 +178,40 @@ class OutcomeTests(AlfredTextBase):
         self.assertIn(f'Lead #{self.lead.id} (Vera Smith)', log.transcript)
         self.assertEqual(log.summary, 'Sold, credit passed and all contracts signed')
 
-    def test_deal_details_come_one_at_a_time_in_the_calls_order(self):
+    def test_after_a_sale_only_the_missing_fields_one_at_a_time_in_the_owners_order(self):
         self.text('Sold it!')
         r = self.text('battery, about 189 a month', context={
             'last_summary': 'Sold, credit passed and all contracts signed',
-            'last_question': 'Any adders on this one?',
-            'empty_fields': ['adders', 'monthly_cost', 'total_cost', 'post_appt_notes']})
+            'last_question': 'What was the total?',
+            'empty_fields': ['total_cost', 'zones', 'adders']})
         out = r.json()
         self.assertEqual(out['set'], {'adders': 'Battery', 'monthly_cost': '$189'})
-        self.assertEqual(out['next_question'], 'And the total?')
+        self.assertEqual(out['next_question'], 'What was the total?')     # still missing; the monthly is never asked
+        self.assertEqual(out['still_empty'], ['total_cost', 'zones'])
         self.assertEqual(out['summary'], 'Sold, credit passed and all contracts signed')
         self.assertIn('Last summary: Sold, credit passed and all contracts signed',
                       self.model.calls[-1]['messages'][0]['content'])
-        self.assertIn("Alfred's last question: Any adders on this one?",
-                      self.model.calls[-1]['messages'][0]['content'])
+        self.assertIn("Alfred's last question: What was the total?", self.model.calls[-1]['messages'][0]['content'])
 
         out = self.text('no idea on the total yet', context={
             'last_summary': out['summary'], 'last_question': out['next_question'],
             'empty_fields': out['still_empty']}).json()
         self.assertEqual(out['set'], {})
-        self.assertEqual(out['next_question'], 'Anything else worth noting?')
-        out = self.text('nothing else', context={
+        self.assertEqual(out['next_question'], 'How many zones?')
+        self.model.fixed = {'understood': True, 'zones': 2}
+        out = self.text('2 zones', context={
             'last_summary': out['summary'], 'last_question': out['next_question'],
             'empty_fields': out['still_empty']}).json()
-        self.assertIsNone(out['next_question'])
+        self.assertEqual(out['set'], {'post_appt_notes': 'Zones: 2'})
+        self.assertIsNone(out['next_question'])                          # never "Anything else worth noting?"
         self.assertEqual(out['still_empty'], [])
 
         lead = self.fresh()
-        self.assertEqual((lead.disposition, lead.adders, lead.monthly_cost, lead.total_cost),
-                         ('sale', 'Battery', '$189', ''))
+        self.assertEqual((lead.disposition, lead.adders, lead.monthly_cost, lead.total_cost, lead.post_appt_notes),
+                         ('sale', 'Battery', '$189', '', 'Zones: 2'))
         self.assertEqual(lead.call_notes, 'Sold, credit passed and all contracts signed')
-        self.assertEqual(lead.call_transcript.count('[Text '), 2)    # each exchange that wrote is kept
-        self.assertEqual(self.fired.call_count, 2)
+        self.assertEqual(lead.call_transcript.count('[Text '), 3)    # each exchange that wrote is kept
+        self.assertEqual(self.fired.call_count, 3)
         self.assertEqual(VoiceCallLog.all_objects.filter(channel='text').count(), 4)
 
     def test_dead_with_reason(self):
@@ -251,13 +253,12 @@ class ChainTests(AlfredTextBase):
         # "It went fine" leaves the outcome open (still_empty []); the outcome
         # that follows brings its own questions in.
         out = self.chain('It went fine, they liked it', 'Sold it!')
-        self.assertEqual(out['next_question'], 'Any adders on this one?')
+        self.assertEqual(out['next_question'], 'What was the total?')
         self.model.fixed = {'understood': True, 'disposition': 'follow_up', 'call_notes': 'Wants to think, no credit'}
         Lead.all_objects.filter(pk=self.lead.pk).update(disposition='', adders='', monthly_cost='')
         out = self.chain('It went fine, they liked it', 'no credit, still life')
         self.assertEqual(out['next_question'], 'When would be a good time to follow up with the homeowner?')
-        self.assertEqual(out['still_empty'], ['follow_up_date', 'follow_up_time', 'adders', 'monthly_cost',
-                                              'total_cost', 'post_appt_notes'])
+        self.assertEqual(out['still_empty'], ['follow_up_date', 'follow_up_time'])    # no deal questions
 
     def test_an_outcome_that_changes_brings_in_its_questions(self):
         # A sale's deal questions are under way; it turns out to be a cpfu.
@@ -267,16 +268,15 @@ class ChainTests(AlfredTextBase):
             'last_summary': 'Sold', 'last_question': "What's the monthly looking like?",
             'empty_fields': ['monthly_cost', 'total_cost', 'post_appt_notes']}).json()
         self.assertEqual(out['next_question'], 'When would be a good time to follow up with the homeowner?')
-        self.assertEqual(out['still_empty'], ['follow_up_date', 'follow_up_time', 'monthly_cost', 'total_cost',
-                                              'post_appt_notes'])
+        self.assertEqual(out['still_empty'], ['follow_up_date', 'follow_up_time'])    # a cpfu is not a sale
 
     def test_a_detail_the_rep_said_nothing_for_is_not_asked_again(self):
         Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True)
         out = self.chain('no idea on the total yet')
-        self.assertEqual(out['still_empty'], ['adders', 'monthly_cost', 'post_appt_notes'])
+        self.assertEqual(out['still_empty'], ['zones', 'adders'])
         out = self.text('battery, about 189 a month', context={
             'last_summary': '', 'last_question': out['next_question'], 'empty_fields': out['still_empty']}).json()
-        self.assertEqual(out['next_question'], 'Anything else worth noting?')     # not the total again
+        self.assertEqual(out['next_question'], 'How many zones?')     # not the total again
 
 
 class WindowTests(AlfredTextBase):
@@ -307,7 +307,7 @@ class DateTests(AlfredTextBase):
         self.assertEqual(out['set']['disposition'], 'follow_up')
         self.assertEqual((out['set']['follow_up_date'], out['set']['follow_up_time']), ('2026-10-23', '14:00'))
         self.assertIsNone(out['appointment_move'])
-        self.assertEqual(out['next_question'], 'Any adders on this one?')
+        self.assertIsNone(out['next_question'])        # a follow-up with its day and time: nothing more before a sale
         lead = self.fresh()
         self.assertEqual((lead.follow_up_date, lead.follow_up_time), (dt.date(2026, 10, 23), dt.time(14, 0)))
         self.assertEqual(lead.appointment_datetime, APPOINTMENT)
@@ -611,10 +611,13 @@ class SameAsTheCallTests(AlfredTextBase):
         # The follow-up time and the appointment move are different fields.
         self.assertIn('follow_up_time', props)
         self.assertIn('appointment_moved_to_time', props)
-        # Alfred's questions are the call's own words.
-        for question in alfred_text.QUESTIONS.values():
-            self.assertIn(question, SYSTEM_PROMPT)
+        # The follow-up and decision-tree questions are the call's own words; the deal questions by text are
+        # the owner's (Revision 2, 2026-10-28) — the call's are unchanged.
+        self.assertIn(alfred_text.QUESTIONS['follow_up_date'], SYSTEM_PROMPT)
         self.assertIn(alfred_text.ASK_OUTCOME, SYSTEM_PROMPT)
+        self.assertEqual({f: q for f, q in alfred_text.QUESTIONS.items() if f != 'follow_up_date'},
+                         {'total_cost': 'What was the total?', 'zones': 'How many zones?', 'adders': 'Any adders?',
+                          'system': 'What system did they go with?'})
 
     def test_voice_logs_stay_voice(self):
         log = VoiceCallLog.all_objects.create(rep=self.v_rep, caller_number='6175550001', organization=self.ventana)
@@ -655,6 +658,159 @@ class RealCompletionTests(TestCase):
         fake.return_value.chat.completions.create.return_value.choices = [mock.Mock(message=mock.Mock(tool_calls=None))]
         with mock.patch('openai.OpenAI', fake):
             self.assertEqual(alfred_text._complete([], alfred_text.text_tool()), {})
+
+
+class TextQuestionTests(AlfredTextBase):
+    """What Alfred asks by text (the owner's Revision 2, 2026-10-28): before a
+    sale no deal questions unless the rep brought up pricing; after a sale only
+    the missing required fields, total → zones → adders → system, each once;
+    the monthly is written but never asked; the notes are never asked."""
+
+    def say(self, text, answer, out=None):
+        """One turn: the stand-in reads `answer`; the last response is passed back as context."""
+        self.model.fixed = {'understood': True, **answer}
+        context = None if out is None else {'last_summary': out['summary'], 'last_question': out['next_question'],
+                                            'empty_fields': out['still_empty']}
+        r = self.text(text, context=context)
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()
+
+    def test_the_owners_target_conversation_by_text(self):
+        # Tuesday 10-20; an HVAC lead.
+        out = self.say('went well, needs to talk to wife, try Thursday 2',
+                       {'disposition': 'follow_up', 'sat': True, 'call_notes': 'Needs to talk to wife',
+                        'follow_up_date': '2026-10-22', 'follow_up_time': '14:00'})
+        self.assertEqual((out['set']['disposition'], out['set']['follow_up_date'], out['set']['follow_up_time']),
+                         ('follow_up', '2026-10-22', '14:00'))
+        self.assertIsNone(out['next_question'])                 # no deal questions before a sale
+        self.assertEqual(out['still_empty'], [])
+
+        out = self.say('sold, $180/mo 2 zones',
+                       {'disposition': 'sale', 'sat': True, 'call_notes': 'Sold, $180/mo, 2 zones',
+                        'monthly_cost': '$180/mo', 'zones': '2', 'pricing_mentioned': True}, out)
+        self.assertEqual((out['set']['disposition'], out['set']['monthly_cost'], out['set']['post_appt_notes']),
+                         ('sale', '$180/mo', 'Zones: 2'))
+        self.assertEqual(out['next_question'], 'What was the total?')
+        self.assertEqual(out['still_empty'], ['total_cost', 'adders'])
+
+        out = self.say('about 9800 total', {'total_cost': '$9,800', 'pricing_mentioned': True}, out)
+        self.assertEqual(out['set'], {'total_cost': '$9,800'})
+        self.assertEqual(out['next_question'], 'Any adders?')
+        self.assertEqual(out['still_empty'], ['adders'])
+
+        out = self.say('no adders', {'declined_fields': ['adders']}, out)
+        self.assertEqual(out['set'], {})
+        self.assertIsNone(out['next_question'])                 # then Wednesday's wrap-up
+        self.assertEqual(out['still_empty'], [])
+
+        lead = self.fresh()
+        self.assertEqual((lead.disposition, lead.monthly_cost, lead.total_cost, lead.adders, lead.post_appt_notes),
+                         ('sale', '$180/mo', '$9,800', '', 'Zones: 2'))
+        self.assertEqual((lead.follow_up_date, lead.follow_up_time), (dt.date(2026, 10, 22), dt.time(14, 0)))
+
+    def test_before_a_sale_no_deal_questions_unless_pricing_came_up(self):
+        follow_up = {'disposition': 'follow_up', 'sat': True, 'call_notes': 'Wants to compare quotes',
+                     'follow_up_date': '2026-10-23', 'follow_up_time': '14:00', 'monthly_cost': '$189'}
+        out = self.say('quoted 189 a month, follow up friday at 2', {**follow_up, 'pricing_mentioned': True})
+        self.assertEqual(out['set']['monthly_cost'], '$189')     # written when given
+        self.assertEqual(out['next_question'], 'What was the total?')
+        self.assertEqual(out['still_empty'], ['total_cost'])     # only the price field
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='', monthly_cost='', follow_up_date=None,
+                                                        follow_up_time=None)
+        out = self.say('quoted 189 a month, follow up friday at 2', follow_up)     # not flagged: nothing asked
+        self.assertIsNone(out['next_question'])
+        self.assertEqual(out['still_empty'], [])
+        # The day and time come first.
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='', follow_up_date=None, follow_up_time=None)
+        out = self.say('cpfu, quoted $9,800', {'disposition': 'cpfu', 'sat': True, 'call_notes': 'Credit passed',
+                                               'pricing_mentioned': True})
+        self.assertEqual(out['next_question'], 'When would be a good time to follow up with the homeowner?')
+        self.assertEqual(out['still_empty'], ['follow_up_date', 'follow_up_time', 'total_cost'])
+        # No outcome yet: the decision tree, pricing or not.
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='', sat=None)
+        out = self.say('they liked the 189 a month', {'monthly_cost': '$189', 'pricing_mentioned': True})
+        self.assertEqual(out['next_question'], 'Did you sit the appointment?')
+
+    def test_after_a_sale_the_order_follows_the_product(self):
+        for product, fields in (('hvac', ['total_cost', 'zones', 'adders']), ('both', ['total_cost', 'zones', 'adders']),
+                                ('solar', ['total_cost', 'adders']), ('', ['total_cost', 'adders', 'system'])):
+            Lead.all_objects.filter(pk=self.lead.pk).update(appointment_type=product, disposition='', sat=None,
+                                                            total_cost='', adders='', post_appt_notes='')
+            out = self.say('Sold it!', {'disposition': 'sale', 'sat': True, 'call_notes': 'Sold'})
+            self.assertEqual(out['still_empty'], fields, product)
+            self.assertEqual(out['next_question'], 'What was the total?', product)
+        # The last of them, for a lead with no product.
+        out = self.say('9800, no adders', {'total_cost': '$9,800', 'declined_fields': ['adders']}, out)
+        self.assertEqual((out['next_question'], out['still_empty']), ('What system did they go with?', ['system']))
+        out = self.say('heat pump', {'system': 'heat pump'}, out)
+        self.assertEqual((out['set'], out['next_question']), ({'post_appt_notes': 'System: heat pump'}, None))
+
+    def test_a_known_or_declined_field_is_never_asked(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True, total_cost='$9,800',
+                                                        post_appt_notes='Dog in the yard\nZones: 3')
+        out = self.say('battery', {'adders': 'Battery'})
+        self.assertEqual((out['next_question'], out['still_empty']), (None, []))
+        Lead.all_objects.filter(pk=self.lead.pk).update(adders='', post_appt_notes='')
+        out = self.say("not sure how many zones", {'declined_fields': ['zones']})
+        self.assertEqual((out['next_question'], out['still_empty']), ('Any adders?', ['adders']))
+        # Given in the same text as the sale: not asked.
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='', total_cost='', post_appt_notes='')
+        out = self.say('sold, 9800, 2 zones, battery', {'disposition': 'sale', 'sat': True, 'call_notes': 'Sold',
+                                                         'total_cost': '$9,800', 'zones': '2', 'adders': 'Battery'})
+        self.assertEqual((out['next_question'], out['still_empty']), (None, []))
+
+    def test_the_monthly_and_the_notes_are_never_asked(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True, total_cost='$9,800',
+                                                        adders='Battery', monthly_cost='', post_appt_notes='')
+        out = self.say('2 zones', {'zones': '2'})
+        self.assertIsNone(out['next_question'])
+        for field in ('monthly_cost', 'post_appt_notes'):
+            self.assertNotIn(field, out['still_empty'])
+        self.assertNotIn('Anything else', json.dumps(out))
+
+    def test_zones_and_system_are_labelled_lines_in_the_notes(self):
+        Lead.all_objects.filter(pk=self.lead.pk).update(
+            disposition='sale', sat=True, post_appt_notes='Dog in the yard\nzones: 1\nGate on the left\nZones: 4')
+        out = self.say('3 zones, heat pump', {'zones': '3 ', 'system': ' heat  pump'})
+        self.assertEqual(out['set'], {'post_appt_notes': 'Dog in the yard\nZones: 3\nGate on the left\nSystem: heat pump'})
+        self.assertEqual(self.fresh().post_appt_notes, 'Dog in the yard\nZones: 3\nGate on the left\nSystem: heat pump')
+        # The model's own note in the same text keeps the labelled line too.
+        Lead.all_objects.filter(pk=self.lead.pk).update(post_appt_notes='')
+        out = self.say('wants a quiet unit, 2 zones', {'post_appt_notes': 'Wants a quiet unit', 'zones': 2})
+        self.assertEqual(out['set']['post_appt_notes'], 'Wants a quiet unit\nZones: 2')
+        Lead.all_objects.filter(pk=self.lead.pk).update(post_appt_notes='')
+        out = self.say('2 zones', {'zones': '2'})
+        self.assertEqual(out['set'], {'post_appt_notes': 'Zones: 2'})
+
+    def test_the_tool_reads_zones_system_and_pricing(self):
+        from voice_ws import DISPOSITION_TOOL
+        props = alfred_text.text_tool()['function']['parameters']['properties']
+        self.assertEqual((props['zones']['type'], props['system']['type'], props['pricing_mentioned']['type']),
+                         ('string', 'string', 'boolean'))
+        self.assertEqual(props['declined_fields']['items']['enum'],
+                         ['follow_up_date', 'follow_up_time', 'total_cost', 'zones', 'adders', 'system',
+                          'monthly_cost', 'post_appt_notes'])
+        for field in ('zones', 'system', 'pricing_mentioned'):
+            self.assertNotIn(field, DISPOSITION_TOOL['parameters']['properties'])   # the call's tool is unchanged
+
+    def test_an_older_still_empty_is_accepted(self):
+        # A pending token issued before, with the old names in its still_empty: applied; only today's handed back.
+        token = signing.dumps({'v': 2, 'pid': '0123456789abcdef', 'lead': self.lead.id, 'rep': self.v_rep.id,
+                               'issued': NOW.isoformat(), 'writes': {}, 'exchange': 'x', 'summary': 'x',
+                               'move': {'date': '2026-10-22', 'time': '18:00'}, 'next_question': 'And the total?',
+                               'still_empty': ['monthly_cost', 'total_cost', 'post_appt_notes']},
+                              key=alfred_text._pending_key(), salt=alfred_text.PENDING_SALT, compress=True)
+        r = Client().post(URL, data=json.dumps({'rep_id': self.v_rep.id, 'lead_id': self.lead.id, 'confirm_move': token}),
+                          content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {self.v_tenant.api_key}')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['still_empty'], ['total_cost'])
+        # A context from before (its names: adders, monthly_cost, total_cost, post_appt_notes).
+        Lead.all_objects.filter(pk=self.lead.pk).update(disposition='sale', sat=True)
+        self.model.fixed = {'understood': True, 'adders': 'Battery'}
+        out = self.text('battery', context={'last_summary': 'Sold', 'last_question': 'Any adders on this one?',
+                                            'empty_fields': ['adders', 'monthly_cost', 'total_cost',
+                                                             'post_appt_notes']}).json()
+        self.assertEqual((out['next_question'], out['still_empty']), ('What was the total?', ['total_cost']))
 
 
 class WebhookTests(AlfredTextBase):
