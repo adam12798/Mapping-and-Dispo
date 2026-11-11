@@ -1515,11 +1515,39 @@ def dashboard_api(request):
     })
 
 
+# The chart API (dashboard_chart_api) puts group_by and each filter key into
+# ORM field paths, so it accepts only these Lead columns: every key the
+# dashboard page offers (GROUP_BY_OPTIONS and FILTER_COLUMNS in dashboard.html,
+# unchanged since 2026-04-30; saved charts live in each manager's browser and
+# can only hold those keys). Each is a column on Lead itself, never a '__'
+# path, so no join can reach another model or organization (API keys, password
+# hashes, other orgs' leads). The lookups are fixed in apply_chart_filter.
+# Anything else is a 400. maps/test_dashboard_chart.py checks the page's keys
+# against these sets.
+CHART_GROUP_BY_FIELDS = frozenset({
+    'appointment_format', 'appointment_type', 'city', 'disposition',
+    'rep_id', 'sat', 'source', 'state',
+})
+CHART_FILTER_FIELDS = frozenset({
+    'address', 'appointment_datetime', 'appointment_format', 'appointment_type',
+    'call_notes', 'call_transcript', 'city', 'disposition', 'follow_up_date',
+    'homeowner_name', 'phone_number', 'rep_id', 'sat', 'source', 'state', 'tags',
+})
+
+
+class ChartRequestError(ValueError):
+    """A chart request names a field the chart API does not accept."""
+
+
 def apply_chart_filter(qs, f):
+    if not isinstance(f, dict):
+        raise ChartRequestError('Each filter must be an object')
     key = f.get('key', '')
     cond = f.get('cond', '')
     val = f.get('val', '')
     val2 = f.get('val2', '')
+    if key and (not isinstance(key, str) or key not in CHART_FILTER_FIELDS):
+        raise ChartRequestError('Unsupported filter field')
     if not key or not cond:
         return qs
     if key in ('rep_id', 'sat'):
@@ -1571,6 +1599,8 @@ def dashboard_chart_api(request):
     from django.db.models import Count, Q
 
     group_by = request.GET.get('group_by', 'disposition')
+    if group_by not in CHART_GROUP_BY_FIELDS:
+        return JsonResponse({'error': 'Unsupported group_by'}, status=400)
     start = request.GET.get('start', '')
     end = request.GET.get('end', '')
     metric = request.GET.get('metric', 'count')
@@ -1582,8 +1612,13 @@ def dashboard_chart_api(request):
     if end:
         qs = qs.filter(appointment_datetime__date__lte=end)
     try:
-        for f in json.loads(filters_raw):
+        filters = json.loads(filters_raw)
+        if not isinstance(filters, list):
+            return JsonResponse({'error': 'filters must be a list'}, status=400)
+        for f in filters:
             qs = apply_chart_filter(qs, f)
+    except ChartRequestError as e:
+        return JsonResponse({'error': str(e)}, status=400)
     except (json.JSONDecodeError, TypeError):
         pass
 
