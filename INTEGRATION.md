@@ -471,18 +471,48 @@ Related: the public SMS consent page (`sms_consent.html`, part of the 978's A2P 
 
 ### 6.7 Slot availability and claims (`maps/availability.py`, migration `0046`)
 
-Lurch (the setters' booking app) shows open time blocks during a call and reserves one when the setter confirms. A reservation (a **claim**) is not a lead: the lead still arrives through Wednesday's push (`POST /api/v1/leads/create/`), which consumes the claim.
+Lurch (the setters' booking app) shows open time blocks during a call and reserves a spot when the setter books. A reservation (a **claim**) is not a lead: the lead still arrives through Wednesday's push (`POST /api/v1/leads/create/`), which consumes the claim.
 
-- **Ventana only, off by default.** All three endpoints answer **403** `{"error": "Slot availability is not enabled for this key."}` unless the key's own organization is Ventana (slug `ventana`), active, and has `slot_claims_enabled` on. A key of any other org, or a key with no org, gets 403 before anything is read or written (`api_key_required`'s default-inbound fallback is never used). Switch: `python manage.py slot_claims ventana on|off [--ttl-hours N]`; it refuses any other organization.
-- **Blocks** are `TIME_BLOCKS` in New York time (morning 9-12, midday 12-3, afternoon 3-6, evening 6-9; a time belongs to the block whose start hour ≤ its hour < end hour, so 21:00 is in none). **Capacity** is the rep count from `/rep-count/` (the date's override, else the block's default; 0 closes the block). **Booked** = the block's non-cancelled leads + its live claims. A claim is **live** until it is consumed, released, or `slot_claim_ttl_hours` old (an Organization setting, default 24).
-- `GET /api/v1/availability/?week_start=YYYY-MM-DD[&days=7]` (days 1-14): `{"availability": [{date, time_block, label, start, end, rep_count, booked, open, leads, claims}], "timezone": "America/New_York"}`. `start`/`end` are the block's ISO times with the day's offset (DST-correct); `open` = max(0, rep_count − booked). Reads only.
-- `POST /api/v1/availability/book/` `{date, time_block, idempotency_key, session_ref, phone?}`: under a row lock on the block (`SlotBlockLock`, `SELECT … FOR UPDATE`), recounts and either **201** `{claim_id, date, time_block, expires_at, state: "live", open_after, released}` or **409** `{"error": "slot_full", …}`. The session's own live claims in that block don't count against it. On success the session's other live claims are released (`released` lists them); on 409 they are kept. **The same `idempotency_key`** returns the original claim (**200**, `replayed: true`, with its current `state`), never a second one; the same key for another block is **422**. `session_ref` must be unique per setter call: a new claim releases every other live claim with that `session_ref`. `phone` is optional (last 10 digits kept, for the fallback below).
-- `POST /api/v1/availability/release/` `{claim_id}` or `{session_ref}`: releases the open claims named → `{"released": [claim_ids]}`. A consumed claim is never released. An unknown claim (or another org's) is 404.
-- **v1 lead create, Ventana with the switch on only.** The body may carry **`claim_id`** (top level, beside `hub_customer_id`). Under the same block lock:
-  - a `claim_id` of an unconsumed Ventana claim is consumed by the new lead (`consumed_by_lead`, `consumed_at`), whatever block it was for;
-  - without a usable `claim_id`, a live claim in the lead's own block with the same phone (last 10 digits) is consumed instead (fallback);
-  - when the consumed claim was live and in the lead's block, it held the spot: `over_capacity = false`. Otherwise the block is counted; already full → **the lead is still created** (201, as always) with `Lead.over_capacity = true`, shown as an OVER CAPACITY badge on the CRM and Daily rows. Room left → `false`. No time, or a time in no block → `NULL`;
-  - if the check itself fails, the lead is created unchecked (`NULL`) and the error is logged. A claim never makes the create fail.
-  - With the switch off, and for every other organization, the create is byte-for-byte what it was: same response, same row, same writes (`INSERT maps_lead`, the key's `last_used_at`), slot tables untouched, `over_capacity` NULL.
-- **Nothing is sent.** No endpoint here sends SMS, email, a call or a webhook, or creates a lead. The lead create still fires `lead_created` exactly as before.
-- **Known gaps (unchanged paths):** leads created or moved by the GHL, SMS, manager-edit and v1 `PUT` paths are counted as booked but take no lock and are never marked `over_capacity`. A claim's spot is checked against leads and claims, not against reps' time off.
+- **Ventana only, off by default.** All three endpoints answer **403** `not_enabled` unless the key's own organization is Ventana (slug `ventana`), active, and has `slot_claims_enabled` on. A key of any other org, or a key with no org, gets 403 before anything is read or written (`api_key_required`'s default-inbound fallback is never used). Switch and settings: `python manage.py slot_claims ventana on|off [--ttl-hours N] [--step-minutes N] [--full-policy refuse|flag]`; it refuses any other organization.
+- **Errors** are always `{"error": "<code>", "detail": "<sentence>"}` (some add fields, e.g. `slot_full` adds `date`, `time_block`, `open`). Codes: `invalid_body`, `invalid_date`, `invalid_week_start`, `invalid_days`, `invalid_time_block`, `invalid_idempotency_key`, `invalid_session_ref`, `invalid_start_time`, `invalid_claim_id` (400); `not_enabled` (403); `claim_not_found` (404); `method_not_allowed` (405); `slot_full`, `claim_not_live` (409); `idempotency_key_reused`, `block_past`, `start_outside_block` (422). (401 for a missing or unknown key is `api_key_required`'s own `{"error": "Authentication required"}`.)
+- **Blocks** are `TIME_BLOCKS` in New York time: morning 9-12, midday 12-3, afternoon 3-6, evening 6-9. A time belongs to the block whose start hour ≤ its hour < end hour, so 21:00 is in none. **Capacity** is the rep count from `/rep-count/` (the date's override, else the block's default; 0 closes the block). **Booked** = the block's non-cancelled leads + its live claims. A claim is **live** until it is consumed, released, or `slot_claim_ttl_hours` old (Organization setting, default 24).
+- **Organization settings** (all with database defaults): `slot_claims_enabled` (false), `slot_claim_ttl_hours` (24), `slot_start_step_minutes` (30, the GET's suggested start times only), `slot_full_policy` (`refuse` | `flag`, default `refuse`).
+
+**`GET /api/v1/availability/?week_start=YYYY-MM-DD[&days=7]`** (days 1-14). Reads only.
+- Returns `{"availability": [...], "timezone": "America/New_York", "start_step_minutes": 30, "full_policy": "refuse"}`.
+- Each row is `{date, time_block, label, start, end, start_times, rep_count, booked, open, bookable, leads, claims}`:
+  - `start` and `end` are the block's ISO times with the day's offset, so they are correct on DST days;
+  - `start_times` are suggestions: every step from the block's start that is still ahead of now, the last one a step before the block ends (the 15:00 block offers 15:00, 15:30 … 17:30);
+  - `open` = max(0, rep_count − booked);
+  - `bookable` = a suggested start remains and (`open` > 0 or the policy is `flag`).
+
+**`POST /api/v1/availability/book/`** takes `{idempotency_key, session_ref, start_time?, date?, time_block?, phone?}`.
+- **Time.** `start_time` may be any whole minute inside a block: ISO, an offset optional (none means New York), seconds refused. It names its own block, so `date` and `time_block` may be left out; when they are sent they must agree with it (else 422 `start_outside_block`). Without a `start_time`, `date` and `time_block` are required and the claim is for the block.
+- **Session.** `session_ref` must be a UUID, a new one for each setter call. A constant would let one setter's booking release everyone else's claims.
+- **Past times are refused** with 422 `block_past`: a block that has ended, or a `start_time` at or before now.
+- **The claim itself.** The request takes a lock on its session (`pg_advisory_xact_lock`) and then a row lock on the block (`SlotBlockLock`, `SELECT … FOR UPDATE`), then recounts. The session's own live claims in that block don't count against it.
+- **When the block is full:** with the policy `refuse`, **409** `slot_full`. With `flag`, it books anyway: **201** with `over_capacity: true`, and the claim is marked.
+- **Success** is **201** with `{claim_id, date, time_block, block_start, block_end, start_time, over_capacity, expires_at, state: "live", open_after, released}`. The session's other live claims are released (listed in `released`). On a 409 they are kept.
+- **The same `idempotency_key`** returns the original claim and never makes a second one:
+  - **200** with the same body plus `replayed: true` while it is live or consumed;
+  - **409** `claim_not_live` (with the claim's fields) once it was released or expired;
+  - **422** `idempotency_key_reused` for a different block or start time. Make the key cover the start time.
+- `phone` is optional; its last 10 digits are kept for the fallback below.
+
+**`POST /api/v1/availability/release/`** takes `{claim_id}` or `{session_ref}` and releases the open claims named, returning `{"released": [claim_ids]}`. A consumed claim is never released. An unknown claim, or another org's, is 404.
+
+**v1 lead create**, only for Ventana with the switch on. The body may carry **`claim_id`** (top level, beside `hub_customer_id`). Under the block's lock (that lock only, never a session lock):
+- A `claim_id` of an unconsumed Ventana claim is consumed by the new lead (`consumed_by_lead`, `consumed_at`), whatever block it was for. A different date or block than the lead's time is logged as a warning.
+- Without a usable `claim_id`, a live claim in the lead's own block with the same phone (last 10 digits) is consumed instead (the fallback). Whenever a lead without a usable `claim_id` lands in a block holding live claims, a warning is logged, so a push that drops `claim_id` shows up.
+- If the consumed claim was live and in the lead's block, it held the spot, and the lead takes the claim's own `over_capacity` (normally false). Otherwise the block is counted:
+  - already full → **the lead is still created** (201, as always) with `Lead.over_capacity = true`, shown as an OVER CAPACITY badge on the CRM and Daily rows;
+  - room left → `false`;
+  - no time, or a time in no block → `NULL`.
+- If the check itself fails, the lead is created unchecked (`NULL`) and the error is logged. A claim never makes the create fail.
+- With the switch off, and for every other organization, the create is byte-for-byte what it was: the same response, row and writes (`INSERT maps_lead`, the key's `last_used_at`), slot tables untouched, `over_capacity` NULL. The one addition is a read of the key's organization row (`slot_claims_org`) on every v1 lead create, any org.
+
+**The mark clears itself (PostgreSQL trigger `maps_lead_clear_over_capacity`).** When a lead whose `over_capacity` is true has its `appointment_datetime` or `cancelled` changed by any write path, the mark goes back to NULL. The trigger's `WHEN` clause never fires for a NULL or false row, which covers every Team Sunshine lead. A second save from a stale in-memory lead can write `true` back; no current path does that after a move.
+
+**Nothing is sent.** No endpoint here sends SMS, email, a call or a webhook, or creates a lead. The lead create still fires `lead_created` exactly as before.
+
+**Known gaps (unchanged paths):** leads created or moved by the GHL, SMS, manager-edit and v1 `PUT` paths are counted as booked, but they take no lock and are never marked `over_capacity`. A spot is checked against leads and claims, not against reps' time off.

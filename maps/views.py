@@ -3648,7 +3648,8 @@ def ventana_api_key_required(view_func):
     def gated(request, *args, **kwargs):
         org = slot_claims_org(request.api_tenant)
         if org is None or get_current_org_id() != org.id:
-            return JsonResponse({'error': 'Slot availability is not enabled for this key.'}, status=403)
+            return JsonResponse({'error': 'not_enabled',
+                                 'detail': 'Slot availability is not enabled for this key.'}, status=403)
         request.slot_claims_org = org
         return view_func(request, *args, **kwargs)
     return api_key_required(gated)

@@ -35,9 +35,19 @@ class Organization(models.Model):
     # the block. Off by default: until it is turned on the availability
     # endpoints answer 403 and v1 lead creates are unchanged —
     # `python manage.py slot_claims ventana on`. Only Ventana can turn it on.
-    slot_claims_enabled = models.BooleanField(default=False)
+    # db_default: code that predates these columns can still insert a row.
+    slot_claims_enabled = models.BooleanField(default=False, db_default=False)
     # How long a claim no lead has picked up keeps its spot.
-    slot_claim_ttl_hours = models.PositiveSmallIntegerField(default=24)
+    slot_claim_ttl_hours = models.PositiveSmallIntegerField(default=24, db_default=24)
+    # The step between the start times the availability GET suggests inside a
+    # block (9:00, 9:30, ...; the last one a step before the block ends). Only
+    # suggestions: a booking may start at any minute inside a block.
+    slot_start_step_minutes = models.PositiveSmallIntegerField(default=30, db_default=30)
+    # What a booking into a full block gets: 'refuse' (409 slot_full) or
+    # 'flag' (201, the claim and then its lead marked over capacity).
+    SLOT_FULL_POLICY_CHOICES = [('refuse', 'Refuse'), ('flag', 'Allow and flag')]
+    slot_full_policy = models.CharField(max_length=10, choices=SLOT_FULL_POLICY_CHOICES,
+                                        default='refuse', db_default='refuse')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -145,7 +155,9 @@ class Lead(OrgOwnedModel):
     # Slot claims only (maps/availability.py): True when a v1 create put this
     # lead in a time block that was already full and held no claim for it.
     # The lead is created anyway (the customer was promised the time). NULL =
-    # never checked: every lead of an organization without slot claims.
+    # never checked: every lead of an organization without slot claims. On
+    # PostgreSQL a trigger (migration 0046) sets a True back to NULL when the
+    # appointment time or cancelled changes; a NULL is never touched.
     over_capacity = models.BooleanField(null=True, blank=True)
 
     def __str__(self):
@@ -354,8 +366,12 @@ class SlotClaim(OrgOwnedModel):
     date = models.DateField()
     time_block = models.CharField(max_length=10)
     idempotency_key = models.CharField(max_length=100)
-    session_ref = models.CharField(max_length=100, db_index=True)
+    session_ref = models.CharField(max_length=100, db_index=True)   # a UUID, one per setter call
     phone10 = models.CharField(max_length=10, blank=True)
+    # The exact start the setter picked inside the block, if any.
+    start_time = models.DateTimeField(null=True, blank=True)
+    # Booked into a block that was already full (slot_full_policy 'flag').
+    over_capacity = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     expires_at = models.DateTimeField()
     released_at = models.DateTimeField(null=True, blank=True)
