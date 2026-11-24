@@ -469,29 +469,39 @@ Related: the public SMS consent page (`sms_consent.html`, part of the 978's A2P 
 
     The customers, the `ask`, what was recorded ("Recorded just now: …") and the history (a short transcript) are written by customers, reps and other code, so they go in the **user** turn, fenced in `<data>…</data>`, with any `<data>` tag inside removed so nothing can close the fence.
 
-### 6.7 Slot availability and claims (`maps/availability.py`, migration `0046`)
+### 6.7 Slot availability and claims (`maps/availability.py`, migrations `0046`, `0047`)
 
 Lurch (the setters' booking app) shows open time blocks during a call and reserves a spot when the setter books. A reservation (a **claim**) is not a lead: the lead still arrives through Wednesday's push (`POST /api/v1/leads/create/`), which consumes the claim.
 
-- **Ventana only, off by default.** All three endpoints answer **403** `not_enabled` unless the key's own organization is Ventana (slug `ventana`), active, and has `slot_claims_enabled` on. A key of any other org, or a key with no org, gets 403 before anything is read or written (`api_key_required`'s default-inbound fallback is never used). Switch and settings: `python manage.py slot_claims ventana on|off [--ttl-hours N] [--step-minutes N] [--full-policy refuse|flag]`; it refuses any other organization.
-- **Errors** are always `{"error": "<code>", "detail": "<sentence>"}` (some add fields, e.g. `slot_full` adds `date`, `time_block`, `open`). Codes: `invalid_body`, `invalid_date`, `invalid_week_start`, `invalid_days`, `invalid_time_block`, `invalid_idempotency_key`, `invalid_session_ref`, `invalid_start_time`, `invalid_claim_id` (400); `not_enabled` (403); `claim_not_found` (404); `method_not_allowed` (405); `slot_full`, `claim_not_live` (409); `idempotency_key_reused`, `block_past`, `start_outside_block` (422). (401 for a missing or unknown key is `api_key_required`'s own `{"error": "Authentication required"}`.)
+- **Ventana only, off by default.** All three endpoints answer **403** `not_enabled` unless the key's own organization is Ventana (slug `ventana`), active, and has `slot_claims_enabled` on. A key of any other org, or a key with no org, gets 403 before anything is read or written (`api_key_required`'s default-inbound fallback is never used). Switch and settings: `python manage.py slot_claims ventana on|off [--ttl-hours N] [--step-minutes N] [--full-policy refuse|flag] [--overbook-cap N]`; it refuses any other organization.
+- **Errors** are always `{"error": "<code>", "detail": "<sentence>"}` (some add fields, e.g. `slot_full` adds `date`, `time_block`, `open`). Codes: `invalid_body`, `invalid_date`, `invalid_week_start`, `invalid_days`, `invalid_time_block`, `invalid_idempotency_key`, `invalid_session_ref`, `invalid_start_time`, `invalid_claim_id` (400); `not_enabled` (403); `claim_not_found` (404); `method_not_allowed` (405); `slot_full`, `block_closed`, `claim_not_live` (409); `idempotency_key_reused`, `block_past`, `start_outside_block` (422). (401 for a missing or unknown key is `api_key_required`'s own `{"error": "Authentication required"}`.)
 - **Blocks** are `TIME_BLOCKS` in New York time: morning 9-12, midday 12-3, afternoon 3-6, evening 6-9. A time belongs to the block whose start hour ≤ its hour < end hour, so 21:00 is in none. **Capacity** is the rep count from `/rep-count/` (the date's override, else the block's default; 0 closes the block). **Booked** = the block's non-cancelled leads + its live claims. A claim is **live** until it is consumed, released, or `slot_claim_ttl_hours` old (Organization setting, default 24).
-- **Organization settings** (all with database defaults): `slot_claims_enabled` (false), `slot_claim_ttl_hours` (24), `slot_start_step_minutes` (30, the GET's suggested start times only), `slot_full_policy` (`refuse` | `flag`, default `refuse`).
+- **Organization settings** (all with database defaults): `slot_claims_enabled` (false), `slot_claim_ttl_hours` (24), `slot_start_step_minutes` (30, the GET's suggested start times only), `slot_full_policy` (`refuse` | `flag`, default `refuse`), `slot_overbook_cap` (1: with `flag`, the bookings a block may take past its rep count).
+- **For Lurch (the client):**
+  - Branch on `error`, never on the status alone. `slot_full`, `block_closed` and `claim_not_live` are all 409, and need different messages and actions.
+  - Send `start_time` either with no offset, read as New York time (`2026-12-01T15:30`), or with the correct offset for that date (`-05:00` in winter, `-04:00` in summer). A wrong offset names a different instant, and possibly another block. The `start_times` the GET returns already carry the right offset.
+  - A replay is matched by `idempotency_key` alone; it does not check `session_ref`. Keep keys unique per call and per pick (e.g. session + block + start).
 
 **`GET /api/v1/availability/?week_start=YYYY-MM-DD[&days=7]`** (days 1-14). Reads only.
-- Returns `{"availability": [...], "timezone": "America/New_York", "start_step_minutes": 30, "full_policy": "refuse"}`.
+- Returns `{"availability": [...], "timezone": "America/New_York", "start_step_minutes": 30, "full_policy": "refuse", "overbook_cap": 0}`. `overbook_cap` is 0 under `refuse`.
 - Each row is `{date, time_block, label, start, end, start_times, rep_count, booked, open, bookable, leads, claims}`:
   - `start` and `end` are the block's ISO times with the day's offset, so they are correct on DST days;
   - `start_times` are suggestions: every step from the block's start that is still ahead of now, the last one a step before the block ends (the 15:00 block offers 15:00, 15:30 … 17:30);
   - `open` = max(0, rep_count − booked);
-  - `bookable` = a suggested start remains and (`open` > 0 or the policy is `flag`).
+  - `bookable` = a suggested start remains, the rep count is above 0, and either `open` > 0 or the policy is `flag` with booked < rep_count + `overbook_cap`.
 
 **`POST /api/v1/availability/book/`** takes `{idempotency_key, session_ref, start_time?, date?, time_block?, phone?}`.
 - **Time.** `start_time` may be any whole minute inside a block: ISO, an offset optional (none means New York), seconds refused. It names its own block, so `date` and `time_block` may be left out; when they are sent they must agree with it (else 422 `start_outside_block`). Without a `start_time`, `date` and `time_block` are required and the claim is for the block.
 - **Session.** `session_ref` must be a UUID, a new one for each setter call. A constant would let one setter's booking release everyone else's claims.
-- **Past times are refused** with 422 `block_past`: a block that has ended, or a `start_time` at or before now.
+- **Past times are refused** with 422 `block_past`:
+  - a block that has ended;
+  - a `start_time` at or before now;
+  - with no `start_time`, a block with no suggested start left, the same blocks the GET marks not bookable for time.
 - **The claim itself.** The request takes a lock on its session (`pg_advisory_xact_lock`) and then a row lock on the block (`SlotBlockLock`, `SELECT … FOR UPDATE`), then recounts. The session's own live claims in that block don't count against it.
-- **When the block is full:** with the policy `refuse`, **409** `slot_full`. With `flag`, it books anyway: **201** with `over_capacity: true`, and the claim is marked.
+- **A block with rep count 0** is always refused, under either policy: **409** `block_closed`.
+- **When the block is full:**
+  - under the policy `refuse`: **409** `slot_full`;
+  - under `flag`: it books anyway, **201** with `over_capacity: true` and the claim marked, until the block holds rep_count + `slot_overbook_cap`. Past that: **409** `slot_full`.
 - **Success** is **201** with `{claim_id, date, time_block, block_start, block_end, start_time, over_capacity, expires_at, state: "live", open_after, released}`. The session's other live claims are released (listed in `released`). On a 409 they are kept.
 - **The same `idempotency_key`** returns the original claim and never makes a second one:
   - **200** with the same body plus `replayed: true` while it is live or consumed;
@@ -511,7 +521,7 @@ Lurch (the setters' booking app) shows open time blocks during a call and reserv
 - If the check itself fails, the lead is created unchecked (`NULL`) and the error is logged. A claim never makes the create fail.
 - With the switch off, and for every other organization, the create is byte-for-byte what it was: the same response, row and writes (`INSERT maps_lead`, the key's `last_used_at`), slot tables untouched, `over_capacity` NULL. The one addition is a read of the key's organization row (`slot_claims_org`) on every v1 lead create, any org.
 
-**The mark clears itself (PostgreSQL trigger `maps_lead_clear_over_capacity`).** When a lead whose `over_capacity` is true has its `appointment_datetime` or `cancelled` changed by any write path, the mark goes back to NULL. The trigger's `WHEN` clause never fires for a NULL or false row, which covers every Team Sunshine lead. A second save from a stale in-memory lead can write `true` back; no current path does that after a move.
+**The mark clears itself (PostgreSQL trigger `maps_lead_clear_over_capacity`, migration `0047`).** When a lead whose `over_capacity` is true has its `appointment_datetime` or `cancelled` changed by any write path, the mark goes back to NULL. The trigger's `WHEN` clause never fires for a NULL or false row, which covers every Team Sunshine lead. A second save from a stale in-memory lead can write `true` back; no current path does that after a move.
 
 **Nothing is sent.** No endpoint here sends SMS, email, a call or a webhook, or creates a lead. The lead create still fires `lead_created` exactly as before.
 

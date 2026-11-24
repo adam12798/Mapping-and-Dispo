@@ -16,13 +16,14 @@ import time
 import unittest
 import uuid
 from datetime import datetime, timedelta
+from importlib import import_module
 from io import StringIO
 from unittest import mock
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.management import CommandError, call_command
-from django.db import connection
+from django.db import connection, transaction
 from django.test import Client, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -205,8 +206,8 @@ class WeekTests(Base):
         resp = self.week(DAY)
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
-        self.assertEqual((body['timezone'], body['start_step_minutes'], body['full_policy']),
-                         ('America/New_York', 30, 'refuse'))
+        self.assertEqual((body['timezone'], body['start_step_minutes'], body['full_policy'], body['overbook_cap']),
+                         ('America/New_York', 30, 'refuse', 0))
         rows = body['availability']
         self.assertEqual(len(rows), 7 * len(TIME_BLOCKS))
         self.assertEqual(rows[0], {
@@ -259,12 +260,16 @@ class WeekTests(Base):
         self.assertEqual((row['rep_count'], row['leads'], row['claims'], row['booked'], row['open']),
                          (3, 1, 1, 2, 1))
 
-    def test_override_zero_blocks_the_block(self):
+    def test_rep_count_zero_closes_the_block_under_both_policies(self):
         self.capacity(DAY, 'evening', 0)
-        row = self.block(DAY, 'evening')
-        self.assertEqual((row['rep_count'], row['open'], row['bookable']), (0, 0, False))
-        body = self.assertError(self.book('a', 'evening'), 409, 'slot_full')
-        self.assertEqual((body['date'], body['time_block'], body['open']), (DAY, 'evening', 0))
+        for policy in ('refuse', 'flag'):
+            Organization.objects.filter(pk=self.ventana.pk).update(slot_full_policy=policy, slot_overbook_cap=5)
+            row = self.block(DAY, 'evening')
+            self.assertEqual((row['rep_count'], row['open'], row['bookable']), (0, 0, False), policy)
+            body = self.assertError(self.book('a', 'evening', start_time='2026-12-01T19:00:00-05:00'),
+                                    409, 'block_closed')
+            self.assertEqual((body['date'], body['time_block'], body['open']), (DAY, 'evening', 0))
+        self.assertEqual(SlotClaim.all_objects.count(), 0)
 
     def test_open_never_negative(self):
         self.capacity(DAY, 'midday', 1)
@@ -412,6 +417,16 @@ class BookTests(Base):
         self.assertError(self.book('b', start_time='2026-12-01T11:15:00-05:00'), 409, 'slot_full')
         self.assertEqual(SlotClaim.all_objects.count(), 1)
 
+    def test_without_a_start_time_book_agrees_with_the_gets_bookable(self):
+        # At 17:45 the 3-6 block has no suggested start left (17:30 passed):
+        # the GET says not bookable, and a booking with no start_time agrees.
+        with mock.patch('django.utils.timezone.now', return_value=et(2026, 12, 1, 17, 45)):
+            row = self.block(DAY, 'afternoon')
+            self.assertEqual((row['start_times'], row['open'], row['bookable']), ([], 2, False))
+            self.assertError(self.book('a', 'afternoon'), 422, 'block_past')
+            # An explicit start time inside it is still any setter's call.
+            self.assertEqual(self.book('a', 'afternoon', start_time='2026-12-01T17:50').status_code, 201)
+
     def test_full_policy_flag_takes_the_booking_and_marks_it(self):
         Organization.objects.filter(pk=self.ventana.pk).update(slot_full_policy='flag')
         self.capacity(DAY, 'morning', 1)
@@ -423,7 +438,15 @@ class BookTests(Base):
         self.assertIs(SlotClaim.all_objects.get(session_ref=sid('b')).over_capacity, True)
         week = self.week(DAY, 1).json()
         row = next(r for r in week['availability'] if r['time_block'] == 'morning')
-        self.assertEqual((week['full_policy'], row['booked'], row['open'], row['bookable']), ('flag', 2, 0, True))
+        self.assertEqual((week['full_policy'], week['overbook_cap'], row['booked'], row['open'], row['bookable']),
+                         ('flag', 1, 2, 0, False))
+        # The cap (default 1 past the rep count) is reached: refused like 'refuse'.
+        self.assertError(self.book('c', start_time='2026-12-01T11:30:00-05:00'), 409, 'slot_full')
+        Organization.objects.filter(pk=self.ventana.pk).update(slot_overbook_cap=2)
+        self.assertTrue(self.block(DAY, 'morning')['bookable'])
+        self.assertEqual(self.book('c', start_time='2026-12-01T11:30:00-05:00').json()['over_capacity'], True)
+        self.assertError(self.book('d', start_time='2026-12-01T11:45:00-05:00'), 409, 'slot_full')
+        SlotClaim.all_objects.filter(session_ref=sid('c')).update(released_at=NOW)
         # Its lead inherits the mark; the first claim's lead does not.
         for claim_id, hub, expected in ((second.json()['claim_id'], 'w:2', True),
                                         (first.json()['claim_id'], 'w:1', False)):
@@ -844,12 +867,13 @@ class CommandTests(TestCase):
     def test_on_off_ttl_and_step_for_ventana(self):
         out = StringIO()
         call_command('slot_claims', 'ventana', 'on', '--ttl-hours', '12', '--step-minutes', '15',
-                     '--full-policy', 'flag', stdout=out)
+                     '--full-policy', 'flag', '--overbook-cap', '2', stdout=out)
         org = Organization.objects.get(slug='ventana')
         self.assertEqual((org.slot_claims_enabled, org.slot_claim_ttl_hours, org.slot_start_step_minutes,
-                          org.slot_full_policy), (True, 12, 15, 'flag'))
+                          org.slot_full_policy, org.slot_overbook_cap), (True, 12, 15, 'flag', 2))
         self.assertIn('were off, claims hold 24 h, starts every 30 min, a full block: refuse, '
-                      'now on, claims hold 12 h, starts every 15 min, a full block: flag', out.getvalue())
+                      'now on, claims hold 12 h, starts every 15 min, a full block: flag (up to 2 over)',
+                      out.getvalue())
         call_command('slot_claims', 'ventana', 'off', stdout=StringIO())
         self.assertFalse(Organization.objects.get(slug='ventana').slot_claims_enabled)
 
@@ -861,14 +885,15 @@ class CommandTests(TestCase):
 
     def test_refuses_silly_values(self):
         for args in (('--ttl-hours', '0'), ('--ttl-hours', '337'), ('--step-minutes', '4'),
-                     ('--step-minutes', '181'), ('--full-policy', 'allow')):
+                     ('--step-minutes', '181'), ('--full-policy', 'allow'), ('--overbook-cap', '21'),
+                     ('--overbook-cap', '-1')):
             with self.assertRaises((CommandError, SystemExit)):
                 call_command('slot_claims', 'ventana', *args, stdout=StringIO())
 
     def test_new_columns_default_off(self):
         for org in Organization.objects.all():
             self.assertEqual((org.slot_claims_enabled, org.slot_claim_ttl_hours, org.slot_start_step_minutes,
-                              org.slot_full_policy), (False, 24, 30, 'refuse'))
+                              org.slot_full_policy, org.slot_overbook_cap), (False, 24, 30, 'refuse', 1))
 
     def test_older_code_can_still_insert_an_organization(self):
         # The database defaults: an INSERT that names none of the new columns.
@@ -879,7 +904,41 @@ class CommandTests(TestCase):
                 ['Old Code Co', 'old-code', True, False, False, False, timezone.now()])
         org = Organization.objects.get(slug='old-code')
         self.assertEqual((org.slot_claims_enabled, org.slot_claim_ttl_hours, org.slot_start_step_minutes,
-                          org.slot_full_policy), (False, 24, 30, 'refuse'))
+                          org.slot_full_policy, org.slot_overbook_cap), (False, 24, 30, 'refuse', 1))
+
+
+class MigrationTests(TestCase):
+    """0046 never locks maps_lead (both organizations' table); 0047 touches
+    only it. Both set a 5 s lock limit first, applying and reversing."""
+
+    def migrations(self):
+        return [import_module('maps.migrations.0046_slot_claims'),
+                import_module('maps.migrations.0047_lead_over_capacity')]
+
+    @requires_postgres      # SQLite's schema editor can't run inside a test's transaction
+    def test_0046_leaves_maps_lead_alone(self):
+        out = StringIO()
+        call_command('sqlmigrate', 'maps', '0046', stdout=out)
+        self.assertIn('"maps_organization"', out.getvalue())
+        self.assertNotIn('"maps_lead"', out.getvalue())
+        out = StringIO()
+        call_command('sqlmigrate', 'maps', '0047', stdout=out)
+        self.assertIn('ALTER TABLE "maps_lead" ADD COLUMN "over_capacity" boolean NULL', out.getvalue())
+
+    def test_both_set_the_lock_limit_first_both_ways(self):
+        for module in self.migrations():
+            ops = module.Migration.operations
+            self.assertIs(ops[0].code, module.set_lock_timeout, module.__name__)
+            self.assertIs(ops[-1].reverse_code, module.set_lock_timeout, module.__name__)
+
+    @requires_postgres
+    def test_the_lock_limit_is_set_for_the_transaction(self):
+        for module in self.migrations():
+            with transaction.atomic(), connection.schema_editor(atomic=False) as editor:
+                module.set_lock_timeout(None, editor)
+                with connection.cursor() as cursor:
+                    cursor.execute('SHOW lock_timeout')
+                    self.assertEqual(cursor.fetchone()[0], '5s')
 
 
 class BadgeTests(Base):

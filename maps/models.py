@@ -48,6 +48,9 @@ class Organization(models.Model):
     SLOT_FULL_POLICY_CHOICES = [('refuse', 'Refuse'), ('flag', 'Allow and flag')]
     slot_full_policy = models.CharField(max_length=10, choices=SLOT_FULL_POLICY_CHOICES,
                                         default='refuse', db_default='refuse')
+    # With 'flag': how many bookings a block may take past its rep count
+    # before it refuses too. A block whose rep count is 0 is always refused.
+    slot_overbook_cap = models.PositiveSmallIntegerField(default=1, db_default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -156,7 +159,7 @@ class Lead(OrgOwnedModel):
     # lead in a time block that was already full and held no claim for it.
     # The lead is created anyway (the customer was promised the time). NULL =
     # never checked: every lead of an organization without slot claims. On
-    # PostgreSQL a trigger (migration 0046) sets a True back to NULL when the
+    # PostgreSQL a trigger (migration 0047) sets a True back to NULL when the
     # appointment time or cancelled changes; a NULL is never touched.
     over_capacity = models.BooleanField(null=True, blank=True)
 

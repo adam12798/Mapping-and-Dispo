@@ -6,9 +6,11 @@
     python manage.py slot_claims ventana --ttl-hours 24    # how long an unconsumed claim holds its spot
     python manage.py slot_claims ventana --step-minutes 30 # the step between a block's suggested start times
     python manage.py slot_claims ventana --full-policy flag # a full block: refuse (409) or flag (201, over capacity)
+    python manage.py slot_claims ventana --overbook-cap 1  # with flag: bookings allowed past the rep count
 
-It touches those four columns (Organization.slot_claims_enabled,
-slot_claim_ttl_hours, slot_start_step_minutes, slot_full_policy) of Ventana's row and nothing else, and prints what they
+It touches those five columns (Organization.slot_claims_enabled,
+slot_claim_ttl_hours, slot_start_step_minutes, slot_full_policy,
+slot_overbook_cap) of Ventana's row and nothing else, and prints what they
 were and what they are now. Any other organization is refused: slot claims
 are Ventana's alone (views.SLOT_CLAIMS_ORG_SLUG), and no other organization's
 row is ever written. Turning it off keeps every claim; they stop mattering.
@@ -28,6 +30,7 @@ class Command(BaseCommand):
         parser.add_argument('--ttl-hours', type=int)
         parser.add_argument('--step-minutes', type=int)
         parser.add_argument('--full-policy', choices=['refuse', 'flag'])
+        parser.add_argument('--overbook-cap', type=int)
 
     def handle(self, *args, **options):
         if options['slug'] != SLOT_CLAIMS_ORG_SLUG:
@@ -38,10 +41,14 @@ class Command(BaseCommand):
         step = options['step_minutes']
         if step is not None and not 5 <= step <= 180:
             raise CommandError('--step-minutes must be from 5 to 180; nothing was changed')
+        cap = options['overbook_cap']
+        if cap is not None and not 0 <= cap <= 20:
+            raise CommandError('--overbook-cap must be from 0 to 20; nothing was changed')
         org = Organization.objects.filter(slug=options['slug']).first()
         if org is None:
             raise CommandError(f"no organization with slug {options['slug']!r}")
-        fields = ['slot_claims_enabled', 'slot_claim_ttl_hours', 'slot_start_step_minutes', 'slot_full_policy']
+        fields = ['slot_claims_enabled', 'slot_claim_ttl_hours', 'slot_start_step_minutes', 'slot_full_policy',
+                  'slot_overbook_cap']
 
         def current():
             return tuple(getattr(org, f) for f in fields)
@@ -55,11 +62,13 @@ class Command(BaseCommand):
             org.slot_start_step_minutes = step
         if options['full_policy'] is not None:
             org.slot_full_policy = options['full_policy']
+        if cap is not None:
+            org.slot_overbook_cap = cap
         if current() != before:
             org.save(update_fields=fields)
 
-        def show(enabled, hours, minutes, policy):
+        def show(enabled, hours, minutes, policy, cap):
             return (f"{'on' if enabled else 'off'}, claims hold {hours} h, starts every {minutes} min, "
-                    f"a full block: {policy}")
+                    f"a full block: {policy}" + (f' (up to {cap} over)' if policy == 'flag' else ''))
 
         self.stdout.write(f'{org.name}: slot claims were {show(*before)}, now {show(*current())}')

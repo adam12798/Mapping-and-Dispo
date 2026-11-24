@@ -13,7 +13,8 @@ default). A block's booked count is its non-cancelled leads plus its live
 claims. A booking may start at any minute inside a block; the GET suggests
 start times every slot_start_step_minutes. A booking into a full block is
 refused (409) or, with slot_full_policy 'flag', taken and marked over
-capacity. A claim reserves one spot while a setter books. It is not a
+capacity, up to slot_overbook_cap past the rep count. A block whose rep count
+is 0 is always refused. A claim reserves one spot while a setter books. It is not a
 lead: the lead arrives later through Wednesday's push (v1 lead create), which
 consumes the claim (save_lead_against_claims). A claim stops counting once it
 is consumed, released, or older than the organization's slot_claim_ttl_hours.
@@ -231,13 +232,29 @@ def _slot(data):
     return slot[0], slot[1], start
 
 
-def _bookable(day, key, start, now):
-    """Refuses a block that has ended, or a start that is not ahead of now."""
+def _bookable(day, key, start, org, now):
+    """Refuses a block that has ended, a start that is not ahead of now, and,
+    without a start, a block with no suggested start left (as the GET says)."""
     _begins, ends = _block_times(day, key)
     if ends <= now:
         raise _Refusal(422, 'block_past', 'That block has already ended.')
     if start is not None and start <= now:
         raise _Refusal(422, 'block_past', 'That start time has already passed.')
+    if start is None and not _start_times(day, key, org.slot_start_step_minutes, now):
+        raise _Refusal(422, 'block_past', 'No start time is left in that block; send a start_time.')
+
+
+def _room(org, rep_count, booked):
+    """'open', 'over' (a booking past the rep count, allowed by the 'flag'
+    policy up to slot_overbook_cap extra), 'full' or 'closed' (rep count 0:
+    always refused)."""
+    if rep_count <= 0:
+        return 'closed'
+    if booked < rep_count:
+        return 'open'
+    if org.slot_full_policy == 'flag' and booked < rep_count + org.slot_overbook_cap:
+        return 'over'
+    return 'full'
 
 
 def _claim_body(claim, now):
@@ -314,18 +331,20 @@ def availability_week(request):
                 'rep_count': rep_count,
                 'booked': leads + claims,
                 'open': open_,
-                'bookable': bool(starts) and (open_ > 0 or flag_when_full),
+                'bookable': bool(starts) and _room(org, rep_count, leads + claims) in ('open', 'over'),
                 'leads': leads,
                 'claims': claims,
             })
     return JsonResponse({'availability': blocks, 'timezone': 'America/New_York', 'start_step_minutes': step,
-                         'full_policy': 'flag' if flag_when_full else 'refuse'})
+                         'full_policy': 'flag' if flag_when_full else 'refuse',
+                         'overbook_cap': org.slot_overbook_cap if flag_when_full else 0})
 
 
 @ventana_api_key_required
 def book_slot(request):
     """Claims one spot in a block, atomically: 201 with the claim, or 409
-    slot_full (with slot_full_policy 'flag': 201, marked over_capacity). The
+    slot_full / block_closed (with slot_full_policy 'flag', a full block takes
+    up to slot_overbook_cap more: 201, marked over_capacity). The
     same idempotency_key again returns the original claim, never a second
     one. A new claim releases its session's other live claims."""
     if request.method != 'POST':
@@ -345,7 +364,7 @@ def book_slot(request):
     if earlier is not None:
         return _replay(earlier, day, key, start, now)
     try:
-        _bookable(day, key, start, now)
+        _bookable(day, key, start, org, now)
     except _Refusal as refusal:
         return refusal.response()
     try:
@@ -361,12 +380,15 @@ def book_slot(request):
             # the new claim replaces them (released below).
             booked = _leads_in(day, key) + (
                 live_claims(now).filter(date=day, time_block=key).exclude(session_ref=session_ref).count())
-            over = booked >= rep_count
-            if over and org.slot_full_policy != 'flag':
+            room = _room(org, rep_count, booked)
+            if room == 'closed':
+                return _error(409, 'block_closed', 'That block is closed (its rep count is 0). Pick another.',
+                              date=day.isoformat(), time_block=key, open=0)
+            if room == 'full':
                 return _error(409, 'slot_full', 'That block is full. Pick another.',
                               date=day.isoformat(), time_block=key, open=0)
             claim = SlotClaim.objects.create(
-                date=day, time_block=key, start_time=start, over_capacity=over,
+                date=day, time_block=key, start_time=start, over_capacity=room == 'over',
                 idempotency_key=idempotency_key, session_ref=session_ref, phone10=phone10, created_at=now,
                 expires_at=now + timedelta(hours=org.slot_claim_ttl_hours))
             released = list(live_claims(now).filter(session_ref=session_ref).exclude(pk=claim.pk)
