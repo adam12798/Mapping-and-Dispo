@@ -122,7 +122,8 @@ class NumbersTests(AvailabilityBase):
     def test_bad_requests(self):
         key = self.v_key.api_key
         self.assertEqual(Client().get(URL, HTTP_AUTHORIZATION=f'Bearer {key}').status_code, 400)
-        for params in ({'week_start': '12/07/2026'}, {'days': 0}, {'days': 15}, {'days': 'x'}):
+        for params in ({'week_start': '12/07/2026'}, {'days': 0}, {'days': 15}, {'days': 'x'},
+                       {'week_start': '9999-12-31', 'days': 2}, {'week_start': '1999-12-31'}):
             self.assertEqual(self.get(key, **params).status_code, 400, params)
         self.assertEqual(Client().post(f'{URL}?week_start={WEEK}', HTTP_AUTHORIZATION=f'Bearer {key}').status_code,
                          405)

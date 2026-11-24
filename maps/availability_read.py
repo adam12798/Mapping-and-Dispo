@@ -103,6 +103,8 @@ def v1_availability(request):
     days = _days(request.GET.get('days'))
     if days is None:
         return JsonResponse({'error': f'days must be a whole number from 1 to {MAX_DAYS}.'}, status=400)
+    if not (2000 <= start.year <= 2100):
+        return JsonResponse({'error': 'week_start must be a date between 2000 and 2100.'}, status=400)
 
     availability = []
     for day_offset in range(days):
