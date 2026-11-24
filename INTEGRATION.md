@@ -130,6 +130,7 @@ Base: `https://sutton-soda.com/api/v1/`. Auth: `Authorization: Bearer <api_key>`
 | Time off | `GET /api/v1/time-off/?date=` | ✅ exists (read-only) |
 | Delivery-log read-back | `GET /api/v1/ghl/logs/` | ⚠️ inbound-only (see §1.5) |
 | A rep's text debrief → the lead | `POST /api/v1/alfred/text/` | ✅ **Ventana keys only** (§6.6) |
+| Block availability (Lurch), read only | `GET /api/v1/availability/?week_start=` | ✅ **Ventana keys only** (§6.7) |
 
 **Behavioural notes on `PUT /api/v1/leads/<id>/` that the hub design depends on:**
 
@@ -467,3 +468,12 @@ Related: the public SMS consent page (`sms_consent.html`, part of the 978's A2P 
       - `wrap_up`: ONE sentence stating what was recorded, shaped like the example "Got it — I'll hit you up Thursday at 2." (the goal marks its day and time as an example), with no question and no invitation to reply. After a sale it may add a two-word closer ("Nice work.").
 
     The customers, the `ask`, what was recorded ("Recorded just now: …") and the history (a short transcript) are written by customers, reps and other code, so they go in the **user** turn, fenced in `<data>…</data>`, with any `<data>` tag inside removed so nothing can close the fence.
+
+### 6.7 Block availability, read only (`maps/availability_read.py`)
+
+`GET /api/v1/availability/?week_start=YYYY-MM-DD[&days=7]` gives Lurch the Provider Portal's block grid: the same numbers from the same functions (`TIME_BLOCKS`, `_get_rep_count`, `_count_bookings_for_block`; a test compares the two for the same weeks). It books, holds and sends nothing, and changes no existing endpoint.
+
+- **Ventana's keys only.** The key is checked before `api_key_required` runs: no key, an unknown or malformed key, or an inactive key gets **401** `{"error": "Authentication required"}`; a key of any other org, a key with no org (never the default-inbound fallback), or an inactive Ventana org gets **403**. A refused key reads only its own key row: nothing else is read or written, not even its `last_used_at`.
+- **Params:** `week_start` (required; any date), `days` (1-14, default 7). Otherwise **400** `{"error": "<sentence>"}`. GET only (**405**).
+- **Blocks** in New York time: morning 9-12, midday 12-3, afternoon 3-6, evening 6-9; a time belongs to the block whose start hour ≤ its hour < end hour, so 21:00 is in none. `rep_count` is the `/rep-count/` number (the date's override, else the block's default; a block's default row is created on its first read, as the Provider Portal already does). `booked` = the block's non-cancelled Ventana leads. `open` = max(0, `rep_count` − `booked`).
+- **Response 200:** `{"week_start": "2026-12-07", "days": 7, "timezone": "America/New_York", "availability": [{"date": "2026-12-07", "time_block": "morning", "label": "9-12 PM", "start": "2026-12-07T09:00:00-05:00", "end": "2026-12-07T12:00:00-05:00", "rep_count": 3, "booked": 2, "open": 1}, …]}`, one row per day and block in order. `start`/`end` carry the day's own offset, so they are right across DST.
