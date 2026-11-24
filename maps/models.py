@@ -2,6 +2,7 @@ import uuid
 
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils import timezone
 
 from .tenancy import OrgOwnedModel
 
@@ -29,6 +30,14 @@ class Organization(models.Model):
     # and no follow-up reminder. Off by default: nothing changes until it is
     # turned on — `python manage.py wednesday_reminders <slug> on`.
     reminders_by_wednesday = models.BooleanField(default=False)
+    # Slot claims (maps/availability.py): Lurch reserves a spot in a time
+    # block while a setter books, and v1 lead creates are checked against
+    # the block. Off by default: until it is turned on the availability
+    # endpoints answer 403 and v1 lead creates are unchanged —
+    # `python manage.py slot_claims ventana on`. Only Ventana can turn it on.
+    slot_claims_enabled = models.BooleanField(default=False)
+    # How long a claim no lead has picked up keeps its spot.
+    slot_claim_ttl_hours = models.PositiveSmallIntegerField(default=24)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -133,6 +142,11 @@ class Lead(OrgOwnedModel):
     # actually changes, and otherwise keeps the old value. auto_now stays so
     # SQLite dev databases still get a value on save().
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
+    # Slot claims only (maps/availability.py): True when a v1 create put this
+    # lead in a time block that was already full and held no claim for it.
+    # The lead is created anyway (the customer was promised the time). NULL =
+    # never checked: every lead of an organization without slot claims.
+    over_capacity = models.BooleanField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.address} ({self.created_at:%m/%d/%Y})"
@@ -312,6 +326,66 @@ class RepCountOverride(OrgOwnedModel):
 
     def __str__(self):
         return f"{self.date} {self.get_time_block_display()}: {self.count} reps"
+
+
+class SlotBlockLock(OrgOwnedModel):
+    """One row per (organization, date, time block), and no data: a slot
+    claim locks it (SELECT ... FOR UPDATE) while it recounts the block, so two
+    setters can never both take a block's last spot."""
+    date = models.DateField()
+    time_block = models.CharField(max_length=10)
+
+    class Meta(OrgOwnedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(fields=['organization', 'date', 'time_block'],
+                                    name='slot_block_lock_unique'),
+        ]
+
+    def __str__(self):
+        return f'{self.date} {self.time_block}'
+
+
+class SlotClaim(OrgOwnedModel):
+    """A spot Lurch reserved in a time block while a setter books it. Not a
+    lead and not an appointment: the lead arrives later through Wednesday's
+    push (v1 lead create), which consumes the claim. A claim counts against
+    its block while it is live: not released, not consumed, not expired."""
+    claim_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    date = models.DateField()
+    time_block = models.CharField(max_length=10)
+    idempotency_key = models.CharField(max_length=100)
+    session_ref = models.CharField(max_length=100, db_index=True)
+    phone10 = models.CharField(max_length=10, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField()
+    released_at = models.DateTimeField(null=True, blank=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    # The lead that consumed it. No database constraint and DO_NOTHING, so
+    # deleting a lead (any organization's) runs exactly as before; the claim
+    # stays consumed (consumed_at) and keeps the old id.
+    consumed_by_lead = models.ForeignKey(
+        Lead, null=True, blank=True, on_delete=models.DO_NOTHING, db_constraint=False, related_name='+')
+
+    class Meta(OrgOwnedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(fields=['organization', 'idempotency_key'],
+                                    name='slot_claim_idempotency_unique'),
+        ]
+        indexes = [
+            models.Index(fields=['organization', 'date', 'time_block'], name='slot_claim_block_idx'),
+        ]
+
+    def state(self, now):
+        if self.consumed_at:
+            return 'consumed'
+        if self.released_at:
+            return 'released'
+        if self.expires_at <= now:
+            return 'expired'
+        return 'live'
+
+    def __str__(self):
+        return f'{self.date} {self.time_block} ({self.claim_id})'
 
 
 class GHLWebhookLog(models.Model):

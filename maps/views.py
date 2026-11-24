@@ -3621,6 +3621,39 @@ def api_key_required(view_func):
     return wrapper
 
 
+# Slot claims (maps/availability.py) are Ventana's alone. Two locks, both
+# needed: this slug, and the organization's own slot_claims_enabled (off by
+# default). Team Sunshine never passes the first, whatever its column says.
+SLOT_CLAIMS_ORG_SLUG = 'ventana'
+
+
+def slot_claims_org(tenant):
+    """The API key's own organization when slot claims are on for it, else
+    None. Reads the key's organization itself, never api_key_required's
+    default-inbound fallback, so a key with no organization gets None."""
+    if tenant is None or tenant.organization_id is None:
+        return None
+    org = tenant.organization
+    if org.slug != SLOT_CLAIMS_ORG_SLUG or not org.is_active or not org.slot_claims_enabled:
+        return None
+    return org
+
+
+def ventana_api_key_required(view_func):
+    """api_key_required, then 403 unless slot_claims_org() passes for the key.
+    The 403 comes before the view runs, so nothing is read or written for any
+    other organization's key (api_key_required still stamps the key's own
+    last_used_at, as it does for every key)."""
+    @wraps(view_func)
+    def gated(request, *args, **kwargs):
+        org = slot_claims_org(request.api_tenant)
+        if org is None or get_current_org_id() != org.id:
+            return JsonResponse({'error': 'Slot availability is not enabled for this key.'}, status=403)
+        request.slot_claims_org = org
+        return view_func(request, *args, **kwargs)
+    return api_key_required(gated)
+
+
 def _paginate(queryset, request, default_per_page=50):
     try:
         page = max(1, int(request.GET.get('page', 1)))
@@ -3880,7 +3913,15 @@ def v1_lead_create(request):
     if lead.city:
         geocode_address = f"{lead.address}, {lead.city}, MA"
     lead.latitude, lead.longitude = geocode(geocode_address)
-    lead.save()
+    org = slot_claims_org(request.api_tenant)
+    if org is None:
+        lead.save()
+    else:
+        # Ventana with slot claims on: the lead consumes its claim (the body's
+        # optional claim_id), or is marked over_capacity when its block was
+        # already full. It is always created. maps/availability.py.
+        from .availability import save_lead_against_claims
+        save_lead_against_claims(lead, data.get('claim_id'))
     fire_webhooks('lead_created', lead)
     return JsonResponse({'status': 'ok', 'id': lead.id}, status=201)
 

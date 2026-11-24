@@ -96,7 +96,7 @@
                     <td class="checkbox-col sticky-col sticky-check"><input type="checkbox" class="row-select"></td>
                     <td data-label="Name" class="sticky-col sticky-name">
                         <input type="text" class="crm-input" data-field="homeowner_name" value="{{ lead.homeowner_name }}">
-                        {% if lead.cancelled %}<span class="cancelled-badge">CANCELLED</span>{% endif %}
+                        {% if lead.cancelled %}<span class="cancelled-badge">CANCELLED</span>{% endif %}{% if lead.over_capacity %}<span class="over-capacity-badge" style="display:inline-block;background:#d4a017;color:#fff;font-family:'Montserrat',sans-serif;font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;letter-spacing:0.5px;vertical-align:middle;margin-left:4px;" title="Booked into a time block that was already full, with no reserved slot">OVER CAPACITY</span>{% endif %}
                     </td>
                     <td data-label="Phone"><input type="text" class="crm-input" data-field="phone_number" value="{{ lead.phone_number }}"></td>
                     <td data-label="Address">
