@@ -3307,9 +3307,28 @@ def _get_rep_count(date_obj, block_key):
 
 
 # ===== Rep Count (Manager) =====
+# Turning a whole day off is Ventana's only: Team Sunshine's /rep-count/ page
+# renders exactly as before (rep_count_day_off is False for it) and
+# rep_count_day_api refuses every organization but Ventana.
+REP_COUNT_DAY_OFF_ORG_SLUG = 'ventana'
+
+
+def _rep_count_day_off_org(request):
+    """Ventana's Organization when it is this request's active organization
+    (a superuser switched into another organization gets None), else None."""
+    org_id = getattr(request, 'organization_id', None)
+    if not org_id or org_id != get_current_org_id():
+        return None
+    return Organization.objects.filter(
+        id=org_id, slug=REP_COUNT_DAY_OFF_ORG_SLUG, is_active=True).first()
+
+
 @manager_required
 def rep_count_view(request):
-    return render(request, 'maps/rep_count.html', {'active_tab': 'rep_count'})
+    return render(request, 'maps/rep_count.html', {
+        'active_tab': 'rep_count',
+        'rep_count_day_off': _rep_count_day_off_org(request) is not None,
+    })
 
 
 @csrf_exempt
@@ -3357,6 +3376,50 @@ def rep_count_overrides_api(request):
         return JsonResponse({'status': 'ok'})
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@manager_required
+def rep_count_day_api(request):
+    """POST {"date": "YYYY-MM-DD", "off": true|false} -- Ventana managers only.
+
+    off=true: all four blocks of the date get an override of 0 (no spots,
+    so Lurch's availability shows open=0 for each). off=false: the date's
+    overrides are deleted, so its blocks fall back to the defaults. Touches
+    only the active organization's RepCountOverride rows for that date.
+    CSRF-checked: the page sends the token in X-CSRFToken."""
+    org = _rep_count_day_off_org(request)
+    if org is None:
+        return JsonResponse({'error': 'Turning a whole day off is only available for Ventana.'}, status=403)
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only.'}, status=405)
+    bad = JsonResponse({'error': 'Send {"date": "YYYY-MM-DD", "off": true or false}.'}, status=400)
+    try:
+        data = json.loads(request.body or b'null')
+    except (ValueError, UnicodeDecodeError):
+        return bad
+    if not isinstance(data, dict) or not isinstance(data.get('off'), bool) \
+            or not isinstance(data.get('date'), str):
+        return bad
+    try:
+        date_obj = datetime.strptime(data['date'], '%Y-%m-%d').date()
+    except ValueError:
+        return bad
+    if not (2000 <= date_obj.year <= 2100):
+        return bad
+    off = data['off']
+
+    from django.db import transaction
+    with transaction.atomic():
+        if off:
+            for block_key, _label, _start, _end in TIME_BLOCKS:
+                RepCountOverride.objects.update_or_create(
+                    organization=org, date=date_obj, time_block=block_key,
+                    defaults={'count': 0})
+        else:
+            RepCountOverride.objects.filter(organization=org, date=date_obj).delete()
+    overrides = {o.time_block: o.count
+                 for o in RepCountOverride.objects.filter(organization=org, date=date_obj)}
+    return JsonResponse({'status': 'ok', 'date': date_obj.isoformat(), 'off': off, 'overrides': overrides})
 
 
 @manager_required

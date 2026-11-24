@@ -59,6 +59,7 @@ urlpatterns = [
     path('api/rep-count/default/', views.rep_count_default_api, name='rep_count_default_api'),
     path('api/rep-count/overrides/', views.rep_count_overrides_api, name='rep_count_overrides_api'),
     path('api/rep-count/bookings/', views.rep_count_bookings_api, name='rep_count_bookings_api'),
+    path('api/rep-count/day/', views.rep_count_day_api, name='rep_count_day_api'),
     # Provider portal
     path('provider/', views.provider_view, name='provider'),
     path('api/provider/availability/', views.provider_availability_api, name='provider_availability_api'),
