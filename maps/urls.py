@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 from . import voice
 from . import alfred_text
+from . import availability_read
 
 urlpatterns = [
     path('privacy/', views.privacy_view, name='privacy'),
@@ -73,6 +74,8 @@ urlpatterns = [
     path('api/v1/stats/', views.v1_stats, name='v1_stats'),
     path('api/v1/time-off/', views.v1_time_off, name='v1_time_off'),
     path('api/v1/alfred/text/', alfred_text.alfred_text, name='v1_alfred_text'),
+    # Block availability for Lurch, read only (Ventana keys only; maps/availability_read.py)
+    path('api/v1/availability/', availability_read.v1_availability, name='v1_availability'),
     # GHL inbound webhooks
     path('api/v1/ghl/appointment/', views.ghl_appointment, name='ghl_appointment'),
     path('api/v1/ghl/reschedule/', views.ghl_reschedule, name='ghl_reschedule'),
