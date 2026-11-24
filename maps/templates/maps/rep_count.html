@@ -241,7 +241,48 @@
             .rc-stepper-val { width: 26px; height: 24px; font-size: 14px; }
         }
     </style>
-{% endblock %}
+{% if rep_count_day_off %}    <style>
+        /* Ventana only: turn a whole day off / back on */
+        .rc-header.day-off { background: #7f8c8d; }
+        .rc-day-off-tag {
+            display: inline-block;
+            margin-top: 4px;
+            background: #c0392b;
+            color: #fff;
+            border-radius: 3px;
+            padding: 1px 6px;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+        }
+        .rc-day-btn {
+            display: block;
+            margin: 6px auto 0;
+            max-width: 100%;
+            background: transparent;
+            color: #e0fbfc;
+            border: 1px solid rgba(224,251,252,0.6);
+            border-radius: 4px;
+            padding: 3px 6px;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: none;
+            cursor: pointer;
+        }
+        .rc-day-btn:hover { background: #e0fbfc; color: #293241; }
+        .rc-day-btn:disabled { opacity: 0.6; cursor: default; }
+        .rc-day-btn.failed { border-color: #ee6c4d; color: #ee6c4d; }
+        .rc-day-btn.failed:hover { background: #ee6c4d; color: #fff; }
+        .rc-cell.day-off {
+            background: repeating-linear-gradient(45deg, #f4f4f4, #f4f4f4 6px, #e8e8e8 6px, #e8e8e8 12px);
+        }
+        .rc-cell.day-off.over { background: rgba(231,76,60,0.1); }
+        .rc-cell.day-off .rc-stepper-val { color: #95a5a6; }
+        @media (max-width: 768px) {
+            .rc-day-btn { font-size: 9px; padding: 2px 4px; }
+        }
+    </style>
+{% endif %}{% endblock %}
 
 {% block content %}
     <div class="rc-container">
@@ -428,6 +469,71 @@
             });
         }
 
-        loadWeek();
+{% if rep_count_day_off %}        // Ventana only: turn a whole day off (all four blocks set to 0) or back
+        // on (the day's overrides removed, so its blocks use the defaults).
+        var DAY_OFF_CSRF = '{{ csrf_token }}';
+        var dayOffSaving = {};
+        var dayOffFailed = {};
+
+        function isDayOff(ds) {
+            return BLOCKS.every(function(b) { return overrides[ds + '_' + b.key] === 0; });
+        }
+
+        var renderGridWithoutDayOff = renderGrid;
+        renderGrid = function() {
+            renderGridWithoutDayOff();
+            var headers = document.querySelectorAll('#rc-grid .rc-header');
+            for (var i = 0; i < 7; i++) {
+                var d = new Date(weekStart);
+                d.setDate(d.getDate() + i);
+                var ds = dateStr(d);
+                var off = isDayOff(ds);
+                var header = headers[i + 1];
+                if (!header) continue;
+                var label = dayOffSaving[ds] ? 'Saving...' :
+                    (dayOffFailed[ds] ? 'Not saved - retry' : (off ? 'Turn back on' : 'Turn off day'));
+                var title = dayOffFailed[ds] ? 'Not saved. Try again, or reload the page.' :
+                    (off ? 'Put every block of this day back to its default' : 'Set every block of this day to 0');
+                var html = off ? '<br><span class="rc-day-off-tag">Day off</span>' : '';
+                html += '<button type="button" class="rc-day-btn' + (dayOffFailed[ds] ? ' failed' : '') + '"' +
+                    (dayOffSaving[ds] ? ' disabled' : '') + ' title="' + title + '"' +
+                    ' onclick="setDayOff(\'' + ds + '\', ' + (off ? 'false' : 'true') + ')">' + label + '</button>';
+                if (off) header.classList.add('day-off');
+                header.insertAdjacentHTML('beforeend', html);
+                if (off) {
+                    document.querySelectorAll('#rc-grid .rc-cell[data-date="' + ds + '"]').forEach(function(cell) {
+                        cell.classList.add('day-off');
+                    });
+                }
+            }
+        };
+
+        function setDayOff(ds, off) {
+            if (dayOffSaving[ds]) return;
+            dayOffSaving[ds] = true;
+            delete dayOffFailed[ds];
+            renderGrid();
+            fetch('/api/rep-count/day/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': DAY_OFF_CSRF },
+                body: JSON.stringify({ date: ds, off: off })
+            }).then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            }).then(function(res) {
+                BLOCKS.forEach(function(b) {
+                    var key = ds + '_' + b.key;
+                    if (b.key in res.overrides) overrides[key] = res.overrides[b.key];
+                    else delete overrides[key];
+                });
+            }).catch(function() {
+                dayOffFailed[ds] = true;
+            }).then(function() {
+                delete dayOffSaving[ds];
+                renderGrid();
+            });
+        }
+
+{% endif %}        loadWeek();
     </script>
 {% endblock %}
