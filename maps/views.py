@@ -631,8 +631,9 @@ def lead_update(request, pk):
         'monthly_cost': 'Monthly Cost', 'total_cost': 'Total Cost', 'adders': 'Adders',
         'post_appt_notes': 'Post-Appt Notes',
     }
+    type_entries = appointment_types.for_org(lead.organization_id)
     VALUE_LABELS = {
-        'appointment_type': appointment_types.labels_for_org(lead.organization_id),
+        'appointment_type': appointment_types.labels(type_entries),
         'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
         'sat': {'true': 'Sit', 'false': 'No Sit'},
     }
@@ -664,8 +665,11 @@ def lead_update(request, pk):
             if old_display != new_display:
                 label = FIELD_LABELS.get(field, field)
                 changes.append(f"{label}: {old_display} → {new_display}")
-    # Auto-compute appointment_type from tags when tags change
-    if 'tags' in data and 'appointment_type' not in data:
+    # Auto-compute appointment_type from tags when tags change — unless the
+    # lead has one of its organization's own types beyond solar/hvac/both
+    # (the tags only know those three; never with the default list).
+    if ('tags' in data and 'appointment_type' not in data
+            and not appointment_types.is_extra(type_entries, lead.appointment_type)):
         new_type = compute_appointment_type(lead.tags)
         old_type = lead.appointment_type or ''
         if new_type != old_type:
@@ -1427,6 +1431,8 @@ def dashboard_api(request):
     # The organization's appointment types, in its configured order.
     type_entries = appointment_types.for_org(get_current_org_id())
     type_values = [t['value'] for t in type_entries]
+    # The base three keep their colours; the org's other types get their own.
+    PRODUCT_COLORS = {**appointment_types.extra_colors(type_entries), **PRODUCT_COLORS}
 
     # --- by_disposition ---
     if group_by == 'rep':
@@ -1493,7 +1499,8 @@ def dashboard_api(request):
 
     # --- by_product ---
     PRODUCT_LABELS = appointment_types.labels(type_entries)
-    PRODUCT_COLORS_FLAT = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
+    PRODUCT_COLORS_FLAT = {**appointment_types.extra_colors(type_entries),
+                           'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
     prod_rows = list(qs.filter(appointment_type__in=type_values).values(
         'appointment_type').annotate(count=Count('id')))
     by_product = {

@@ -379,7 +379,8 @@
         }
 
         // Lead pin colors by appointment type
-        var leadTypeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+        var leadTypeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };{% for v in appointment_types_extra %}
+        leadTypeColors['{{ v|escapejs }}'] = '{{ appointment_type_extra_pin }}';{% endfor %}
         var leadsLayer = L.layerGroup().addTo(map);
         var leadMarkers = {};
         var allLeads = [];
@@ -672,7 +673,8 @@
             if (!sidebar.classList.contains('open')) toggleSidebar();
         }
 
-        var typeColorMap = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };
+        var typeColorMap = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };{% for v in appointment_types_extra %}
+        typeColorMap['{{ v|escapejs }}'] = '{{ appointment_type_extra_pin }}';{% endfor %}
 
         function updateSidebar(assignData) {
             updatePinNumbers(assignData);

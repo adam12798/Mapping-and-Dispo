@@ -25,6 +25,15 @@ from django.core.exceptions import ValidationError
 VALUE_RE = re.compile(r'^[a-z0-9_]{1,10}$')
 ENTRY_KEYS = frozenset({'value', 'label', 'any_rep'})
 EXAMPLE = '{"value": "windows", "label": "Windows", "any_rep": true}'
+# The three types Sutton has always had. Their colours (pins, charts) and the
+# tag-derived type (compute_appointment_type) belong to them alone.
+BASE_VALUES = frozenset({'solar', 'hvac', 'both'})
+# Chart colours for an organization's other types, in list order (cycled).
+# None is a base type's colour, the "unknown" pink or the chart fallback.
+EXTRA_COLORS = ('#3d5a80', '#8e44ad', '#e67e22', '#16a085', '#7f8c8d', '#2c3e50', '#d35400')
+# Map pin for a type the organization lists beyond the base three. A value
+# outside its list keeps the pink "type or format missing" pin.
+EXTRA_PIN_COLOR = '#7f8c8d'
 
 
 def default_appointment_types():
@@ -113,6 +122,24 @@ def any_rep_values(entries):
 
 def any_rep_values_for_org(org_id):
     return any_rep_values(for_org(org_id))
+
+
+def extra_values(entries):
+    """Listed values beyond the base three, in list order."""
+    return [e['value'] for e in entries if e['value'] not in BASE_VALUES]
+
+
+def is_extra(entries, value):
+    """True when `value` is one of the organization's own types beyond the
+    base three. The tag pills never re-derive such a type (they only know
+    solar/hvac/both). Always False for the default list."""
+    return value in extra_values(entries)
+
+
+def extra_colors(entries):
+    """{value: chart colour} for the types beyond the base three. Empty for
+    the default list."""
+    return {v: EXTRA_COLORS[i % len(EXTRA_COLORS)] for i, v in enumerate(extra_values(entries))}
 
 
 def sorted_by_label(entries):

@@ -271,3 +271,128 @@ class WindowsAnyRepTests(Base):
         with org_context(self.ventana):
             texts = list(LeadUpdate.objects.filter(lead=lead).order_by('id').values_list('text', flat=True))
         self.assertEqual(texts, ['Appt Type: HVAC → Windows', 'Bulk update: Appt Type → Other'])
+
+
+# The Appt Type <select> exactly as origin/main rendered it before
+# per-organization types (crm.html and daily.html had the same lines).
+OLD_SELECT = (
+    '                            <option value="">—</option>\n'
+    '                            <option value="solar" {% if lead.appointment_type == "solar" %}selected{% endif %}>Solar</option>\n'
+    '                            <option value="hvac" {% if lead.appointment_type == "hvac" %}selected{% endif %}>HVAC</option>\n'
+    '                            <option value="both" {% if lead.appointment_type == "both" %}selected{% endif %}>Both</option>\n'
+    '                        </select>'
+)
+OLD_PINS = ("var leadTypeColors = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };\n"
+            "        var leadsLayer")
+OLD_BADGES = ("var typeColorMap = { solar: '#f1c40f', hvac: '#e74c3c', both: '#27ae60' };\n\n"
+              "        function updateSidebar")
+
+
+class DefaultOrgParityTests(Base):
+    """A default-list organization renders what origin/main rendered, for
+    every kind of stored value and every way into the pages."""
+    STORED = ['solar', 'hvac', 'both', 'Solar', 'HVAC', 'roofing', ' solar', '', 'windows']
+
+    def assert_rows_match_old(self, html, leads):
+        from django.template import Context, Template
+        old = Template(OLD_SELECT)
+        for lead in leads:
+            row = html.split(f'<tr data-id="{lead.id}">', 1)[1].split('</tr>', 1)[0]
+            with self.subTest(value=lead.appointment_type):
+                self.assertIn(old.render(Context({'lead': lead})), row)
+
+    def assert_default_page(self, client, prefix=''):
+        leads = [self.lead(self.sunshine, v, hour=8 + i) for i, v in enumerate(self.STORED)]
+        crm = client.get(f'{prefix}/crm/').content.decode()
+        daily = client.get(f'{prefix}/daily/?date=2026-12-01').content.decode()
+        for html in (crm, daily):
+            self.assertIn(DEFAULT_FILTER_JS, html)
+            self.assertNotIn('Windows', html)
+        if not prefix:
+            self.assert_rows_match_old(crm, leads)
+            self.assert_rows_match_old(daily, leads)
+        index = client.get(f'{prefix}/').content.decode()
+        self.assertIn(OLD_PINS, index)
+        self.assertIn(OLD_BADGES, index)
+        self.assertIn(DEFAULT_FILTER_JS, client.get(f'{prefix}/dashboard/').content.decode())
+
+    def test_manager(self):
+        self.assert_default_page(self.client_for(self.s_mgr))
+
+    def test_superuser_switched_into_the_default_org(self):
+        boss = User.objects.create_user('boss_at', password='pw', is_superuser=True)
+        UserProfile.all_objects.create(user=boss, role='manager', organization=self.ventana)
+        c = self.client_for(boss)
+        session = c.session
+        session['active_org_id'] = self.sunshine.id
+        session.save()
+        self.assert_default_page(c)
+        # And switched back into Ventana, Ventana's list shows.
+        session['active_org_id'] = self.ventana.id
+        session.save()
+        self.assertIn("{value: 'windows', label: 'Windows'}", c.get('/crm/').content.decode())
+
+    def test_tenant_pages(self):
+        tenant = APITenant.objects.create(name='ST', slug='st-at', organization=self.sunshine)
+        user = User.objects.create_user('s_ten_at', password='pw')
+        UserProfile.all_objects.create(user=user, role='manager', organization=self.sunshine, tenant=tenant)
+        self.assert_default_page(self.client_for(user), prefix='/t/st-at')
+
+    def test_provider_page(self):
+        for org, name in ((self.sunshine, 's_prov_at'), (self.ventana, 'v_prov_at')):
+            user = User.objects.create_user(name, password='pw')
+            UserProfile.all_objects.create(user=user, role='provider', organization=org)
+            html = self.client_for(user).get('/provider/crm/').content.decode()
+            if org == self.sunshine:
+                self.assertIn(DEFAULT_FILTER_JS, html)
+                self.assertNotIn('Windows', html)
+            else:
+                self.assertIn("{value: 'windows', label: 'Windows'}", html)
+
+
+class TagsAndColoursTests(Base):
+    def put_tags(self, user, lead, tags):
+        r = self.client_for(user).put(f'/api/leads/{lead.id}/', json.dumps({'tags': tags}),
+                                      content_type='application/json')
+        lead.refresh_from_db()
+        return r.json()
+
+    def test_tag_pills_keep_an_org_type_beyond_the_base_three(self):
+        lead = self.lead(self.ventana, 'insulation')
+        self.assertEqual(self.put_tags(self.v_mgr, lead, 'MassSave')['appointment_type'], 'insulation')
+        self.assertEqual(lead.appointment_type, 'insulation')
+        self.put_tags(self.v_mgr, lead, '')
+        self.assertEqual(lead.appointment_type, 'insulation')
+
+    def test_tag_pills_still_derive_the_base_three(self):
+        v_lead = self.lead(self.ventana, 'hvac')
+        self.put_tags(self.v_mgr, v_lead, 'MassSave')
+        self.assertEqual(v_lead.appointment_type, 'both')
+        # A value outside the org's list is re-derived, as before (Team Sunshine).
+        s_lead = self.lead(self.sunshine, 'windows')
+        self.put_tags(self.s_mgr, s_lead, 'MassSave')
+        self.assertEqual(s_lead.appointment_type, 'both')
+        self.put_tags(self.s_mgr, s_lead, '')
+        self.assertEqual(s_lead.appointment_type, '')
+
+    def test_dashboard_colours(self):
+        for t in ('solar', 'hvac', 'both', 'windows', 'insulation', 'other'):
+            self.lead(self.ventana, t, disposition='sale')
+        data = self.client_for(self.v_mgr).get('/api/dashboard/?group_by=product').json()
+        pivot = {d['label']: d['backgroundColor'] for d in data['by_disposition']['datasets']}
+        pie = dict(zip(data['by_product']['labels'], data['by_product']['datasets'][0]['backgroundColor']))
+        for colours in (pivot, pie):
+            base = {k: v for k, v in colours.items() if k.lower() in ('solar', 'hvac', 'both')}
+            self.assertEqual(sorted(base.values()), ['#27ae60', '#e74c3c', '#f1c40f'])
+            extra = [v for k, v in colours.items() if k.lower() not in ('solar', 'hvac', 'both')]
+            self.assertEqual(len(extra), 3)
+            self.assertEqual(len(set(extra)), 3)
+            self.assertFalse(set(extra) & {'#27ae60', '#e74c3c', '#f1c40f', '#ff69b4', '#98c1d9'})
+
+    def test_map_pins(self):
+        html = self.client_for(self.v_mgr).get('/').content.decode()
+        for var in ('leadTypeColors', 'typeColorMap'):
+            for v in ('windows', 'insulation', 'other'):
+                self.assertIn(f"{var}['{v}'] = '{appointment_types.EXTRA_PIN_COLOR}';", html)
+        self.assertNotIn("leadTypeColors['solar']", html)
+        self.assertNotEqual(appointment_types.EXTRA_PIN_COLOR, '#ff69b4')

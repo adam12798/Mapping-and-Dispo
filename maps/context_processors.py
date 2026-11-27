@@ -24,6 +24,9 @@ def organization(request):
         ctx['current_org'].appointment_types if ctx['current_org'] else None)
     ctx['appointment_types'] = types
     ctx['appointment_types_by_label'] = appointment_types.sorted_by_label(types)
+    # Map pins: the org's types beyond solar/hvac/both (none for the default list).
+    ctx['appointment_types_extra'] = appointment_types.extra_values(types)
+    ctx['appointment_type_extra_pin'] = appointment_types.EXTRA_PIN_COLOR
     user = getattr(request, 'user', None)
     if user is not None and user.is_authenticated and user.is_superuser:
         ctx['switchable_orgs'] = list(Organization.objects.filter(is_active=True).order_by('name'))
