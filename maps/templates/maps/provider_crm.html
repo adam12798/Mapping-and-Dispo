@@ -248,7 +248,7 @@
             {key: 'homeowner_name', label: 'Name', type: 'text'},
             {key: 'phone_number', label: 'Phone', type: 'text'},
             {key: 'appointment_type', label: 'Product Type', type: 'select', options: [
-                {value: 'both', label: 'Both'}, {value: 'hvac', label: 'HVAC'}, {value: 'solar', label: 'Solar'}
+                {% for t in appointment_types_by_label %}{value: '{{ t.value|escapejs }}', label: '{{ t.label|escapejs }}'}{% if not forloop.last %}, {% endif %}{% endfor %}
             ]},
             {key: 'rep_name', label: 'Rep', type: 'text'},
             {key: 'sat', label: 'Sit', type: 'select', options: [

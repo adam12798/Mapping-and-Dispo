@@ -7,6 +7,7 @@ try:
 except ImportError:
     from django.utils.timezone import get_fixed_timezone
     EASTERN = get_fixed_timezone(-300)
+from . import appointment_types
 from .models import Lead, Rep, TimeOffRequest
 
 
@@ -79,9 +80,18 @@ def is_blocked_by_time_off(arrival, duration_min, time_off_blocks):
     return False
 
 
-def is_compatible(rep, lead):
+def is_compatible(rep, lead, any_rep_types=None):
+    """any_rep_types: the values the lead's organization opens to any rep
+    (Organization.appointment_types); looked up when not passed. A default
+    list has none, so the specialty rule below decides exactly as before."""
     if not lead.appointment_type:
         return False  # No type set — can't assign any rep
+    if any_rep_types is None:
+        any_rep_types = appointment_types.any_rep_values_for_org(lead.organization_id)
+    if lead.appointment_type in any_rep_types:
+        # Any active rep of the lead's own organization, whatever the specialty.
+        return bool(rep.is_active and lead.organization_id is not None
+                    and rep.organization_id == lead.organization_id)
     if not rep.specialty or rep.specialty == 'both':
         return True
     return rep.specialty == lead.appointment_type
@@ -283,6 +293,14 @@ def auto_assign_leads(target_date, save=True):
 
     unassigned = []
 
+    # Each organization's any-rep types, read once per run (not per rep × lead).
+    any_rep_by_org = {}
+
+    def any_rep_types(lead):
+        if lead.organization_id not in any_rep_by_org:
+            any_rep_by_org[lead.organization_id] = appointment_types.any_rep_values_for_org(lead.organization_id)
+        return any_rep_by_org[lead.organization_id]
+
     def get_rep_free_time_and_location(rep_id):
         """Where will this rep be and when will they be free after their current stops?"""
         rep_obj = next(r for r in reps if r.id == rep_id)
@@ -308,7 +326,7 @@ def auto_assign_leads(target_date, save=True):
         best_drive = float('inf')
 
         for rep in available_reps:
-            if not is_compatible(rep, lead):
+            if not is_compatible(rep, lead, any_rep_types(lead)):
                 continue
             if len(clusters[rep.id]) >= MAX_PER_REP:
                 continue
@@ -357,7 +375,7 @@ def auto_assign_leads(target_date, save=True):
             best_drive = float('inf')
 
             for rep in available_reps:
-                if not is_compatible(rep, lead):
+                if not is_compatible(rep, lead, any_rep_types(lead)):
                     continue
                 if len(clusters[rep.id]) >= MAX_PER_REP:
                     continue

@@ -225,8 +225,9 @@ class SwitchTests(TestCase):
         self.assertTrue(model_admin.has_change_permission(request))
         self.assertFalse(model_admin.has_add_permission(request))
         self.assertFalse(model_admin.has_delete_permission(request))
+        # Alfred's switch and the appointment-type list (maps/appointment_types.py).
         self.assertEqual(set(model_admin.get_fields(request)) - set(model_admin.get_readonly_fields(request)),
-                         {'alfred_declines'})
+                         {'alfred_declines', 'appointment_types'})
         request.user = staff
         self.assertFalse(model_admin.has_module_permission(request))
         self.assertFalse(model_admin.has_change_permission(request))

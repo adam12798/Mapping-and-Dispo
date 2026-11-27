@@ -3,6 +3,7 @@ import uuid
 from django.contrib.auth.models import User
 from django.db import models
 
+from .appointment_types import default_appointment_types, validate_appointment_types
 from .tenancy import OrgOwnedModel
 
 
@@ -29,6 +30,16 @@ class Organization(models.Model):
     # and no follow-up reminder. Off by default: nothing changes until it is
     # turned on — `python manage.py wednesday_reminders <slug> on`.
     reminders_by_wednesday = models.BooleanField(default=False)
+    # The appointment types this organization offers (maps/appointment_types.py):
+    # value, label, and whether any active rep may take it. Defaults to the
+    # three Sutton has always had, so an organization nobody configures sees
+    # and assigns exactly as before. Edited in the Django admin.
+    appointment_types = models.JSONField(
+        default=default_appointment_types,
+        validators=[validate_appointment_types],
+        help_text='A list like [{"value": "windows", "label": "Windows", "any_rep": true}]. '
+                  'value: up to 10 lowercase letters/digits/_; any_rep: any active rep may take it.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

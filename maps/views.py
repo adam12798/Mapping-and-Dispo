@@ -23,6 +23,7 @@ from django.views.decorators.http import require_POST
 from django.conf import settings
 from django.db.models import Q
 
+from . import appointment_types
 from .assignment import auto_assign_leads
 from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant, WebhookConfig, Organization, OrgSwitchAudit
 from .tenancy import get_current_org_id, org_context
@@ -631,7 +632,7 @@ def lead_update(request, pk):
         'post_appt_notes': 'Post-Appt Notes',
     }
     VALUE_LABELS = {
-        'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
+        'appointment_type': appointment_types.labels_for_org(lead.organization_id),
         'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
         'sat': {'true': 'Sit', 'false': 'No Sit'},
     }
@@ -758,7 +759,7 @@ def leads_bulk_update(request):
         'follow_up_date': 'Follow Up Date',
     }
     BULK_VALUE_LABELS = {
-        'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
+        'appointment_type': appointment_types.labels_for_org(get_current_org_id()),
         'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
         'sat': {True: 'Sit', False: 'No Sit'},
         'disposition': dict(Lead.DISPOSITION_CHOICES),
@@ -1423,6 +1424,9 @@ def dashboard_api(request):
         'no_show': '#800000',
     }
     PRODUCT_COLORS = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
+    # The organization's appointment types, in its configured order.
+    type_entries = appointment_types.for_org(get_current_org_id())
+    type_values = [t['value'] for t in type_entries]
 
     # --- by_disposition ---
     if group_by == 'rep':
@@ -1441,15 +1445,17 @@ def dashboard_api(request):
         ]
     elif group_by == 'product':
         grouped = qs.values('appointment_type', 'disposition').annotate(count=Count('id'))
-        pivot = {pt: {d: 0 for d in DISPO_KEYS} for pt in ['solar', 'hvac', 'both']}
+        pivot = {pt: {d: 0 for d in DISPO_KEYS} for pt in type_values}
         for row in grouped:
             pt = row['appointment_type'] or ''
             if pt in pivot and row['disposition'] in pivot[pt]:
                 pivot[pt][row['disposition']] = row['count']
+        # Labels stay value.capitalize() ('Hvac'), as this pivot has always
+        # shown them, so a default-list organization gets identical output.
         dispo_datasets = [
             {'label': pt.capitalize(), 'data': [pivot[pt][d] for d in DISPO_KEYS],
-             'backgroundColor': PRODUCT_COLORS[pt]}
-            for pt in ['solar', 'hvac', 'both']
+             'backgroundColor': PRODUCT_COLORS.get(pt, '#98c1d9')}
+            for pt in type_values
         ]
     else:
         flat = qs.values('disposition').annotate(count=Count('id'))
@@ -1486,9 +1492,9 @@ def dashboard_api(request):
     }
 
     # --- by_product ---
-    PRODUCT_LABELS = {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'}
+    PRODUCT_LABELS = appointment_types.labels(type_entries)
     PRODUCT_COLORS_FLAT = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
-    prod_rows = list(qs.filter(appointment_type__in=['solar', 'hvac', 'both']).values(
+    prod_rows = list(qs.filter(appointment_type__in=type_values).values(
         'appointment_type').annotate(count=Count('id')))
     by_product = {
         'labels': [PRODUCT_LABELS.get(r['appointment_type'], r['appointment_type']) for r in prod_rows],
@@ -1624,7 +1630,7 @@ def dashboard_chart_api(request):
 
     LABEL_MAPS = {
         'disposition': DISPO_NAMES,
-        'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
+        'appointment_type': appointment_types.labels_for_org(get_current_org_id()),
         'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
         'sat': {'True': 'Sit', 'False': 'No Sit'},
     }
