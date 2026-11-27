@@ -415,10 +415,8 @@
                     </td>
                     <td data-label="Appt Type">
                         <select class="crm-select" data-field="appointment_type">
-                            <option value="">—</option>
-                            <option value="solar" {% if lead.appointment_type == "solar" %}selected{% endif %}>Solar</option>
-                            <option value="hvac" {% if lead.appointment_type == "hvac" %}selected{% endif %}>HVAC</option>
-                            <option value="both" {% if lead.appointment_type == "both" %}selected{% endif %}>Both</option>
+                            <option value="">—</option>{% for t in appointment_types %}
+                            <option value="{{ t.value }}" {% if lead.appointment_type == t.value %}selected{% endif %}>{{ t.label }}</option>{% endfor %}
                         </select>
                     </td>
                     <td data-label="Format">
@@ -837,7 +835,7 @@
             {key: 'homeowner_name', label: 'Name', type: 'text'},
             {key: 'phone_number', label: 'Phone', type: 'text'},
             {key: 'appointment_type', label: 'Product Type', type: 'select', options: [
-                {value: 'both', label: 'Both'}, {value: 'hvac', label: 'HVAC'}, {value: 'solar', label: 'Solar'}
+                {% for t in appointment_types_by_label %}{value: '{{ t.value|escapejs }}', label: '{{ t.label|escapejs }}'}{% if not forloop.last %}, {% endif %}{% endfor %}
             ]},
             {key: 'rep_id', label: 'Rep', type: 'select', options: [
                 {% for rep in reps %}{value: '{{ rep.id }}', label: '{{ rep.name|escapejs }}'},{% endfor %}

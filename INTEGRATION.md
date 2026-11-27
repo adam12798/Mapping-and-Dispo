@@ -165,7 +165,7 @@ Every field on `maps.models.Lead`, classified for a hub-side customer record. **
 | Field | Type | Notes |
 |---|---|---|
 | `appointment_datetime` | datetime, null | Stored UTC, rendered Eastern. **CRM is the source of truth for appointment times** |
-| `appointment_type` | choice: `solar`/`hvac`/`both`, blank | Blank = unassignable by auto-assign |
+| `appointment_type` | char(10), blank | One of the lead's organization's types (`Organization.appointment_types`; default `solar`/`hvac`/`both`). Send the lowercase value, not the label. Not enforced on write: any value is stored as sent. Blank = unassignable by auto-assign; a type marked `any_rep` goes to any active rep of the org |
 | `appointment_format` | choice: `in_person`/`virtual`, blank | |
 | `rep` | FK → Rep, null | The assigned owner. Serialized as `rep_id` + `rep_name` |
 | `cancelled` | bool, default False | Soft-cancel; cancelled leads stay in the table |

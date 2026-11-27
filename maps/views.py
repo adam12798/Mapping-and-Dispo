@@ -23,6 +23,7 @@ from django.views.decorators.http import require_POST
 from django.conf import settings
 from django.db.models import Q
 
+from . import appointment_types
 from .assignment import auto_assign_leads
 from .models import Lead, Rep, TimeOffRequest, Manager, UserProfile, LeadUpdate, LeadMessage, VoiceCallLog, RepCountDefault, RepCountOverride, GHLWebhookLog, APITenant, WebhookConfig, Organization, OrgSwitchAudit
 from .tenancy import get_current_org_id, org_context
@@ -630,8 +631,9 @@ def lead_update(request, pk):
         'monthly_cost': 'Monthly Cost', 'total_cost': 'Total Cost', 'adders': 'Adders',
         'post_appt_notes': 'Post-Appt Notes',
     }
+    type_entries = appointment_types.for_org(lead.organization_id)
     VALUE_LABELS = {
-        'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
+        'appointment_type': appointment_types.labels(type_entries),
         'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
         'sat': {'true': 'Sit', 'false': 'No Sit'},
     }
@@ -663,8 +665,11 @@ def lead_update(request, pk):
             if old_display != new_display:
                 label = FIELD_LABELS.get(field, field)
                 changes.append(f"{label}: {old_display} → {new_display}")
-    # Auto-compute appointment_type from tags when tags change
-    if 'tags' in data and 'appointment_type' not in data:
+    # Auto-compute appointment_type from tags when tags change — unless the
+    # lead has one of its organization's own types beyond solar/hvac/both
+    # (the tags only know those three; never with the default list).
+    if ('tags' in data and 'appointment_type' not in data
+            and not appointment_types.is_extra(type_entries, lead.appointment_type)):
         new_type = compute_appointment_type(lead.tags)
         old_type = lead.appointment_type or ''
         if new_type != old_type:
@@ -758,7 +763,7 @@ def leads_bulk_update(request):
         'follow_up_date': 'Follow Up Date',
     }
     BULK_VALUE_LABELS = {
-        'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
+        'appointment_type': appointment_types.labels_for_org(get_current_org_id()),
         'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
         'sat': {True: 'Sit', False: 'No Sit'},
         'disposition': dict(Lead.DISPOSITION_CHOICES),
@@ -1423,6 +1428,11 @@ def dashboard_api(request):
         'no_show': '#800000',
     }
     PRODUCT_COLORS = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
+    # The organization's appointment types, in its configured order.
+    type_entries = appointment_types.for_org(get_current_org_id())
+    type_values = [t['value'] for t in type_entries]
+    # The base three keep their colours; the org's other types get their own.
+    PRODUCT_COLORS = {**appointment_types.extra_colors(type_entries), **PRODUCT_COLORS}
 
     # --- by_disposition ---
     if group_by == 'rep':
@@ -1441,15 +1451,17 @@ def dashboard_api(request):
         ]
     elif group_by == 'product':
         grouped = qs.values('appointment_type', 'disposition').annotate(count=Count('id'))
-        pivot = {pt: {d: 0 for d in DISPO_KEYS} for pt in ['solar', 'hvac', 'both']}
+        pivot = {pt: {d: 0 for d in DISPO_KEYS} for pt in type_values}
         for row in grouped:
             pt = row['appointment_type'] or ''
             if pt in pivot and row['disposition'] in pivot[pt]:
                 pivot[pt][row['disposition']] = row['count']
+        # Labels stay value.capitalize() ('Hvac'), as this pivot has always
+        # shown them, so a default-list organization gets identical output.
         dispo_datasets = [
             {'label': pt.capitalize(), 'data': [pivot[pt][d] for d in DISPO_KEYS],
-             'backgroundColor': PRODUCT_COLORS[pt]}
-            for pt in ['solar', 'hvac', 'both']
+             'backgroundColor': PRODUCT_COLORS.get(pt, '#98c1d9')}
+            for pt in type_values
         ]
     else:
         flat = qs.values('disposition').annotate(count=Count('id'))
@@ -1486,9 +1498,10 @@ def dashboard_api(request):
     }
 
     # --- by_product ---
-    PRODUCT_LABELS = {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'}
-    PRODUCT_COLORS_FLAT = {'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
-    prod_rows = list(qs.filter(appointment_type__in=['solar', 'hvac', 'both']).values(
+    PRODUCT_LABELS = appointment_types.labels(type_entries)
+    PRODUCT_COLORS_FLAT = {**appointment_types.extra_colors(type_entries),
+                           'solar': '#f1c40f', 'hvac': '#e74c3c', 'both': '#27ae60'}
+    prod_rows = list(qs.filter(appointment_type__in=type_values).values(
         'appointment_type').annotate(count=Count('id')))
     by_product = {
         'labels': [PRODUCT_LABELS.get(r['appointment_type'], r['appointment_type']) for r in prod_rows],
@@ -1624,7 +1637,7 @@ def dashboard_chart_api(request):
 
     LABEL_MAPS = {
         'disposition': DISPO_NAMES,
-        'appointment_type': {'solar': 'Solar', 'hvac': 'HVAC', 'both': 'Both'},
+        'appointment_type': appointment_types.labels_for_org(get_current_org_id()),
         'appointment_format': {'in_person': 'In Person', 'virtual': 'Virtual'},
         'sat': {'True': 'Sit', 'False': 'No Sit'},
     }
